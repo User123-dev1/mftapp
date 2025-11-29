@@ -8,7 +8,7 @@ from flask import Flask, render_template_string, request, jsonify
 from flask_cors import CORS
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import logging
 
@@ -564,6 +564,7 @@ HTML_TEMPLATE = """
             border-radius: 5px;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -586,26 +587,54 @@ HTML_TEMPLATE = """
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content active">
             <h2>System Dashboard</h2>
+
+            <!-- Statistics Grid -->
             <div class="stats-grid">
                 <div class="stat-card">
-                    <h3 id="total-transfers">0</h3>
-                    <p>Total Transfers</p>
+                    <h3 id="total-files-transferred">0</h3>
+                    <p>Total Files Transferred</p>
                 </div>
                 <div class="stat-card">
                     <h3 id="active-rules">0</h3>
                     <p>Active Rules</p>
                 </div>
                 <div class="stat-card">
+                    <h3 id="total-transfers">0</h3>
+                    <p>Total Transfers</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="success-rate">0%</h3>
+                    <p>Success Rate</p>
+                </div>
+            </div>
+
+            <!-- Secondary Stats Grid -->
+            <div class="stats-grid" style="margin-top: 20px;">
+                <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h3 id="active-transfers">0</h3>
+                    <p>Active Transfers</p>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">
+                    <h3 id="completed-transfers">0</h3>
+                    <p>Completed</p>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%); color: white;">
+                    <h3 id="failed-transfers">0</h3>
+                    <p>Failed</p>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%); color: white;">
                     <h3 id="total-users">0</h3>
                     <p>AD Users</p>
                 </div>
-                <div class="stat-card">
-                    <h3 id="compliance-frameworks">0</h3>
-                    <p>Compliance Frameworks</p>
-                </div>
             </div>
-            
-            <div class="info-box">
+
+            <!-- Performance Chart -->
+            <div style="background: white; padding: 20px; border-radius: 10px; margin-top: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h3 style="margin-bottom: 15px;">📈 Transfer Performance (Last 24 Hours)</h3>
+                <canvas id="performanceChart" height="80"></canvas>
+            </div>
+
+            <div class="info-box" style="margin-top: 20px;">
                 <strong>System Status</strong>
                 <p>All systems operational. Last AD sync: <span id="last-ad-sync">Never</span></p>
                 <p>Enabled compliance frameworks: <span id="enabled-frameworks">None</span></p>
@@ -1140,39 +1169,121 @@ HTML_TEMPLATE = """
         }
         
         // Load dashboard statistics
+        let performanceChart = null;
+
         function loadDashboard() {
-            fetch('/api/v1/rules/statistics')
+            // Load enhanced dashboard statistics
+            fetch('/api/v1/dashboard/stats')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('total-transfers').textContent = data.total_files_transferred || 0;
+                    // Update main stats
+                    document.getElementById('total-files-transferred').textContent = data.total_files_transferred || 0;
                     document.getElementById('active-rules').textContent = data.active_rules || 0;
+                    document.getElementById('total-transfers').textContent = data.total_transfers || 0;
+                    document.getElementById('success-rate').textContent = (data.success_rate || 0) + '%';
+
+                    // Update transfer breakdown
+                    document.getElementById('active-transfers').textContent = data.active_transfers || 0;
+                    document.getElementById('completed-transfers').textContent = data.completed_transfers || 0;
+                    document.getElementById('failed-transfers').textContent = data.failed_transfers || 0;
+
+                    // Update performance chart
+                    updatePerformanceChart(data.performance_data);
                 })
                 .catch(err => console.error('Failed to load dashboard:', err));
-            
+
             fetch('/api/v1/users')
                 .then(r => r.json())
                 .then(data => {
                     document.getElementById('total-users').textContent = data.length || 0;
                 })
                 .catch(err => console.error('Failed to load users:', err));
-            
+
             fetch('/api/v1/compliance/frameworks')
                 .then(r => r.json())
                 .then(data => {
                     const enabled = data.frameworks.filter(f => f.enabled);
-                    document.getElementById('compliance-frameworks').textContent = enabled.length;
-                    document.getElementById('enabled-frameworks').textContent = 
+                    document.getElementById('enabled-frameworks').textContent =
                         enabled.map(f => f.name).join(', ') || 'None';
                 })
                 .catch(err => console.error('Failed to load compliance:', err));
-            
+
             fetch('/api/v1/ad/status')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('last-ad-sync').textContent = 
+                    document.getElementById('last-ad-sync').textContent =
                         data.last_sync ? new Date(data.last_sync).toLocaleString() : 'Never';
                 })
                 .catch(err => console.error('Failed to load AD status:', err));
+        }
+
+        function updatePerformanceChart(performanceData) {
+            const ctx = document.getElementById('performanceChart');
+
+            if (!performanceData || !performanceData.labels) {
+                console.warn('No performance data available');
+                return;
+            }
+
+            // Destroy existing chart if it exists
+            if (performanceChart) {
+                performanceChart.destroy();
+            }
+
+            // Create new chart
+            performanceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: performanceData.labels,
+                    datasets: [
+                        {
+                            label: 'Completed',
+                            data: performanceData.completed,
+                            borderColor: '#38ef7d',
+                            backgroundColor: 'rgba(56, 239, 125, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Failed',
+                            data: performanceData.failed,
+                            borderColor: '#ff6a00',
+                            backgroundColor: 'rgba(255, 106, 0, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
         }
         
         // ========================================
@@ -3119,6 +3230,89 @@ def get_statistics():
             'total_rules': 0,
             'success': False,
             'error': str(e)
+        }), 500
+
+
+@app.route('/api/v1/dashboard/stats', methods=['GET'])
+def get_dashboard_stats():
+    """Get comprehensive dashboard statistics"""
+    try:
+        # Get transfer statistics from monitor
+        monitor = mft_app.monitor
+
+        active_count = len(monitor.active_transfers) if hasattr(monitor, 'active_transfers') else 0
+        completed_count = len(monitor.completed_transfers) if hasattr(monitor, 'completed_transfers') else 0
+        failed_count = len(monitor.failed_transfers) if hasattr(monitor, 'failed_transfers') else 0
+        total_transfers = active_count + completed_count + failed_count
+
+        # Calculate success rate
+        success_rate = round((completed_count / total_transfers * 100) if total_transfers > 0 else 0, 1)
+
+        # Get total files transferred from rules
+        total_files = sum(rule.files_transferred for rule in monitor_manager.rules.values())
+
+        # Get active rules count
+        active_rules = len([r for r in monitor_manager.rules.values() if r.enabled])
+
+        # Prepare hourly transfer data for last 24 hours
+        now = datetime.now()
+        hourly_data = {i: {'completed': 0, 'failed': 0} for i in range(24)}
+
+        # Process completed transfers
+        for task in monitor.completed_transfers:
+            if hasattr(task, 'completed_at') and task.completed_at:
+                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                if hours_ago < 24:
+                    hourly_data[hours_ago]['completed'] += 1
+
+        # Process failed transfers
+        for task in monitor.failed_transfers:
+            if hasattr(task, 'completed_at') and task.completed_at:
+                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                if hours_ago < 24:
+                    hourly_data[hours_ago]['failed'] += 1
+
+        # Format hourly data for chart
+        hours = [(now - timedelta(hours=i)).strftime('%H:00') for i in range(23, -1, -1)]
+        completed_series = [hourly_data[23-i]['completed'] for i in range(24)]
+        failed_series = [hourly_data[23-i]['failed'] for i in range(24)]
+
+        stats = {
+            'total_files_transferred': total_files,
+            'active_rules': active_rules,
+            'total_transfers': total_transfers,
+            'active_transfers': active_count,
+            'completed_transfers': completed_count,
+            'failed_transfers': failed_count,
+            'success_rate': success_rate,
+            'performance_data': {
+                'labels': hours,
+                'completed': completed_series,
+                'failed': failed_series
+            }
+        }
+
+        logger.info(f"📊 Dashboard stats: {total_transfers} transfers, {success_rate}% success rate")
+
+        return jsonify(stats)
+
+    except Exception as e:
+        logger.error(f"Failed to get dashboard stats: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'total_files_transferred': 0,
+            'active_rules': 0,
+            'total_transfers': 0,
+            'active_transfers': 0,
+            'completed_transfers': 0,
+            'failed_transfers': 0,
+            'success_rate': 0,
+            'performance_data': {
+                'labels': [],
+                'completed': [],
+                'failed': []
+            }
         }), 500
 
 
