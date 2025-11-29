@@ -690,7 +690,10 @@ HTML_TEMPLATE = """
             <button class="btn btn-primary" onclick="showCreateRuleModal()" style="margin-bottom: 20px;">
                 ➕ Create New Rule
             </button>
-            
+            <button class="btn btn-secondary" onclick="seedRules()" style="margin-bottom: 20px; margin-left: 10px;">
+                🌱 Seed Test Data
+            </button>
+
             <table id="rules-table">
                 <thead>
                     <tr>
@@ -1847,7 +1850,21 @@ HTML_TEMPLATE = """
                     });
             }
         }
-        
+
+        function seedRules() {
+            if (confirm('This will clear existing rules and create 3 test rules. Continue?')) {
+                fetch('/api/v1/rules/seed', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        showMessage('rules-message', `✅ ${data.message}`, 'success');
+                        loadRules();
+                    })
+                    .catch(err => {
+                        showMessage('rules-message', '❌ Failed to seed rules: ' + err.message, 'error');
+                    });
+            }
+        }
+
         // Show message helper
         function showMessage(elementId, message, type) {
             const msgEl = document.getElementById(elementId);
@@ -2690,13 +2707,21 @@ def get_rules():
     try:
         rules_list = []
 
+        # Debug logging
+        logger.info(f"📋 GET /api/v1/rules called")
+        logger.info(f"   monitor_manager type: {type(monitor_manager)}")
+        logger.info(f"   Has 'rules' attr: {hasattr(monitor_manager, 'rules')}")
+
         # Ensure monitor_manager.rules exists
         if not hasattr(monitor_manager, 'rules') or not isinstance(monitor_manager.rules, dict):
-            logger.warning("No rules found in monitor_manager")
+            logger.warning("❌ No rules found in monitor_manager")
             return jsonify({
                 'success': True,
                 'rules': []  # Return empty array
             })
+
+        logger.info(f"   Rules dict size: {len(monitor_manager.rules)}")
+        logger.info(f"   Rules keys: {list(monitor_manager.rules.keys())}")
 
         for rule_id, rule in monitor_manager.rules.items():
             try:
@@ -2822,7 +2847,13 @@ def create_rule():
         )
 
         # Add rule to monitor manager
+        logger.info(f"➕ Adding rule to monitor_manager: {rule.name} (ID: {rule_id})")
+        logger.info(f"   Before add - Rules count: {len(monitor_manager.rules)}")
+
         monitor_manager.add_rule(rule)
+
+        logger.info(f"   After add - Rules count: {len(monitor_manager.rules)}")
+        logger.info(f"   Rule stored: {rule_id in monitor_manager.rules}")
 
         # Log audit event
         audit_manager.log_event(
@@ -3075,6 +3106,90 @@ def get_statistics():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/v1/rules/seed', methods=['POST'])
+def seed_rules():
+    """Seed database with example transfer rules for testing"""
+    try:
+        logger.info("🌱 Seeding transfer rules...")
+
+        # Clear existing rules
+        monitor_manager.rules.clear()
+        logger.info("   Cleared existing rules")
+
+        # Create sample rules
+        sample_rules = [
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Daily Reports Transfer',
+                'source_path': 'C:\\SourceFolder\\Reports',
+                'destination_path': '\\\\server\\share\\Reports',
+                'protocol': 'unc',
+                'host': 'fileserver.local',
+                'port': 445,
+                'source_pattern': '*.pdf',
+                'schedule_type': ScheduleType.EVENT_DRIVEN,
+                'trigger_type': TriggerType.FILE_CREATED,
+                'action_type': ActionType.COPY,
+                'enabled': True,
+                'files_transferred': 15,
+                'status': 'monitoring'
+            },
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Backup Archive Files',
+                'source_path': 'C:\\Data\\Archive',
+                'destination_path': '\\\\backup\\Archive',
+                'protocol': 'unc',
+                'host': 'backup.local',
+                'port': 445,
+                'source_pattern': '*.zip',
+                'schedule_type': ScheduleType.RECURRING,
+                'trigger_type': TriggerType.FILE_CREATED,
+                'action_type': ActionType.MOVE,
+                'enabled': True,
+                'files_transferred': 42,
+                'status': 'idle'
+            },
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Log Files Cleanup',
+                'source_path': 'C:\\Logs',
+                'destination_path': '\\\\archive\\Logs',
+                'protocol': 'unc',
+                'host': 'archive.local',
+                'port': 445,
+                'source_pattern': '*.log',
+                'schedule_type': ScheduleType.CRON,
+                'trigger_type': TriggerType.FILE_MODIFIED,
+                'action_type': ActionType.MOVE_WITH_DELAY,
+                'enabled': False,
+                'files_transferred': 8,
+                'status': 'idle'
+            }
+        ]
+
+        # Add each sample rule
+        for rule_data in sample_rules:
+            rule = TransferRule(**rule_data)
+            monitor_manager.rules[rule.rule_id] = rule
+            logger.info(f"   ✅ Added: {rule.name}")
+
+        logger.info(f"🌱 Successfully seeded {len(sample_rules)} rules")
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully seeded {len(sample_rules)} rules',
+            'count': len(sample_rules)
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to seed rules: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
     # ============================================================================
 # MAIN
