@@ -68,6 +68,8 @@ class AuditEventType(Enum):
     AD_SYNC_FAILED = "ad_sync_failed"
     SYSTEM_STARTED = "system_started"
     SYSTEM_STOPPED = "system_stopped"
+    SERVER_OFFLINE = "server_offline"
+    SERVER_ONLINE = "server_online"
 
 
 # ============================================================================

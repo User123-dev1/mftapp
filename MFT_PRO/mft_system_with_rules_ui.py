@@ -18,6 +18,9 @@ from mft_application import MFTApplication, TransferConfig, TransferProtocol
 # Import file monitor
 from file_monitor import FileMonitorManager, TransferRule, ScheduleType, TriggerType, ActionType
 
+# Import server health monitor
+from server_monitor import ServerHealthMonitor
+
 # Import compliance and AD systems
 from compliance_system import (
     ComplianceManager, AuditManager, ActiveDirectoryManager,
@@ -47,8 +50,17 @@ audit_manager = AuditManager()
 # Initialize Active Directory Manager
 ad_manager = ActiveDirectoryManager()
 
+# Initialize Server Health Monitor
+server_monitor = ServerHealthMonitor(audit_manager=audit_manager, check_interval=30)
+
 # Start monitoring on startup
 monitor_manager.start_all()
+
+# Start server health monitoring
+server_monitor.start_monitoring()
+
+# Sync servers from rules
+server_monitor.sync_servers_from_rules(monitor_manager.rules)
 
 # Log system startup
 audit_manager.log_event(
@@ -582,6 +594,7 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="showTab('ad')">🔐 Active Directory</div>
             <div class="tab" onclick="showTab('compliance')">✅ Compliance</div>
             <div class="tab" onclick="showTab('audit')">📝 Audit Log</div>
+            <div class="tab" onclick="showTab('activity')">📡 Activity Log</div>
         </div>
         
         <!-- Dashboard Tab -->
@@ -920,8 +933,59 @@ HTML_TEMPLATE = """
                 <tbody></tbody>
             </table>
         </div>
+
+        <!-- Activity Log Tab -->
+        <div id="activity-tab" class="tab-content">
+            <h2>Server Activity Log</h2>
+
+            <div class="info-box" style="margin-bottom: 20px;">
+                <h3>📡 Server Health Monitoring</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 10px;">
+                    <div>
+                        <strong>Total Servers:</strong> <span id="activity-total-servers">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #27ae60;">Online:</strong> <span id="activity-online-count" style="color: #27ae60;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #e74c3c;">Offline:</strong> <span id="activity-offline-count" style="color: #e74c3c;">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="loadActivityLog()">🔄 Refresh</button>
+
+            <h3 style="margin-top: 30px;">Recent Server Events</h3>
+            <table id="activity-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Event</th>
+                        <th>Server</th>
+                        <th>Message</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h3 style="margin-top: 30px;">Server Status</h3>
+            <table id="server-status-table">
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>Protocol</th>
+                        <th>Status</th>
+                        <th>Last Check</th>
+                        <th>Downtime</th>
+                        <th>Offline Since</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </div>
-    
+
     <!-- CREATE/EDIT RULE MODAL -->
     <div id="rule-modal" class="modal">
         <div class="modal-content">
@@ -1170,6 +1234,8 @@ HTML_TEMPLATE = """
                 loadCompliance();
             } else if (tabName === 'audit') {
                 loadAuditLog();
+            } else if (tabName === 'activity') {
+                loadActivityLog();
             }
         }
         
@@ -1776,7 +1842,84 @@ HTML_TEMPLATE = """
         function exportAuditLog() {
             window.location.href = '/api/v1/audit/export';
         }
-        
+
+        // ========================================
+        // ACTIVITY LOG FUNCTIONS
+        // ========================================
+
+        function loadActivityLog() {
+            // Load server status
+            fetch('/api/v1/servers/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update summary stats
+                        document.getElementById('activity-total-servers').textContent = data.total_servers;
+                        document.getElementById('activity-online-count').textContent = data.online_count;
+                        document.getElementById('activity-offline-count').textContent = data.offline_count;
+
+                        // Update server status table
+                        const statusTbody = document.querySelector('#server-status-table tbody');
+                        statusTbody.innerHTML = '';
+
+                        Object.entries(data.servers).forEach(([server_key, server]) => {
+                            const row = statusTbody.insertRow();
+                            const statusBadge = server.is_online
+                                ? '<span style="color: #27ae60; font-weight: bold;">● ONLINE</span>'
+                                : '<span style="color: #e74c3c; font-weight: bold;">● OFFLINE</span>';
+
+                            row.innerHTML = `
+                                <td>${server.host}:${server.port}</td>
+                                <td>${server.protocol.toUpperCase()}</td>
+                                <td>${statusBadge}</td>
+                                <td>${new Date(server.last_check).toLocaleString()}</td>
+                                <td>${server.total_downtime || 'None'}</td>
+                                <td>${server.offline_since ? new Date(server.offline_since).toLocaleString() : '-'}</td>
+                            `;
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to load server status:', err));
+
+            // Load activity log
+            fetch('/api/v1/servers/activity?limit=100')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const activityTbody = document.querySelector('#activity-table tbody');
+                        activityTbody.innerHTML = '';
+
+                        if (data.activity.length === 0) {
+                            activityTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No activity yet</td></tr>';
+                            return;
+                        }
+
+                        data.activity.forEach(activity => {
+                            const row = activityTbody.insertRow();
+                            const eventBadge = activity.event_type === 'server_online'
+                                ? '<span style="background: #27ae60; color: white; padding: 3px 8px; border-radius: 3px;">✅ ONLINE</span>'
+                                : '<span style="background: #e74c3c; color: white; padding: 3px 8px; border-radius: 3px;">❌ OFFLINE</span>';
+
+                            let details = '';
+                            if (activity.details && activity.details.downtime_formatted) {
+                                details = `Downtime: ${activity.details.downtime_formatted}`;
+                            } else if (activity.details && activity.details.protocol) {
+                                details = `Protocol: ${activity.details.protocol}`;
+                            }
+
+                            row.innerHTML = `
+                                <td>${new Date(activity.timestamp).toLocaleString()}</td>
+                                <td>${eventBadge}</td>
+                                <td>${activity.server}</td>
+                                <td>${activity.message}</td>
+                                <td>${details}</td>
+                            `;
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to load activity log:', err));
+        }
+
         // ========================================
         // TRANSFER FUNCTIONS
         // ========================================
@@ -3016,6 +3159,9 @@ def create_rule():
             details={'rule_id': rule_id, 'name': data.get('name')}
         )
 
+        # Sync servers for health monitoring
+        server_monitor.sync_servers_from_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'rule_id': rule_id,
@@ -3347,6 +3493,55 @@ def get_dashboard_stats():
                 'completed': [],
                 'failed': []
             }
+        }), 500
+
+
+@app.route('/api/v1/servers/status', methods=['GET'])
+def get_servers_status():
+    """Get status of all monitored servers"""
+    try:
+        statuses = server_monitor.get_all_statuses()
+
+        return jsonify({
+            'success': True,
+            'servers': statuses,
+            'total_servers': len(statuses),
+            'online_count': sum(1 for s in statuses.values() if s['is_online']),
+            'offline_count': sum(1 for s in statuses.values() if not s['is_online'])
+        })
+    except Exception as e:
+        logger.error(f"Failed to get server status: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'servers': {},
+            'total_servers': 0,
+            'online_count': 0,
+            'offline_count': 0
+        }), 500
+
+
+@app.route('/api/v1/servers/activity', methods=['GET'])
+def get_server_activity():
+    """Get server activity log"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        activity_log = server_monitor.get_activity_log(limit=limit)
+
+        return jsonify({
+            'success': True,
+            'activity': activity_log,
+            'total': len(activity_log)
+        })
+    except Exception as e:
+        logger.error(f"Failed to get server activity: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'activity': [],
+            'total': 0
         }), 500
 
 
