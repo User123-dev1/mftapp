@@ -705,6 +705,7 @@ HTML_TEMPLATE = """
                         <th>Protocol</th>
                         <th>Status</th>
                         <th>Time</th>
+                        <th>Details</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -1821,46 +1822,59 @@ HTML_TEMPLATE = """
             
             const tbody = document.querySelector('#history-table tbody');  
             
-            // Check if we have transfers  
-            if (!data || !data.transfers) {  
-                console.warn('⚠️ No transfers array in response');  
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: orange;">Invalid data format received</td></tr>';  
-                return;  
+            // Check if we have transfers
+            if (!data || !data.transfers) {
+                console.warn('⚠️ No transfers array in response');
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: orange;">Invalid data format received</td></tr>';
+                return;
             }  
             
-            if (data.transfers.length === 0) {  
-                console.log('ℹ️ No transfers yet');  
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No transfers yet. Create a transfer to see history.</td></tr>';  
-                return;  
-            }  
-            
-            // Clear table  
-            tbody.innerHTML = '';  
-            
-            // Add each transfer  
-            data.transfers.forEach((t, index) => {  
-                console.log(`  📤 Transfer ${index + 1}:`, t.task_id.substring(0, 8));  
-                
-                const row = tbody.insertRow();  
-                row.innerHTML = `  
-                    <td>${t.task_id.substring(0, 8)}...</td>  
-                    <td>${t.source_path}</td>  
-                    <td>${t.destination_path}</td>  
-                    <td>${t.protocol}</td>  
-                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>  
-                    <td>${new Date(t.timestamp).toLocaleString()}</td>  
-                `;  
+            if (data.transfers.length === 0) {
+                console.log('ℹ️ No transfers yet');
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No transfers yet. Create a transfer to see history.</td></tr>';
+                return;
+            }
+
+            // Clear table
+            tbody.innerHTML = '';
+
+            // Add each transfer
+            data.transfers.forEach((t, index) => {
+                console.log(`  📤 Transfer ${index + 1}:`, t.task_id.substring(0, 8));
+
+                // Determine details to show
+                let details = '';
+                if (t.status === 'failed' && t.error) {
+                    details = `<span style="color: #e74c3c; font-weight: bold;" title="${t.error}">❌ ${t.error}</span>`;
+                } else if (t.status === 'completed') {
+                    details = '<span style="color: #27ae60;">✅ Success</span>';
+                } else if (t.status === 'in_progress') {
+                    details = '<span style="color: #3498db;">🔄 In Progress</span>';
+                } else {
+                    details = '<span style="color: #95a5a6;">⏳ Pending</span>';
+                }
+
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${t.task_id.substring(0, 8)}...</td>
+                    <td>${t.source_path}</td>
+                    <td>${t.destination_path}</td>
+                    <td>${t.protocol}</td>
+                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>
+                    <td>${new Date(t.timestamp).toLocaleString()}</td>
+                    <td>${details}</td>
+                `;
             });  
             
             console.log(`✅ Displayed ${data.transfers.length} transfers`);  
         })  
-        .catch(err => {  
-            console.error('❌ Failed to load history:', err);  
-            const tbody = document.querySelector('#history-table tbody');  
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: red;">  
-                Error loading transfers: ${err.message}<br>  
-                <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>  
-            </td></tr>`;  
+        .catch(err => {
+            console.error('❌ Failed to load history:', err);
+            const tbody = document.querySelector('#history-table tbody');
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: red;">
+                Error loading transfers: ${err.message}<br>
+                <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>
+            </td></tr>`;
         });  
 }  
         
@@ -3262,14 +3276,16 @@ def get_dashboard_stats():
         for task in monitor.completed_transfers:
             if hasattr(task, 'completed_at') and task.completed_at:
                 hours_ago = int((now - task.completed_at).total_seconds() / 3600)
-                if hours_ago < 24:
+                # Only count if within last 24 hours and not in future
+                if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['completed'] += 1
 
         # Process failed transfers
         for task in monitor.failed_transfers:
             if hasattr(task, 'completed_at') and task.completed_at:
                 hours_ago = int((now - task.completed_at).total_seconds() / 3600)
-                if hours_ago < 24:
+                # Only count if within last 24 hours and not in future
+                if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['failed'] += 1
 
         # Format hourly data for chart
