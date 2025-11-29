@@ -170,33 +170,107 @@ class SFTPHandler(BaseProtocolHandler):
             if not os.path.exists(source_normalized):
                 raise FileNotFoundError(f"Source file not found: {source_normalized}")
 
-            # Calculate checksums before transfer
-            logger.info(f"🔐 Calculating checksums...")
-            checksums = self.calculate_checksums(source_normalized)
-            file_size = os.path.getsize(source_normalized)
-            logger.info(f"📊 File size: {file_size:,} bytes")
+            # Check if source is a directory or file
+            is_directory = os.path.isdir(source_normalized)
 
-            # Transfer file
-            logger.info(f"📤 Uploading file...")
-            sftp.put(source_normalized, destination_path)
+            if is_directory:
+                # Transfer directory recursively
+                logger.info(f"📁 Source is a DIRECTORY - transferring all files recursively")
+                total_files = 0
+                total_size = 0
 
-            # Verify file size
-            remote_stat = sftp.stat(destination_path)
-            if remote_stat.st_size != file_size:
-                raise Exception(f"File size mismatch: local={file_size}, remote={remote_stat.st_size}")
+                # Ensure destination directory exists
+                try:
+                    sftp.stat(destination_path)
+                except IOError:
+                    logger.info(f"📁 Creating destination directory: {destination_path}")
+                    self._mkdir_p(sftp, destination_path)
 
-            logger.info(f"✅ Size verification: PASSED")
+                # Walk through all files in directory
+                for root, dirs, files in os.walk(source_normalized):
+                    # Calculate relative path from source
+                    rel_path = os.path.relpath(root, source_normalized)
 
-            # Close connections
-            sftp.close()
-            ssh.close()
+                    # Create remote directory structure
+                    if rel_path != '.':
+                        remote_dir = destination_path + '/' + rel_path.replace('\\', '/')
+                    else:
+                        remote_dir = destination_path
 
-            logger.info(f"✅ SFTP transfer successful!")
+                    # Ensure remote directory exists
+                    try:
+                        sftp.stat(remote_dir)
+                    except IOError:
+                        logger.info(f"📁 Creating remote directory: {remote_dir}")
+                        self._mkdir_p(sftp, remote_dir)
 
-            return {
-                'file_size': file_size,
-                **checksums
-            }
+                    # Transfer all files in this directory
+                    for filename in files:
+                        local_file = os.path.join(root, filename)
+                        remote_file = remote_dir + '/' + filename
+
+                        try:
+                            file_size = os.path.getsize(local_file)
+                            logger.info(f"   📤 Uploading: {filename} ({file_size:,} bytes)")
+
+                            sftp.put(local_file, remote_file)
+
+                            # Verify
+                            remote_stat = sftp.stat(remote_file)
+                            if remote_stat.st_size == file_size:
+                                total_files += 1
+                                total_size += file_size
+                                logger.info(f"      ✅ Verified: {filename}")
+                            else:
+                                logger.warning(f"      ⚠️ Size mismatch: {filename}")
+                        except Exception as file_error:
+                            logger.error(f"      ❌ Failed to upload {filename}: {file_error}")
+                            # Continue with other files
+
+                logger.info(f"✅ Directory transfer complete: {total_files} files, {total_size:,} bytes total")
+
+                # Close connections
+                sftp.close()
+                ssh.close()
+
+                return {
+                    'file_size': total_size,
+                    'files_transferred': total_files,
+                    'checksum_md5': None,
+                    'checksum_sha256': None
+                }
+
+            else:
+                # Transfer single file
+                logger.info(f"📄 Source is a FILE")
+
+                # Calculate checksums before transfer
+                logger.info(f"🔐 Calculating checksums...")
+                checksums = self.calculate_checksums(source_normalized)
+                file_size = os.path.getsize(source_normalized)
+                logger.info(f"📊 File size: {file_size:,} bytes")
+
+                # Transfer file
+                logger.info(f"📤 Uploading file...")
+                sftp.put(source_normalized, destination_path)
+
+                # Verify file size
+                remote_stat = sftp.stat(destination_path)
+                if remote_stat.st_size != file_size:
+                    raise Exception(f"File size mismatch: local={file_size}, remote={remote_stat.st_size}")
+
+                logger.info(f"✅ Size verification: PASSED")
+
+                # Close connections
+                sftp.close()
+                ssh.close()
+
+                logger.info(f"✅ SFTP transfer successful!")
+
+                return {
+                    'file_size': file_size,
+                    **checksums
+                }
 
         except Exception as e:
             logger.error(f"❌ SFTP transfer failed: {e}")
