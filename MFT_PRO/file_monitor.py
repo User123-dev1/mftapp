@@ -80,6 +80,7 @@ class TransferRule:
 
     # Statistics
     files_transferred: int = 0
+    bytes_transferred: int = 0  # Total bytes transferred
     last_transfer_time: Optional[datetime] = None
     status: str = "idle"  # idle, monitoring, transferring, error
     created_at: Optional[datetime] = None
@@ -123,8 +124,12 @@ class FileMonitorHandler(FileSystemEventHandler):
                 logger.debug(f"File {filename} doesn't match pattern {self.rule.source_pattern}")
                 return False
 
-            # Check file size
+            # Check file size - CRITICAL: Reject 0-byte files
             file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                logger.info(f"⚠️ Skipping empty file (0 bytes): {filename}")
+                return False
+
             if self.rule.min_file_size > 0 and file_size < self.rule.min_file_size:
                 logger.debug(f"File {filename} too small: {file_size} < {self.rule.min_file_size}")
                 return False
@@ -151,32 +156,55 @@ class FileMonitorHandler(FileSystemEventHandler):
 
         # Start stability checker thread
         def check_and_transfer():
+            max_retries = 10  # Maximum retries for empty files waiting to be populated
+            retry_count = 0
+
             time.sleep(self.rule.file_age_seconds)
 
             # Check if file is stable (size hasn't changed)
             if file_path in self.pending_files:
                 try:
-                    if os.path.exists(file_path):
-                        initial_size = os.path.getsize(file_path)
-                        time.sleep(1)
+                    while retry_count < max_retries:
                         if os.path.exists(file_path):
-                            final_size = os.path.getsize(file_path)
+                            initial_size = os.path.getsize(file_path)
 
-                            if initial_size == final_size:
-                                logger.info(f"✅ File stable, initiating transfer: {file_path}")
-                                del self.pending_files[file_path]
-                                self._execute_transfer(file_path)
+                            # Special handling for 0-byte files (CSV scenario)
+                            if initial_size == 0:
+                                retry_count += 1
+                                logger.info(f"⏳ File is empty (0 bytes), waiting for population... (retry {retry_count}/{max_retries})")
+                                time.sleep(2)  # Wait 2 seconds for file to be populated
+                                continue
+
+                            # Check if file size is stable
+                            time.sleep(1)
+                            if os.path.exists(file_path):
+                                final_size = os.path.getsize(file_path)
+
+                                if initial_size == final_size and final_size > 0:
+                                    logger.info(f"✅ File stable ({final_size:,} bytes), initiating transfer: {file_path}")
+                                    del self.pending_files[file_path]
+                                    self._execute_transfer(file_path)
+                                    return
+                                else:
+                                    logger.info(f"⏳ File still changing ({initial_size} -> {final_size} bytes), will retry...")
+                                    retry_count += 1
+                                    time.sleep(1)
                             else:
-                                logger.info(f"⏳ File still changing, will retry: {file_path}")
-                                self._schedule_transfer(file_path)
+                                logger.warning(f"⚠️ File disappeared: {file_path}")
+                                if file_path in self.pending_files:
+                                    del self.pending_files[file_path]
+                                return
                         else:
-                            logger.warning(f"⚠️ File disappeared: {file_path}")
+                            logger.warning(f"⚠️ File not found: {file_path}")
                             if file_path in self.pending_files:
                                 del self.pending_files[file_path]
-                    else:
-                        logger.warning(f"⚠️ File not found: {file_path}")
-                        if file_path in self.pending_files:
-                            del self.pending_files[file_path]
+                            return
+
+                    # Max retries reached
+                    logger.error(f"❌ File still empty after {max_retries} retries, giving up: {file_path}")
+                    if file_path in self.pending_files:
+                        del self.pending_files[file_path]
+
                 except Exception as e:
                     logger.error(f"❌ Error in stability check: {e}")
                     if file_path in self.pending_files:
@@ -238,6 +266,7 @@ class FileMonitorHandler(FileSystemEventHandler):
 
                             # Update statistics
                             self.rule.files_transferred += 1
+                            self.rule.bytes_transferred += src_size
                             self.rule.last_transfer_time = datetime.now()
                             self.rule.status = "monitoring"
 
@@ -283,7 +312,13 @@ class FileMonitorHandler(FileSystemEventHandler):
             # Only update statistics and perform actions if transfer was successful
             if transfer_success:
                 # Update statistics
-                self.rule.files_transferred += 1
+                try:
+                    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    self.rule.files_transferred += 1
+                    self.rule.bytes_transferred += file_size
+                except:
+                    self.rule.files_transferred += 1
+
                 self.rule.last_transfer_time = datetime.now()
                 self.rule.status = "monitoring"
 
@@ -421,9 +456,45 @@ class FileMonitorManager:
             # Normalize path
             source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
 
+            # Convert C$ to C: for Windows paths
+            import re
+            source_path = re.sub(r'\\([A-Za-z])\$\\', r'\\\1:\\', source_path)
+
+            # If source is a UNC path pointing to localhost, convert to local path
+            if source_path.startswith('\\\\'):
+                import socket
+                # Extract host from UNC path (\\host\path)
+                unc_parts = source_path.lstrip('\\').split('\\', 1)
+                if len(unc_parts) >= 1:
+                    source_host = unc_parts[0]
+                    source_path_part = unc_parts[1] if len(unc_parts) > 1 else ''
+
+                    # Get local machine IPs and hostname
+                    local_hostname = socket.gethostname()
+                    local_ips = [local_hostname.lower()]
+                    try:
+                        for ip_info in socket.getaddrinfo(local_hostname, None):
+                            ip = ip_info[4][0]
+                            local_ips.append(ip)
+                    except:
+                        pass
+
+                    # Check if source_host is the local machine
+                    is_local = (
+                        source_host.lower() in ['localhost', '127.0.0.1', local_hostname.lower()] or
+                        source_host in local_ips
+                    )
+
+                    if is_local:
+                        # This is a local UNC path - convert to local drive path
+                        source_path = source_path_part
+                        logger.info(f"   ✅ UNC points to localhost - converted to local: {source_path}")
+
             # Check if path exists
             if not os.path.exists(source_path):
                 logger.error(f"❌ Source path does not exist: {source_path}")
+                logger.error(f"   Original: {rule.source_path}")
+                logger.error(f"   Normalized: {source_path}")
                 return
 
             # Create event handler
@@ -556,12 +627,48 @@ class FileMonitorManager:
 
         try:
             import fnmatch
+            import re
+            import socket
 
             # Normalize path
             source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
 
+            # Convert C$ to C: for Windows paths
+            source_path = re.sub(r'\\([A-Za-z])\$\\', r'\\\1:\\', source_path)
+
+            # If source is a UNC path pointing to localhost, convert to local path
+            if source_path.startswith('\\\\'):
+                # Extract host from UNC path (\\host\path)
+                unc_parts = source_path.lstrip('\\').split('\\', 1)
+                if len(unc_parts) >= 1:
+                    source_host = unc_parts[0]
+                    source_path_part = unc_parts[1] if len(unc_parts) > 1 else ''
+
+                    # Get local machine IPs and hostname
+                    local_hostname = socket.gethostname()
+                    local_ips = [local_hostname.lower()]
+                    try:
+                        for ip_info in socket.getaddrinfo(local_hostname, None):
+                            ip = ip_info[4][0]
+                            local_ips.append(ip)
+                    except:
+                        pass
+
+                    # Check if source_host is the local machine
+                    is_local = (
+                        source_host.lower() in ['localhost', '127.0.0.1', local_hostname.lower()] or
+                        source_host in local_ips
+                    )
+
+                    if is_local:
+                        # This is a local UNC path - convert to local drive path
+                        source_path = source_path_part
+                        logger.info(f"   ✅ UNC points to localhost - converted to local: {source_path}")
+
             if not os.path.exists(source_path):
                 logger.warning(f"⚠️ Source path does not exist: {source_path}")
+                logger.warning(f"   Original: {rule.source_path}")
+                logger.warning(f"   Normalized: {source_path}")
                 return
 
             if not os.path.isdir(source_path):
@@ -641,6 +748,7 @@ class FileMonitorManager:
             'active_rules': len([r for r in self.rules.values() if r.enabled]),
             'monitoring_rules': len(self.observers),
             'total_files_transferred': sum(r.files_transferred for r in self.rules.values()),
+            'total_bytes_transferred': sum(r.bytes_transferred for r in self.rules.values()),
             'rules': []
         }
 
@@ -658,6 +766,7 @@ class FileMonitorManager:
                 'trigger_type': rule.trigger_type.value,
                 'action_type': rule.action_type.value,
                 'files_transferred': rule.files_transferred,
+                'bytes_transferred': rule.bytes_transferred,
                 'last_transfer': rule.last_transfer_time.isoformat() if rule.last_transfer_time else None
             }
             stats['rules'].append(rule_stats)

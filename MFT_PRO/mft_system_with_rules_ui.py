@@ -591,6 +591,10 @@ HTML_TEMPLATE = """
             <!-- Statistics Grid -->
             <div class="stats-grid">
                 <div class="stat-card">
+                    <h3 id="total-bytes-transferred">0 B</h3>
+                    <p>Total Data Transferred</p>
+                </div>
+                <div class="stat-card">
                     <h3 id="total-files-transferred">0</h3>
                     <p>Total Files Transferred</p>
                 </div>
@@ -1172,12 +1176,21 @@ HTML_TEMPLATE = """
         // Load dashboard statistics
         let performanceChart = null;
 
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
         function loadDashboard() {
             // Load enhanced dashboard statistics
             fetch('/api/v1/dashboard/stats')
                 .then(r => r.json())
                 .then(data => {
                     // Update main stats
+                    document.getElementById('total-bytes-transferred').textContent = formatBytes(data.total_bytes_transferred || 0);
                     document.getElementById('total-files-transferred').textContent = data.total_files_transferred || 0;
                     document.getElementById('active-rules').textContent = data.active_rules || 0;
                     document.getElementById('total-transfers').textContent = data.total_transfers || 0;
@@ -3265,6 +3278,9 @@ def get_dashboard_stats():
         # Get total files transferred from rules
         total_files = sum(rule.files_transferred for rule in monitor_manager.rules.values())
 
+        # Get total bytes transferred from rules
+        total_bytes = sum(rule.bytes_transferred for rule in monitor_manager.rules.values())
+
         # Get active rules count
         active_rules = len([r for r in monitor_manager.rules.values() if r.enabled])
 
@@ -3295,6 +3311,7 @@ def get_dashboard_stats():
 
         stats = {
             'total_files_transferred': total_files,
+            'total_bytes_transferred': total_bytes,
             'active_rules': active_rules,
             'total_transfers': total_transfers,
             'active_transfers': active_count,
@@ -3318,6 +3335,7 @@ def get_dashboard_stats():
         traceback.print_exc()
         return jsonify({
             'total_files_transferred': 0,
+            'total_bytes_transferred': 0,
             'active_rules': 0,
             'total_transfers': 0,
             'active_transfers': 0,
