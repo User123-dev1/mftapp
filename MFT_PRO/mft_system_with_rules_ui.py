@@ -2797,16 +2797,24 @@ def create_rule():
             timeout=300
         )
 
-        # Create transfer rule
+        # Generate a unique rule_id
+        rule_id = str(uuid.uuid4())
+
+        # Create transfer rule with correct fields
         rule = TransferRule(
+            rule_id=rule_id,
             name=data.get('name'),
             source_path=data.get('source_path'),
             destination_path=data.get('destination_path'),
+            protocol=data.get('protocol', 'unc'),
+            host=data.get('host', ''),
+            port=data.get('port', 445),
+            username=data.get('username'),
+            password=data.get('password'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
-            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
@@ -2814,7 +2822,7 @@ def create_rule():
         )
 
         # Add rule to monitor manager
-        rule_id = monitor_manager.add_rule(rule)
+        monitor_manager.add_rule(rule)
 
         # Log audit event
         audit_manager.log_event(

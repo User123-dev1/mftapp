@@ -82,6 +82,13 @@ class TransferRule:
     files_transferred: int = 0
     last_transfer_time: Optional[datetime] = None
     status: str = "idle"  # idle, monitoring, transferring, error
+    created_at: Optional[datetime] = None
+    last_run: Optional[datetime] = None
+
+    def __post_init__(self):
+        """Set created_at timestamp if not provided"""
+        if self.created_at is None:
+            self.created_at = datetime.now()
 
 
 class FileMonitorHandler(FileSystemEventHandler):
