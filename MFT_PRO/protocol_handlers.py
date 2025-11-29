@@ -388,6 +388,7 @@ class UNCHandler(BaseProtocolHandler):
     async def transfer(self, source_path: str, destination_path: str, config: Any) -> Dict[str, Any]:
         """Transfer file via UNC path"""
         import shutil
+        import subprocess
 
         logger.info(f"\n{'='*80}")
         logger.info(f"🔵 UNC TRANSFER STARTING")
@@ -402,6 +403,29 @@ class UNCHandler(BaseProtocolHandler):
             logger.info(f"📂 Source (normalized): {source_normalized}")
             logger.info(f"📂 Dest (raw): {destination_path}")
             logger.info(f"📂 Dest (normalized): {dest_normalized}")
+
+            # Authenticate to UNC share if credentials provided
+            if config.username and config.password and config.host:
+                unc_share = f"\\\\{config.host}"
+                logger.info(f"🔐 Authenticating to {unc_share} as {config.username}...")
+
+                try:
+                    # Use net use to authenticate
+                    auth_cmd = f'net use "{unc_share}" /user:{config.username} {config.password}'
+                    result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+
+                    if result.returncode == 0:
+                        logger.info(f"✅ Authentication successful")
+                    elif "already in use" in result.stdout.lower() or "multiple connections" in result.stdout.lower():
+                        logger.info(f"ℹ️  Connection already exists")
+                    else:
+                        logger.warning(f"⚠️  Authentication warning: {result.stdout}")
+
+                except Exception as auth_error:
+                    logger.error(f"❌ Authentication failed: {auth_error}")
+                    raise Exception(f"Failed to authenticate to {unc_share}: {auth_error}")
+            else:
+                logger.info(f"ℹ️  No credentials provided, using current Windows session")
 
             # Check if source exists
             if not os.path.exists(source_normalized):
