@@ -1,0 +1,29 @@
+# MFT Application Dependencies
+
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# File Transfer Protocols
+paramiko==3.3.1          # SFTP
+pysmb==1.2.9.1           # SMB/CIFS
+tftpy==0.8.2             # TFTP
+pyas2lib==1.4.1          # AS2
+requests==2.31.0         # HTTP/HTTPS
+
+# LDAP/Active Directory
+ldap3==2.9.1
+
+# Database
+# sqlite3 is built into Python
+
+# Scheduling
+croniter==2.0.1
+
+# Utilities
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# Optional but recommended
+python-multipart==0.0.6  # For file uploads

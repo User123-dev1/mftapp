@@ -1,0 +1,103 @@
+# MFT Application Configuration
+# Copy this file to config.yaml and customize for your environment
+
+# Application settings
+app:
+  name: "MFT Application"
+  environment: "development"  # development, staging, production
+  debug: false
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# API server settings
+api:
+  host: "127.0.0.1"
+  port: 8000
+  workers: 4
+  reload: false
+  cors_origins:
+    - "*"  # Configure appropriately for production
+
+# Monitoring settings
+monitoring:
+  enabled: true
+  metrics_retention_hours: 24
+  check_interval_seconds: 10
+
+# Alert settings
+alerts:
+  enabled: true
+  
+  # Email notifications
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    use_tls: true
+    from_address: "mft@example.com"
+    to_addresses:
+      - "admin@example.com"
+      - "ops@example.com"
+    username: null  # Optional SMTP authentication
+    password: null
+  
+  # Slack notifications
+  slack:
+    enabled: false
+    webhook_url: null  # Add your Slack webhook URL
+  
+  # Webhook notifications
+  webhook:
+    enabled: false
+    url: null
+    headers: {}
+
+# Compliance settings
+compliance:
+  audit_log_path: "logs/audit.log"
+  required_frameworks:
+    - "hipaa"
+    - "gdpr"
+  encryption_required: true
+  checksum_verification: true
+
+
+# Scheduler settings
+scheduler:
+  enabled: true
+  execution_history_limit: 1000
+  max_concurrent_executions: 10
+
+# Database settings (optional)
+database:
+  enabled: false
+  type: "postgresql"  # postgresql, mysql, sqlite
+  host: "localhost"
+  port: 5432
+  database: "mft"
+  username: "mft_user"
+  password: ""  # Set via environment variable MFT_DB_PASSWORD
+  pool_size: 10
+  max_overflow: 20
+
+# Redis settings (optional, for caching)
+redis:
+  enabled: false
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: null  # Set via environment variable MFT_REDIS_PASSWORD
+  ssl: false
+
+# Storage settings
+storage:
+  temp_directory: "/tmp/mft"
+  max_file_size_mb: 1024
+  cleanup_interval_hours: 24
+
+# Security settings
+security:
+  secret_key: "w2y52ijtRxAFEd87Wcni08oe-rZtS-SpckfAu5UTPfo"  # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+  token_expiration_hours: 24
+  max_login_attempts: 5
+  password_min_length: 12
+  require_ssl: true

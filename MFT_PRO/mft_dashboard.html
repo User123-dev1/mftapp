@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MFT Application - Enterprise Managed File Transfer System</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,container-queries"></script>
+
+    <!-- Material Symbols -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                    },
+                    colors: {
+                        'primary-blue': '#4f46e5',
+                    }
+                },
+            },
+        };
+    </script>
+
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            font-size: 20px;
+        }
+
+        body {
+            min-height: 100vh;
+            background-color: #f7fafc;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Loading spinner animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="font-display text-gray-700 bg-gray-100">
+    <div class="flex flex-col min-h-screen">
+        <!-- Header -->
+        <header class="bg-white py-4 px-4 sticky top-0 z-10 shadow-sm">
+            <div class="container mx-auto">
+                <h1 class="text-2xl font-bold text-gray-900">🚀 MFT Application</h1>
+                <p class="text-sm text-gray-500">Enterprise Managed File Transfer System</p>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="bg-white sticky top-[76px] z-10 border-b border-gray-200 overflow-x-auto">
+            <div class="container mx-auto flex">
+                <button onclick="showTab('dashboard', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-primary-blue border-b-2 border-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">dashboard</span>
+                    Dashboard
+                </button>
+                <button onclick="showTab('transfers', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-gray-500 hover:text-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">swap_horiz</span>
+                    Transfers
+                </button>
+                <button onclick="showTab('devices', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-gray-500 hover:text-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">devices</span>
+                    Devices
+                </button>
+                <button onclick="showTab('rules', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-gray-500 hover:text-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">rule</span>
+                    Rules
+                </button>
+                <button onclick="showTab('users', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-gray-500 hover:text-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">group</span>
+                    Users
+                </button>
+                <button onclick="showTab('audit', this)" class="tab-btn flex flex-col items-center justify-center flex-shrink-0 px-4 py-3 text-sm font-medium text-gray-500 hover:text-primary-blue w-24">
+                    <span class="material-symbols-outlined mb-1">receipt_long</span>
+                    Audit
+                </button>
+            </div>
+        </div>
+
+        <!-- Dashboard Tab Content -->
+        <main id="dashboard" class="tab-content active flex-grow container mx-auto p-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">System Dashboard</h2>
+                <button onclick="refreshDashboard()" class="bg-gray-100 p-2 rounded-full text-gray-600 hover:bg-gray-200">
+                    <span class="material-symbols-outlined" style="font-size: 24px;">refresh</span>
+                </button>
+            </div>
+
+            <!-- System Status -->
+            <div id="health-status" class="bg-green-50 text-green-700 p-4 rounded-lg mb-6 flex items-center gap-3 border border-green-200">
+                <span class="material-symbols-outlined !text-2xl">verified_user</span>
+                <div>
+                    <p class="font-bold">System Status: Healthy</p>
+                    <p class="text-sm text-green-600">All systems are operating normally.</p>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-gradient-to-r from-blue-500 to-blue-600 p-6 rounded-lg text-white">
+                    <p class="text-sm font-medium opacity-90">Active Transfers</p>
+                    <p id="stat-active" class="text-3xl font-bold mt-1">0</p>
+                </div>
+                <div class="bg-gradient-to-r from-green-500 to-green-600 p-6 rounded-lg text-white">
+                    <p class="text-sm font-medium opacity-90">Completed</p>
+                    <p id="stat-completed" class="text-3xl font-bold mt-1">0</p>
+                </div>
+                <div class="bg-gradient-to-r from-red-500 to-red-600 p-6 rounded-lg text-white">
+                    <p class="text-sm font-medium opacity-90">Failed Transfers</p>
+                    <p id="stat-failed" class="text-3xl font-bold mt-1">0</p>
+                </div>
+                <div class="bg-gradient-to-r from-purple-500 to-purple-600 p-6 rounded-lg text-white">
+                    <p class="text-sm font-medium opacity-90">Success Rate</p>
+                    <p id="stat-success" class="text-3xl font-bold mt-1">100%</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Transfers Tab -->
+        <main id="transfers" class="tab-content flex-grow container mx-auto p-4">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">File Transfers</h2>
+
+            <div class="mb-4 flex gap-2">
+                <select id="transfer-filter" onchange="loadTransfers()" class="rounded-md border-gray-300">
+                    <option value="">All Transfers</option>
+                    <option value="completed">Completed</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <button onclick="loadTransfers()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    <span class="material-symbols-outlined mr-1" style="font-size: 18px;">refresh</span>
+                    Refresh
+                </button>
+            </div>
+
+            <div id="transfers-container" class="space-y-4">
+                <div class="bg-white p-8 rounded-lg text-center text-gray-400">
+                    No transfers yet
+                </div>
+            </div>
+        </main>
+
+        <!-- Devices Tab -->
+        <main id="devices" class="tab-content flex-grow container mx-auto p-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Device Management</h2>
+                <button onclick="loadDevices()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    <span class="material-symbols-outlined mr-1" style="font-size: 18px;">refresh</span>
+                    Refresh
+                </button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-indigo-600 text-white">
+                        <tr>
+                            <th class="px-6 py-3 text-left">ID</th>
+                            <th class="px-6 py-3 text-left">Name</th>
+                            <th class="px-6 py-3 text-left">Hostname</th>
+                            <th class="px-6 py-3 text-left">Port</th>
+                            <th class="px-6 py-3 text-left">Status</th>
+                            <th class="px-6 py-3 text-left">Protocol</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-body">
+                        <tr>
+                            <td colspan="6" class="px-6 py-8 text-center text-gray-400">No devices configured</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+
+        <!-- Rules Tab -->
+        <main id="rules" class="tab-content flex-grow container mx-auto p-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Transfer Rules</h2>
+                <button onclick="loadRules()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    <span class="material-symbols-outlined mr-1" style="font-size: 18px;">refresh</span>
+                    Refresh
+                </button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-indigo-600 text-white">
+                        <tr>
+                            <th class="px-6 py-3 text-left">ID</th>
+                            <th class="px-6 py-3 text-left">Name</th>
+                            <th class="px-6 py-3 text-left">Mode</th>
+                            <th class="px-6 py-3 text-left">Source</th>
+                            <th class="px-6 py-3 text-left">Destination</th>
+                            <th class="px-6 py-3 text-left">Enabled</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rules-body">
+                        <tr>
+                            <td colspan="6" class="px-6 py-8 text-center text-gray-400">No rules configured</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+
+        <!-- Users Tab -->
+        <main id="users" class="tab-content flex-grow container mx-auto p-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Domain Users</h2>
+                <button onclick="syncUsers()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    <span class="material-symbols-outlined mr-1" style="font-size: 18px;">sync</span>
+                    Sync Users
+                </button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-indigo-600 text-white">
+                        <tr>
+                            <th class="px-6 py-3 text-left">ID</th>
+                            <th class="px-6 py-3 text-left">Username</th>
+                            <th class="px-6 py-3 text-left">Email</th>
+                            <th class="px-6 py-3 text-left">Groups</th>
+                            <th class="px-6 py-3 text-left">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-body">
+                        <tr>
+                            <td colspan="5" class="px-6 py-8 text-center text-gray-400">No users synced</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+
+        <!-- Audit Tab -->
+        <main id="audit" class="tab-content flex-grow container mx-auto p-4">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Audit Log</h2>
+                <button onclick="loadAuditLogs()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    <span class="material-symbols-outlined mr-1" style="font-size: 18px;">refresh</span>
+                    Refresh
+                </button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-indigo-600 text-white">
+                        <tr>
+                            <th class="px-6 py-3 text-left">Timestamp</th>
+                            <th class="px-6 py-3 text-left">Action</th>
+                            <th class="px-6 py-3 text-left">User</th>
+                            <th class="px-6 py-3 text-left">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="audit-body">
+                        <tr>
+                            <td colspan="4" class="px-6 py-8 text-center text-gray-400">No audit logs</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api/v1';
+
+        // Tab switching
+        function showTab(tabId, btnElement) {
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('text-primary-blue', 'border-b-2', 'border-primary-blue');
+                btn.classList.add('text-gray-500');
+            });
+
+            document.getElementById(tabId).classList.add('active');
+
+            btnElement.classList.remove('text-gray-500');
+            btnElement.classList.add('text-primary-blue', 'border-b-2', 'border-primary-blue');
+
+            // Load data for tab
+            if (tabId === 'dashboard') refreshDashboard();
+            if (tabId === 'transfers') loadTransfers();
+            if (tabId === 'devices') loadDevices();
+            if (tabId === 'rules') loadRules();
+            if (tabId === 'users') loadUsers();
+            if (tabId === 'audit') loadAuditLogs();
+        }
+
+        // Dashboard functions
+        async function refreshDashboard() {
+            try {
+                const res = await fetch(`${API_BASE}/statistics`);
+                if (!res.ok) throw new Error('API not available');
+
+                const stats = await res.json();
+                document.getElementById('stat-active').textContent = stats.active_transfers || 0;
+                document.getElementById('stat-completed').textContent = stats.completed_transfers || 0;
+                document.getElementById('stat-failed').textContent = stats.failed_transfers || 0;
+                document.getElementById('stat-success').textContent = (stats.success_rate || 100).toFixed(1) + '%';
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                document.getElementById('health-status').innerHTML = `
+                    <span class="material-symbols-outlined !text-2xl">error</span>
+                    <div>
+                        <p class="font-bold">System Status: Error</p>
+                        <p class="text-sm">Cannot connect to API server. Make sure it's running on http://localhost:8000</p>
+                    </div>
+                `;
+                document.getElementById('health-status').className = 'bg-red-50 text-red-700 p-4 rounded-lg mb-6 flex items-center gap-3 border border-red-200';
+            }
+        }
+
+        // Transfers functions
+        async function loadTransfers() {
+            const container = document.getElementById('transfers-container');
+            container.innerHTML = '<div class="text-center py-8"><div class="spinner inline-block w-8 h-8 border-2 border-gray-300 border-t-indigo-600 rounded-full"></div></div>';
+
+            try {
+                const filter = document.getElementById('transfer-filter').value;
+                const url = filter ? `${API_BASE}/transfers?status=${filter}` : `${API_BASE}/transfers`;
+                const res = await fetch(url);
+                const transfers = await res.json();
+
+                if (!transfers || transfers.length === 0) {
+                    container.innerHTML = '<div class="bg-white p-8 rounded-lg text-center text-gray-400">No transfers found</div>';
+                    return;
+                }
+
+                container.innerHTML = transfers.map(t => {
+                    const statusClass = t.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                       t.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
+                    return `
+                        <div class="bg-white p-4 rounded-lg shadow">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="font-bold">${t.task_id.substring(0, 16)}...</p>
+                                    <p class="text-sm text-gray-600">${t.source_path} → ${t.destination_path}</p>
+                                </div>
+                                <span class="px-2 py-1 rounded text-xs font-semibold ${statusClass}">${t.status}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                container.innerHTML = '<div class="bg-red-50 p-4 rounded-lg text-red-600">Error loading transfers</div>';
+            }
+        }
+
+        // Devices functions
+        async function loadDevices() {
+            const tbody = document.getElementById('devices-body');
+            tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center"><div class="spinner inline-block w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full"></div></td></tr>';
+
+            try {
+                const res = await fetch(`${API_BASE}/devices`);
+                const devices = await res.json();
+
+                if (!devices || devices.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-400">No devices configured</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = devices.map(d => {
+                    const statusClass = d.status === 'online' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    return `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="px-6 py-4">${d.id}</td>
+                            <td class="px-6 py-4 font-medium">${d.name}</td>
+                            <td class="px-6 py-4">${d.hostname}</td>
+                            <td class="px-6 py-4">${d.port}</td>
+                            <td class="px-6 py-4"><span class="px-2 py-1 rounded text-xs font-semibold ${statusClass}">${d.status}</span></td>
+                            <td class="px-6 py-4">${d.protocol || 'N/A'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-red-600">Error loading devices</td></tr>';
+            }
+        }
+
+        // Rules functions
+        async function loadRules() {
+            const tbody = document.getElementById('rules-body');
+            tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center"><div class="spinner inline-block w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full"></div></td></tr>';
+
+            try {
+                const res = await fetch(`${API_BASE}/rules`);
+                const rules = await res.json();
+
+                if (!rules || rules.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-400">No rules configured</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = rules.map(r => `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-6 py-4">${r.id}</td>
+                        <td class="px-6 py-4 font-medium">${r.name}</td>
+                        <td class="px-6 py-4">${r.transfer_mode}</td>
+                        <td class="px-6 py-4">${r.source_path || r.source_pattern}</td>
+                        <td class="px-6 py-4">${r.destination_path || r.destination_pattern}</td>
+                        <td class="px-6 py-4">${r.enabled ? '✅ Yes' : '❌ No'}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-red-600">Error loading rules</td></tr>';
+            }
+        }
+
+        // Users functions
+        async function loadUsers() {
+            const tbody = document.getElementById('users-body');
+            tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center"><div class="spinner inline-block w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full"></div></td></tr>';
+
+            try {
+                const res = await fetch(`${API_BASE}/users`);
+                const users = await res.json();
+
+                if (!users || users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">No users synced</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = users.map(u => `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-6 py-4">${u.id}</td>
+                        <td class="px-6 py-4 font-medium">${u.username}</td>
+                        <td class="px-6 py-4">${u.email || '-'}</td>
+                        <td class="px-6 py-4">${u.groups || '-'}</td>
+                        <td class="px-6 py-4">${u.is_active ? '✅ Active' : '❌ Inactive'}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-red-600">Error loading users</td></tr>';
+            }
+        }
+
+        async function syncUsers() {
+            try {
+                const res = await fetch(`${API_BASE}/domain/sync`, { method: 'POST' });
+                const result = await res.json();
+                alert(`Synced ${result.synced || 0} users`);
+                loadUsers();
+            } catch (error) {
+                alert('Sync failed: ' + error.message);
+            }
+        }
+
+        // Audit functions
+        async function loadAuditLogs() {
+            const tbody = document.getElementById('audit-body');
+            tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center"><div class="spinner inline-block w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full"></div></td></tr>';
+
+            try {
+                const res = await fetch(`${API_BASE}/audit?limit=50`);
+                const logs = await res.json();
+
+                if (!logs || logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-gray-400">No audit logs</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = logs.map(l => `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-6 py-4">${l.timestamp}</td>
+                        <td class="px-6 py-4 font-medium">${l.action}</td>
+                        <td class="px-6 py-4">${l.username || 'System'}</td>
+                        <td class="px-6 py-4 text-sm">${JSON.stringify(l.details || {})}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-red-600">Error loading logs</td></tr>';
+            }
+        }
+
+        // Auto-refresh dashboard
+        setInterval(() => {
+            if (document.getElementById('dashboard').classList.contains('active')) {
+                refreshDashboard();
+            }
+        }, 10000);
+
+        // Initial load
+        refreshDashboard();
+    </script>
+</body>
+</html>

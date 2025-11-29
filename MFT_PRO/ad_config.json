@@ -1,0 +1,8 @@
+{
+  "server": "10.10.100.19",
+  "port": 389,
+  "use_ssl": false,
+  "base_dn": "DC=scepces,DC=Com",
+  "username": "administrator@scepces.com",
+  "password": "@Admin123"
+}
