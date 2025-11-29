@@ -93,24 +93,43 @@ class SFTPHandler(BaseProtocolHandler):
 
             logger.info(f"   Source (normalized): {source_normalized}")
 
-            # If source is a UNC path, authenticate to it
+            # If source is a UNC path pointing to localhost, convert to local path
             if source_normalized.startswith('\\\\'):
-                import subprocess
-                # Extract host from UNC path (\\host\...)
+                import socket
+                # Extract host from UNC path (\\host\path)
                 unc_parts = source_normalized.lstrip('\\').split('\\', 1)
-                if unc_parts:
+                if len(unc_parts) >= 1:
                     source_host = unc_parts[0]
-                    unc_share = f"\\\\{source_host}"
+                    source_path_part = unc_parts[1] if len(unc_parts) > 1 else ''
 
-                    # Try to authenticate with Windows credentials if available
-                    # Note: For SFTP, we may need separate source credentials
-                    # For now, try with current Windows session
-                    logger.info(f"🔐 Source is UNC path: {unc_share}")
-                    logger.info(f"   Using current Windows session credentials")
+                    # Get local machine IPs and hostname
+                    local_ips = []
+                    local_hostname = 'localhost'
+                    try:
+                        local_hostname = socket.gethostname()
+                        local_ips = [local_hostname.lower()]
+                        # Get all local IP addresses
+                        for ip_info in socket.getaddrinfo(local_hostname, None):
+                            ip = ip_info[4][0]
+                            local_ips.append(ip)
+                    except Exception as e:
+                        logger.warning(f"Could not get local IPs: {e}")
 
-                    # Optional: If username/password available, try to authenticate
-                    # This assumes same credentials work for source UNC and destination SFTP
-                    # In production, you may want separate source_username/source_password fields
+                    # Check if source_host is the local machine
+                    is_local = (
+                        source_host.lower() in ['localhost', '127.0.0.1', local_hostname.lower()] or
+                        source_host in local_ips
+                    )
+
+                    if is_local:
+                        # This is a local UNC path - convert to local drive path
+                        source_normalized = source_path_part
+                        logger.info(f"   ✅ UNC points to localhost - converted to local: {source_normalized}")
+                    else:
+                        # Remote UNC path - needs authentication
+                        logger.info(f"   🌐 UNC points to remote host: {source_host}")
+                        logger.warning(f"   ⚠️  Remote UNC paths require the share to be accessible")
+                        logger.warning(f"   ⚠️  Run this first: net use \\\\{source_host} /user:username password")
 
             # Create SSH client
             ssh = paramiko.SSHClient()
