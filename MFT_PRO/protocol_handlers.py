@@ -93,6 +93,25 @@ class SFTPHandler(BaseProtocolHandler):
 
             logger.info(f"   Source (normalized): {source_normalized}")
 
+            # If source is a UNC path, authenticate to it
+            if source_normalized.startswith('\\\\'):
+                import subprocess
+                # Extract host from UNC path (\\host\...)
+                unc_parts = source_normalized.lstrip('\\').split('\\', 1)
+                if unc_parts:
+                    source_host = unc_parts[0]
+                    unc_share = f"\\\\{source_host}"
+
+                    # Try to authenticate with Windows credentials if available
+                    # Note: For SFTP, we may need separate source credentials
+                    # For now, try with current Windows session
+                    logger.info(f"🔐 Source is UNC path: {unc_share}")
+                    logger.info(f"   Using current Windows session credentials")
+
+                    # Optional: If username/password available, try to authenticate
+                    # This assumes same credentials work for source UNC and destination SFTP
+                    # In production, you may want separate source_username/source_password fields
+
             # Create SSH client
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
