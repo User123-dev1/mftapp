@@ -2637,53 +2637,67 @@ def get_transfers():
     try:
         transfers_list = []
 
-        # Ensure mft_app.transfers exists and is a dict
-        if not hasattr(mft_app, 'transfers') or not isinstance(mft_app.transfers, dict):
-            logger.warning("No transfers found in mft_app")
+        # Debug logging
+        logger.info(f"📋 GET /api/v1/transfers called")
+        logger.info(f"   Has 'monitor' attr: {hasattr(mft_app, 'monitor')}")
+
+        # Ensure mft_app.monitor exists
+        if not hasattr(mft_app, 'monitor'):
+            logger.warning("❌ No monitor found in mft_app")
             return jsonify({
                 'success': True,
-                'transfers': []  # Return empty array, not error
+                'transfers': []
             })
 
-        for task_id, transfer in mft_app.transfers.items():
+        monitor = mft_app.monitor
+
+        # Collect all transfers from active, completed, and failed
+        all_transfers = []
+
+        # Add active transfers
+        if hasattr(monitor, 'active_transfers') and isinstance(monitor.active_transfers, dict):
+            for task_id, task in monitor.active_transfers.items():
+                all_transfers.append(task)
+            logger.info(f"   Active transfers: {len(monitor.active_transfers)}")
+
+        # Add completed transfers
+        if hasattr(monitor, 'completed_transfers') and isinstance(monitor.completed_transfers, list):
+            all_transfers.extend(monitor.completed_transfers)
+            logger.info(f"   Completed transfers: {len(monitor.completed_transfers)}")
+
+        # Add failed transfers
+        if hasattr(monitor, 'failed_transfers') and isinstance(monitor.failed_transfers, list):
+            all_transfers.extend(monitor.failed_transfers)
+            logger.info(f"   Failed transfers: {len(monitor.failed_transfers)}")
+
+        logger.info(f"   Total transfers: {len(all_transfers)}")
+
+        # Convert each transfer task to dict
+        for task in all_transfers:
             try:
-                # Safely get timestamp
-                timestamp = transfer.get('timestamp')
-                if hasattr(timestamp, 'isoformat'):
-                    timestamp_str = timestamp.isoformat()
-                elif isinstance(timestamp, str):
-                    timestamp_str = timestamp
-                else:
-                    timestamp_str = datetime.now().isoformat()
+                # Manually construct dict from task attributes
+                transfer_dict = {
+                    'task_id': getattr(task, 'task_id', 'unknown'),
+                    'source_path': getattr(task, 'source_path', 'N/A'),
+                    'destination_path': getattr(task, 'destination_path', 'N/A'),
+                    'protocol': getattr(task.protocol, 'value', 'unc') if hasattr(task, 'protocol') else 'unc',
+                    'status': getattr(task.status, 'value', 'unknown') if hasattr(task, 'status') else 'unknown',
+                    'timestamp': getattr(task, 'created_at', datetime.now()).isoformat() if hasattr(task, 'created_at') else datetime.now().isoformat(),
+                    'progress': getattr(task, 'progress', 0),
+                    'error': getattr(task, 'error', None)
+                }
 
-                    # Safely get protocol
-                protocol = transfer.get('protocol')
-                if hasattr(protocol, 'value'):
-                    protocol_str = protocol.value
-                elif isinstance(protocol, str):
-                    protocol_str = protocol
-                else:
-                    protocol_str = 'unc'
+                transfers_list.append(transfer_dict)
 
-                transfers_list.append({
-                    'task_id': task_id,
-                    'source_path': transfer.get('source_path', 'N/A'),
-                    'destination_path': transfer.get('destination_path', 'N/A'),
-                    'protocol': protocol_str,
-                    'status': transfer.get('status', 'unknown'),
-                    'timestamp': timestamp_str,
-                    'progress': transfer.get('progress', 0),
-                    'error': transfer.get('error')
-                })
             except Exception as item_error:
-                logger.error(f"Error processing transfer {task_id}: {item_error}")
+                logger.error(f"Error processing transfer: {item_error}")
                 continue
 
         logger.info(f"✅ Returning {len(transfers_list)} transfers")
 
         return jsonify({
             'success': True,
-            'transfers': transfers_list  # ✅ Always return array
+            'transfers': transfers_list
         })
 
     except Exception as e:
