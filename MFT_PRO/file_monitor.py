@@ -138,6 +138,10 @@ class FileMonitorHandler(FileSystemEventHandler):
                 logger.debug(f"File {filename} too large: {file_size} > {self.rule.max_file_size}")
                 return False
 
+            # Content validation for specific file types
+            if not self._validate_file_content(file_path, filename):
+                return False
+
             # Check if already transferring
             if file_path in self.transferring_files:
                 logger.debug(f"File {filename} already being transferred")
@@ -148,6 +152,77 @@ class FileMonitorHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"Error checking if should transfer {file_path}: {e}")
             return False
+
+    def _validate_file_content(self, file_path: str, filename: str) -> bool:
+        """Validate file has actual content based on file type"""
+        try:
+            # Get file extension
+            _, ext = os.path.splitext(filename.lower())
+
+            # CSV validation - must have data rows, not just headers or empty lines
+            if ext == '.csv':
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+
+                        # Remove empty lines and whitespace-only lines
+                        non_empty_lines = [line.strip() for line in lines if line.strip()]
+
+                        if len(non_empty_lines) == 0:
+                            logger.info(f"⚠️ Skipping CSV with no content: {filename}")
+                            return False
+
+                        # Check if CSV has data beyond just headers
+                        # A valid CSV should have at least 2 lines (header + 1 data row)
+                        if len(non_empty_lines) < 2:
+                            logger.info(f"⚠️ Skipping CSV with only headers (no data rows): {filename} ({len(non_empty_lines)} lines)")
+                            return False
+
+                        logger.info(f"✅ CSV validation passed: {filename} ({len(non_empty_lines)} lines)")
+                        return True
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to validate CSV content for {filename}: {e}")
+                    return False
+
+            # PDF validation - check for PDF signature and minimum viable size
+            elif ext == '.pdf':
+                try:
+                    # PDF files must start with %PDF- header
+                    with open(file_path, 'rb') as f:
+                        header = f.read(5)
+                        if header != b'%PDF-':
+                            logger.info(f"⚠️ Skipping invalid PDF (missing signature): {filename}")
+                            return False
+
+                        # Read entire file to check for EOF marker
+                        f.seek(0)
+                        content = f.read()
+
+                        # Valid PDF should have %%EOF at the end
+                        if b'%%EOF' not in content:
+                            logger.info(f"⚠️ Skipping incomplete PDF (missing EOF): {filename}")
+                            return False
+
+                        # Check if PDF has some minimal content
+                        # A valid PDF with actual content should be at least 1KB
+                        if len(content) < 1024:
+                            logger.info(f"⚠️ Skipping PDF with minimal content: {filename} ({len(content)} bytes)")
+                            return False
+
+                        logger.info(f"✅ PDF validation passed: {filename} ({len(content)} bytes)")
+                        return True
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to validate PDF content for {filename}: {e}")
+                    return False
+
+            # For other file types, basic size check is sufficient
+            else:
+                return True
+
+        except Exception as e:
+            logger.error(f"❌ Error validating file content for {filename}: {e}")
+            # On error, allow transfer (fail open)
+            return True
 
     def _schedule_transfer(self, file_path: str):
         """Schedule file for transfer after stability check"""
