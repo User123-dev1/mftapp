@@ -66,6 +66,32 @@ class SFTPHandler(BaseProtocolHandler):
     async def transfer(self, source_path: str, destination_path: str, config: Any) -> Dict[str, Any]:
         """Transfer file via SFTP"""
         try:
+            logger.info(f"🔵 SFTP Transfer starting...")
+            logger.info(f"   Source (raw): {source_path}")
+            logger.info(f"   Destination (raw): {destination_path}")
+            logger.info(f"   Host: {config.host}")
+
+            # Normalize source path - convert UNC or forward slashes to local Windows path
+            source_normalized = source_path
+
+            # If source is UNC format (//host/path or \\host\path), try to normalize it
+            if source_path.startswith('//') or source_path.startswith('\\\\'):
+                # Extract the path part after the host
+                parts = source_path.replace('//', '').replace('\\\\', '').split('/', 1)
+                if len(parts) == 2:
+                    host_part, path_part = parts
+                    # Convert to Windows path format (assuming C: drive)
+                    # //192.168.252.16/Users/... -> C:\Users\...
+                    source_normalized = path_part.replace('/', '\\')
+                    if not source_normalized[1:3] == ':\\':  # If not already a drive letter
+                        source_normalized = 'C:\\' + source_normalized
+                    logger.info(f"   Converted UNC to local: {source_normalized}")
+            else:
+                # Convert forward slashes to backslashes for Windows
+                source_normalized = source_path.replace('/', '\\')
+
+            logger.info(f"   Source (normalized): {source_normalized}")
+
             # Create SSH client
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -84,7 +110,9 @@ class SFTPHandler(BaseProtocolHandler):
             elif config.password:
                 connect_kwargs['password'] = config.password
 
+            logger.info(f"🔐 Connecting to {config.host}:{config.port} as {config.username}...")
             ssh.connect(**connect_kwargs)
+            logger.info(f"✅ SSH connection established")
 
             # Create SFTP client
             sftp = ssh.open_sftp()
@@ -96,25 +124,35 @@ class SFTPHandler(BaseProtocolHandler):
                     sftp.stat(dest_dir)
                 except IOError:
                     # Directory doesn't exist, create it
+                    logger.info(f"📁 Creating remote directory: {dest_dir}")
                     self._mkdir_p(sftp, dest_dir)
 
+            # Check if source exists
+            if not os.path.exists(source_normalized):
+                raise FileNotFoundError(f"Source file not found: {source_normalized}")
+
             # Calculate checksums before transfer
-            checksums = self.calculate_checksums(source_path)
-            file_size = os.path.getsize(source_path)
+            logger.info(f"🔐 Calculating checksums...")
+            checksums = self.calculate_checksums(source_normalized)
+            file_size = os.path.getsize(source_normalized)
+            logger.info(f"📊 File size: {file_size:,} bytes")
 
             # Transfer file
-            sftp.put(source_path, destination_path)
+            logger.info(f"📤 Uploading file...")
+            sftp.put(source_normalized, destination_path)
 
             # Verify file size
             remote_stat = sftp.stat(destination_path)
             if remote_stat.st_size != file_size:
                 raise Exception(f"File size mismatch: local={file_size}, remote={remote_stat.st_size}")
 
+            logger.info(f"✅ Size verification: PASSED")
+
             # Close connections
             sftp.close()
             ssh.close()
 
-            logger.info(f"SFTP transfer successful: {source_path} -> {destination_path}")
+            logger.info(f"✅ SFTP transfer successful!")
 
             return {
                 'file_size': file_size,
@@ -122,7 +160,7 @@ class SFTPHandler(BaseProtocolHandler):
             }
 
         except Exception as e:
-            logger.error(f"SFTP transfer failed: {e}")
+            logger.error(f"❌ SFTP transfer failed: {e}")
             raise
 
     def _mkdir_p(self, sftp, remote_path):
