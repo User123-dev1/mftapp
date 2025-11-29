@@ -71,21 +71,22 @@ class SFTPHandler(BaseProtocolHandler):
             logger.info(f"   Destination (raw): {destination_path}")
             logger.info(f"   Host: {config.host}")
 
-            # Normalize source path - convert UNC or forward slashes to local Windows path
+            # Normalize source path to Windows UNC format
             source_normalized = source_path
 
-            # If source is UNC format (//host/path or \\host\path), try to normalize it
-            if source_path.startswith('//') or source_path.startswith('\\\\'):
-                # Extract the path part after the host
-                parts = source_path.replace('//', '').replace('\\\\', '').split('/', 1)
-                if len(parts) == 2:
-                    host_part, path_part = parts
-                    # Convert to Windows path format (assuming C: drive)
-                    # //192.168.252.16/Users/... -> C:\Users\...
-                    source_normalized = path_part.replace('/', '\\')
-                    if not source_normalized[1:3] == ':\\':  # If not already a drive letter
-                        source_normalized = 'C:\\' + source_normalized
-                    logger.info(f"   Converted UNC to local: {source_normalized}")
+            # Convert forward slashes to backslashes
+            if '//' in source_path or '\\\\' in source_path:
+                # This is a UNC path - keep it as UNC, just normalize format
+                source_normalized = source_path.replace('/', '\\')
+                # Ensure it starts with exactly two backslashes
+                if not source_normalized.startswith('\\\\'):
+                    source_normalized = '\\\\' + source_normalized.lstrip('\\')
+
+                # Convert C$ to C: for Windows paths
+                import re
+                source_normalized = re.sub(r'\\([A-Za-z])\$\\', r'\\\1:\\', source_normalized)
+
+                logger.info(f"   UNC path normalized: {source_normalized}")
             else:
                 # Convert forward slashes to backslashes for Windows
                 source_normalized = source_path.replace('/', '\\')
@@ -161,6 +162,8 @@ class SFTPHandler(BaseProtocolHandler):
 
         except Exception as e:
             logger.error(f"❌ SFTP transfer failed: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
     def _mkdir_p(self, sftp, remote_path):
