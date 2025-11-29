@@ -180,6 +180,10 @@ class FileMonitorHandler(FileSystemEventHandler):
 
                         logger.info(f"✅ CSV validation passed: {filename} ({len(non_empty_lines)} lines)")
                         return True
+                except PermissionError:
+                    # File is locked (being written) - allow it to proceed to stability check
+                    logger.info(f"⏳ CSV file is locked (being written), will validate later: {filename}")
+                    return True
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to validate CSV content for {filename}: {e}")
                     return False
@@ -211,6 +215,10 @@ class FileMonitorHandler(FileSystemEventHandler):
 
                         logger.info(f"✅ PDF validation passed: {filename} ({len(content)} bytes)")
                         return True
+                except PermissionError:
+                    # File is locked (being written) - allow it to proceed to stability check
+                    logger.info(f"⏳ PDF file is locked (being written), will validate later: {filename}")
+                    return True
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to validate PDF content for {filename}: {e}")
                     return False
@@ -256,6 +264,13 @@ class FileMonitorHandler(FileSystemEventHandler):
                                 final_size = os.path.getsize(file_path)
 
                                 if initial_size == final_size and final_size > 0:
+                                    # File is stable - perform final content validation
+                                    filename = os.path.basename(file_path)
+                                    if not self._validate_file_content(file_path, filename):
+                                        logger.warning(f"⚠️ File failed content validation after stability check: {file_path}")
+                                        del self.pending_files[file_path]
+                                        return
+
                                     logger.info(f"✅ File stable ({final_size:,} bytes), initiating transfer: {file_path}")
                                     del self.pending_files[file_path]
                                     self._execute_transfer(file_path)
