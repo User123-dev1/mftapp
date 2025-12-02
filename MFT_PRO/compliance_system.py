@@ -59,6 +59,7 @@ class AuditEventType(Enum):
     COMPLIANCE_DISABLED = "compliance_disabled"
     ENCRYPTION_ENABLED = "encryption_enabled"
     ENCRYPTION_DISABLED = "encryption_disabled"
+    DATA_EXPORTED = "data_exported"  # For PDF/CSV exports
     CONFIG_CHANGED = "config_changed"
     RULE_CREATED = "rule_created"
     RULE_MODIFIED = "rule_modified"

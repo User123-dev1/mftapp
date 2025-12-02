@@ -34,6 +34,9 @@ from compliance_system import (
     ComplianceFramework, AuditEventType, EncryptionAlgorithm
 )
 
+# Import state manager for multi-instance support
+from state_manager import StateManager
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,6 +44,9 @@ logger = logging.getLogger(__name__)
 # Create Flask app
 app = Flask(__name__)
 CORS(app)
+
+# Initialize State Manager for multi-instance support
+state_manager = StateManager()
 
 # Initialize MFT application
 mft_app = MFTApplication()
@@ -59,6 +65,64 @@ ad_manager = ActiveDirectoryManager()
 
 # Initialize Server Health Monitor
 server_monitor = ServerHealthMonitor(audit_manager=audit_manager, check_interval=30)
+
+# ============================================================================
+# LOAD SAVED STATE (Multi-Instance Support)
+# ============================================================================
+
+logger.info("\n" + "="*80)
+logger.info("🔄 LOADING SAVED STATE FOR MULTI-INSTANCE SUPPORT")
+logger.info("="*80)
+
+# Load AD configuration
+saved_ad_config = state_manager.load_ad_config()
+if saved_ad_config:
+    logger.info(f"📋 Restoring AD connection: {saved_ad_config.get('server')}")
+    # AD config will be restored when frontend fetches it
+
+# Load transfer rules
+saved_rules = state_manager.load_rules()
+if saved_rules:
+    logger.info(f"📋 Restoring {len(saved_rules)} transfer rules")
+    for rule_id, rule_data in saved_rules.items():
+        try:
+            # Reconstruct TransferRule from saved data
+            from file_monitor import ScheduleType, TriggerType, ActionType
+
+            rule = TransferRule(
+                rule_id=rule_data.get('rule_id', rule_id),
+                name=rule_data.get('name'),
+                source_path=rule_data.get('source_path'),
+                source_pattern=rule_data.get('source_pattern', '*'),
+                destination_path=rule_data.get('destination_path'),
+                protocol=rule_data.get('protocol', 'unc'),
+                host=rule_data.get('host'),
+                port=rule_data.get('port'),
+                username=rule_data.get('username'),
+                password=rule_data.get('password'),
+                schedule_type=ScheduleType(rule_data.get('schedule_type', 'event_driven')),
+                trigger_type=TriggerType(rule_data.get('trigger_type', 'on_create')),
+                action_type=ActionType(rule_data.get('action_type', 'copy')),
+                enabled=rule_data.get('enabled', False),
+                schedule_cron=rule_data.get('schedule_cron'),
+                schedule_interval_minutes=rule_data.get('schedule_interval_minutes'),
+                files_transferred=rule_data.get('files_transferred', 0),
+                bytes_transferred=rule_data.get('bytes_transferred', 0),
+            )
+            monitor_manager.add_rule(rule)
+            logger.info(f"   ✅ Restored rule: {rule.name}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed to restore rule {rule_id}: {e}")
+
+# Load compliance configuration
+saved_compliance = state_manager.load_compliance_config()
+if saved_compliance:
+    logger.info(f"📋 Restoring compliance configuration")
+    # Compliance config will be applied when needed
+
+logger.info("="*80)
+logger.info("✅ STATE RESTORATION COMPLETE")
+logger.info("="*80 + "\n")
 
 # Start monitoring on startup
 monitor_manager.start_all()
@@ -2512,6 +2576,11 @@ def test_ad_connection():
             result="success"
         )
 
+        # Save AD config for multi-instance support
+        ad_config = request.get_json()
+        if ad_config:
+            state_manager.save_ad_config(ad_config)
+
         return jsonify({
             'success': True,
             'message': 'Connection successful',
@@ -2803,7 +2872,7 @@ def export_users_pdf():
 
         # Log the export
         audit_manager.log_event(
-            AuditEventType.ACCESS_GRANTED,
+            AuditEventType.DATA_EXPORTED,
             f"User permissions exported to PDF ({len(users)} users)",
             username="admin",
             result="success"
@@ -3437,6 +3506,9 @@ def create_rule():
         # Sync servers for health monitoring
         server_monitor.sync_servers_from_rules(monitor_manager.rules)
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'rule_id': rule_id,
@@ -3550,6 +3622,9 @@ def update_rule(rule_id):
             details={'rule_id': rule_id, 'name': data.get('name')}
         )
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'rule_id': rule_id,
@@ -3584,6 +3659,9 @@ def enable_rule(rule_id):
             result="success"
         )
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'message': 'Rule enabled successfully'
@@ -3610,6 +3688,9 @@ def disable_rule(rule_id):
             result="success"
         )
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'message': 'Rule disabled successfully'
@@ -3635,6 +3716,9 @@ def delete_rule(rule_id):
             username="admin",
             result="success"
         )
+
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
 
         return jsonify({
             'success': True,
