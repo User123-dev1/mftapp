@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ServerStatus:
     """Status information for a monitored server"""
-    host: str
+    host: str  # Can be hostname, FQDN, or IP address
     port: int
     protocol: str
     is_online: bool
@@ -28,6 +28,11 @@ class ServerStatus:
     total_downtime_seconds: float = 0
     consecutive_failures: int = 0
     consecutive_successes: int = 0
+    # IP address tracking for DHCP environments
+    resolved_ip: Optional[str] = None  # Last resolved IP address
+    previous_ip: Optional[str] = None  # Previous IP (for change detection)
+    is_fqdn: bool = False  # True if host is a hostname/FQDN, False if IP
+    ip_changed: bool = False  # True if IP changed since last check
 
 
 class ServerHealthMonitor:
