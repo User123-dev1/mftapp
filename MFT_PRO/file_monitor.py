@@ -703,6 +703,190 @@ class FileMonitorManager:
             rule.status = "error"
             return False
 
+    async def transfer_folder_recursive(self, rule: TransferRule):
+        """
+        Transfer entire folder and subfolders recursively (for CRON backup rules)
+
+        Args:
+            rule: TransferRule with CRON schedule type
+
+        Returns:
+            Dictionary with transfer statistics
+        """
+        from mft_application import TransferConfig, TransferProtocol
+        import re
+
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📁 CRON FOLDER BACKUP STARTED")
+        logger.info(f"{'='*80}")
+        logger.info(f"Rule: {rule.name}")
+        logger.info(f"Source: {rule.source_path}")
+        logger.info(f"Destination: {rule.destination_path}")
+        logger.info(f"{'='*80}\n")
+
+        # Normalize source path
+        source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
+        source_path = re.sub(r'\\([A-Za-z])\$\\', r'\\\1:\\', source_path)
+
+        # Convert UNC localhost to local path
+        if source_path.startswith('\\\\'):
+            import socket
+            hostname = socket.gethostname().lower()
+            fqdn = socket.getfqdn().lower()
+
+            # Extract server name from UNC path
+            parts = source_path.lstrip('\\').split('\\', 1)
+            if len(parts) >= 1:
+                server_part = parts[0].lower()
+
+                if server_part in [hostname, fqdn, 'localhost', '127.0.0.1']:
+                    if len(parts) >= 2:
+                        source_path_part = parts[1]
+                        source_path_part = re.sub(r'^([A-Za-z])\$\\', r'\1:\\', source_path_part)
+                        source_path = source_path_part
+                        logger.info(f"   ✅ UNC points to localhost - converted to local: {source_path}")
+
+        if not os.path.exists(source_path):
+            logger.error(f"❌ Source path does not exist: {source_path}")
+            return {'success': False, 'error': 'Source path not found'}
+
+        if not os.path.isdir(source_path):
+            logger.error(f"❌ Source path is not a directory: {source_path}")
+            return {'success': False, 'error': 'Source must be a directory for CRON backup'}
+
+        # Convert protocol string to enum
+        protocol_map = {
+            'unc': TransferProtocol.UNC,
+            'smb': TransferProtocol.SMB,
+            'sftp': TransferProtocol.SFTP,
+            'ftp': TransferProtocol.FTP,
+            'ftps': TransferProtocol.FTPS,
+            'http': TransferProtocol.HTTP,
+            'https': TransferProtocol.HTTPS,
+        }
+
+        protocol_enum = protocol_map.get(rule.protocol.lower(), TransferProtocol.UNC)
+
+        # Create transfer config
+        config = TransferConfig(
+            protocol=protocol_enum,
+            host=rule.host,
+            port=rule.port,
+            username=rule.username,
+            password=rule.password,
+            encryption_enabled=True,
+            retry_count=3,
+            retry_delay=5,
+            timeout=300
+        )
+
+        rule.status = "transferring"
+
+        # Statistics
+        total_files = 0
+        transferred_files = 0
+        failed_files = 0
+        total_bytes = 0
+
+        try:
+            # Walk through directory recursively
+            for root, dirs, files in os.walk(source_path):
+                for filename in files:
+                    total_files += 1
+                    file_path = os.path.join(root, filename)
+
+                    # Calculate relative path from source
+                    rel_path = os.path.relpath(file_path, source_path)
+
+                    # Build destination path
+                    dest_base = rule.destination_path
+                    if not dest_base.endswith('/') and not dest_base.endswith('\\'):
+                        dest_base += '/'
+
+                    # Replace backslashes with forward slashes for destination
+                    rel_path_normalized = rel_path.replace('\\', '/')
+                    dest_file_path = dest_base + rel_path_normalized
+
+                    # Normalize destination path for UNC/SMB
+                    if not dest_file_path.startswith('//') and not dest_file_path.startswith('\\\\'):
+                        if protocol_enum in [TransferProtocol.SMB, TransferProtocol.UNC]:
+                            if not dest_file_path.startswith('/'):
+                                dest_file_path = f"//{rule.host}/{dest_file_path}"
+                            else:
+                                dest_file_path = f"//{rule.host}{dest_file_path}"
+
+                    logger.info(f"📤 Transferring [{transferred_files + 1}/{total_files}]: {rel_path}")
+
+                    try:
+                        # Get file size
+                        file_size = os.path.getsize(file_path)
+
+                        # Transfer file
+                        task_id = await self.mft_app.transfer_file(file_path, dest_file_path, config)
+
+                        # Wait for completion
+                        max_wait = 120  # Longer timeout for large files
+                        elapsed = 0
+                        poll_interval = 0.5
+
+                        while elapsed < max_wait:
+                            await asyncio.sleep(poll_interval)
+                            elapsed += poll_interval
+
+                            status = self.mft_app.get_transfer_status(task_id)
+                            if status:
+                                current_status = status.get('status', 'unknown')
+
+                                if current_status == 'completed':
+                                    transferred_files += 1
+                                    total_bytes += file_size
+                                    logger.info(f"   ✅ Success: {rel_path} ({file_size} bytes)")
+                                    break
+                                elif current_status == 'failed':
+                                    failed_files += 1
+                                    error_msg = status.get('error_message', 'Unknown error')
+                                    logger.error(f"   ❌ Failed: {rel_path} - {error_msg}")
+                                    break
+
+                        if elapsed >= max_wait:
+                            failed_files += 1
+                            logger.warning(f"   ⚠️ Timeout: {rel_path}")
+
+                    except Exception as e:
+                        failed_files += 1
+                        logger.error(f"   ❌ Error transferring {rel_path}: {e}")
+
+            # Update rule statistics
+            rule.files_transferred += transferred_files
+            rule.bytes_transferred += total_bytes
+            rule.last_transfer_time = datetime.now()
+            rule.last_run = datetime.now()
+            rule.status = "idle"
+
+            logger.info(f"\n{'='*80}")
+            logger.info(f"📁 CRON FOLDER BACKUP COMPLETED")
+            logger.info(f"{'='*80}")
+            logger.info(f"Total Files: {total_files}")
+            logger.info(f"Transferred: {transferred_files}")
+            logger.info(f"Failed: {failed_files}")
+            logger.info(f"Total Bytes: {total_bytes:,} ({total_bytes / (1024*1024):.2f} MB)")
+            logger.info(f"{'='*80}\n")
+
+            return {
+                'success': True,
+                'total_files': total_files,
+                'transferred_files': transferred_files,
+                'failed_files': failed_files,
+                'total_bytes': total_bytes
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Folder backup error: {e}")
+            import traceback
+            traceback.print_exc()
+            rule.status = "error"
+            return {'success': False, 'error': str(e)}
+
     def process_existing_files(self, rule_id: str):
         """Process existing files in source folder for a rule"""
         if rule_id not in self.rules:

@@ -160,7 +160,10 @@ class ADUser:
     can_download: bool = False
     can_delete: bool = False
     can_create_rules: bool = False
+    can_edit_rules: bool = False
     can_manage_users: bool = False
+    can_edit_permissions: bool = False
+    can_export_users: bool = False
     can_view_audit_logs: bool = False
     is_admin: bool = False
 
@@ -910,7 +913,10 @@ class ActiveDirectoryManager:
             can_download: Optional[bool] = None,
             can_delete: Optional[bool] = None,
             can_create_rules: Optional[bool] = None,
+            can_edit_rules: Optional[bool] = None,
             can_manage_users: Optional[bool] = None,
+            can_edit_permissions: Optional[bool] = None,
+            can_export_users: Optional[bool] = None,
             can_view_audit_logs: Optional[bool] = None,
             is_admin: Optional[bool] = None
     ):
@@ -926,8 +932,14 @@ class ActiveDirectoryManager:
                 user.can_delete = can_delete
             if can_create_rules is not None:
                 user.can_create_rules = can_create_rules
+            if can_edit_rules is not None:
+                user.can_edit_rules = can_edit_rules
             if can_manage_users is not None:
                 user.can_manage_users = can_manage_users
+            if can_edit_permissions is not None:
+                user.can_edit_permissions = can_edit_permissions
+            if can_export_users is not None:
+                user.can_export_users = can_export_users
             if can_view_audit_logs is not None:
                 user.can_view_audit_logs = can_view_audit_logs
             if is_admin is not None:

@@ -4,13 +4,20 @@ Complete integration with Active Directory and Compliance frameworks
 ENHANCED VERSION - Working search and permission editing
 """
 
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_cors import CORS
 import asyncio
 import uuid
 from datetime import datetime, timedelta
 import threading
 import logging
+import io
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # Import MFT application
 from mft_application import MFTApplication, TransferConfig, TransferProtocol
@@ -774,6 +781,7 @@ HTML_TEMPLATE = """
                     </select>
                     <button type="button" class="btn btn-primary" onclick="performSearch()">🔍 Search</button>
                     <button type="button" class="btn btn-secondary" onclick="clearSearch()">Clear</button>
+                    <button type="button" class="btn btn-success" onclick="exportUsersPDF()" style="margin-left: 10px;">📄 Export Users as PDF</button>
                 </div>
             </div>
             
@@ -1149,8 +1157,20 @@ HTML_TEMPLATE = """
                         <label>Can Create Rules</label>
                     </div>
                     <div class="permission-item">
+                        <input type="checkbox" id="perm-edit-rules">
+                        <label>Can Edit Rules</label>
+                    </div>
+                    <div class="permission-item">
                         <input type="checkbox" id="perm-manage-users">
                         <label>Can Manage Users</label>
+                    </div>
+                    <div class="permission-item">
+                        <input type="checkbox" id="perm-edit-permissions">
+                        <label>Can Edit Permissions</label>
+                    </div>
+                    <div class="permission-item">
+                        <input type="checkbox" id="perm-export-users">
+                        <label>Can Export Users</label>
                     </div>
                     <div class="permission-item">
                         <input type="checkbox" id="perm-view-audit">
@@ -1497,7 +1517,41 @@ HTML_TEMPLATE = """
             loadUsers();
             showMessage('users-message', 'Search cleared - showing all users', 'success');
         }
-        
+
+        // ✅ EXPORT USERS AS PDF
+        async function exportUsersPDF() {
+            try {
+                showMessage('users-message', 'Generating PDF export...', 'info');
+
+                const response = await fetch('/api/v1/users/export/pdf', {
+                    method: 'GET'
+                });
+
+                if (response.ok) {
+                    // Get the PDF blob
+                    const blob = await response.blob();
+
+                    // Create download link
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `MFT_Users_Export_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+
+                    showMessage('users-message', 'PDF export downloaded successfully', 'success');
+                } else {
+                    const data = await response.json();
+                    showMessage('users-message', 'Export failed: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (err) {
+                showMessage('users-message', 'Export failed: ' + err.message, 'error');
+                console.error('Export error:', err);
+            }
+        }
+
         // ✅ ASSIGN USER TO GROUP
         function showAssignToGroupModal(groupId, groupName) {
             document.getElementById('assign-group-id').value = groupId;
@@ -1618,7 +1672,10 @@ HTML_TEMPLATE = """
                     document.getElementById('perm-download').checked = user.can_download || false;
                     document.getElementById('perm-delete').checked = user.can_delete || false;
                     document.getElementById('perm-create-rules').checked = user.can_create_rules || false;
+                    document.getElementById('perm-edit-rules').checked = user.can_edit_rules || false;
                     document.getElementById('perm-manage-users').checked = user.can_manage_users || false;
+                    document.getElementById('perm-edit-permissions').checked = user.can_edit_permissions || false;
+                    document.getElementById('perm-export-users').checked = user.can_export_users || false;
                     document.getElementById('perm-view-audit').checked = user.can_view_audit_logs || false;
                     document.getElementById('perm-admin').checked = user.is_admin || false;
                     
@@ -1642,7 +1699,10 @@ HTML_TEMPLATE = """
                 can_download: document.getElementById('perm-download').checked,
                 can_delete: document.getElementById('perm-delete').checked,
                 can_create_rules: document.getElementById('perm-create-rules').checked,
+                can_edit_rules: document.getElementById('perm-edit-rules').checked,
                 can_manage_users: document.getElementById('perm-manage-users').checked,
+                can_edit_permissions: document.getElementById('perm-edit-permissions').checked,
+                can_export_users: document.getElementById('perm-export-users').checked,
                 can_view_audit_logs: document.getElementById('perm-view-audit').checked,
                 is_admin: document.getElementById('perm-admin').checked
             };
@@ -2085,8 +2145,11 @@ HTML_TEMPLATE = """
                                    onchange="toggleRule('${rule.rule_id}', this.checked)">  
                             <span class="toggle-slider"></span>  
                         </label>  
-                    </td>  
+                    </td>
                     <td>
+                        ${rule.schedule_type === 'cron' ?
+                            `<button class="btn btn-small btn-success" onclick="executeRule('${rule.rule_id}')" style="margin-right: 5px;" title="Run full folder backup now">▶️ Run Now</button>` :
+                            ''}
                         <button class="btn btn-small btn-primary" onclick="editRule('${rule.rule_id}')" style="margin-right: 5px;">Edit</button>
                         <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>
                     </td>
@@ -2129,6 +2192,27 @@ HTML_TEMPLATE = """
                     })
                     .catch(err => {
                         showMessage('rules-message', 'Failed to delete rule: ' + err.message, 'error');
+                    });
+            }
+        }
+
+        function executeRule(ruleId) {
+            if (confirm('Execute this CRON backup rule now? This will transfer the entire folder and all subfolders to the destination.')) {
+                showMessage('rules-message', 'Starting backup execution...', 'info');
+
+                fetch(`/api/v1/rules/${ruleId}/execute`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            showMessage('rules-message', data.message + ' - Check console for progress.', 'success');
+                            // Refresh rules table to show updated status
+                            setTimeout(() => loadRules(), 2000);
+                        } else {
+                            showMessage('rules-message', 'Failed to execute rule: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(err => {
+                        showMessage('rules-message', 'Failed to execute rule: ' + err.message, 'error');
                     });
             }
         }
@@ -2563,7 +2647,10 @@ def update_user_permissions(user_id):
             can_download=data.get('can_download'),
             can_delete=data.get('can_delete'),
             can_create_rules=data.get('can_create_rules'),
+            can_edit_rules=data.get('can_edit_rules'),
             can_manage_users=data.get('can_manage_users'),
+            can_edit_permissions=data.get('can_edit_permissions'),
+            can_export_users=data.get('can_export_users'),
             can_view_audit_logs=data.get('can_view_audit_logs'),
             is_admin=data.get('is_admin')
         )
@@ -2584,6 +2671,155 @@ def update_user_permissions(user_id):
         })
     except Exception as e:
         logger.error(f"Failed to update permissions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/users/export/pdf', methods=['GET'])
+def export_users_pdf():
+    """Export all users with permissions as PDF"""
+    try:
+        # Create a PDF in memory
+        buffer = io.BytesIO()
+
+        # Create the PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#2c3e50'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+
+        # Add title
+        title = Paragraph("MFT System - User Permissions Report", title_style)
+        elements.append(title)
+
+        # Add timestamp
+        timestamp = Paragraph(
+            f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            styles['Normal']
+        )
+        elements.append(timestamp)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Get all users
+        users = list(ad_manager.users.values())
+
+        # Add user count
+        summary = Paragraph(f"<b>Total Users:</b> {len(users)}", styles['Normal'])
+        elements.append(summary)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Create table data
+        table_data = [
+            ['Username', 'Display Name', 'Email', 'Department', 'Permissions']
+        ]
+
+        for user in users:
+            # Build permissions string
+            permissions = []
+            if user.can_upload:
+                permissions.append('Upload')
+            if user.can_download:
+                permissions.append('Download')
+            if user.can_delete:
+                permissions.append('Delete')
+            if user.can_create_rules:
+                permissions.append('Create Rules')
+            if user.can_edit_rules:
+                permissions.append('Edit Rules')
+            if user.can_manage_users:
+                permissions.append('Manage Users')
+            if user.can_edit_permissions:
+                permissions.append('Edit Permissions')
+            if user.can_export_users:
+                permissions.append('Export Users')
+            if user.can_view_audit_logs:
+                permissions.append('View Audit Logs')
+            if user.is_admin:
+                permissions.append('ADMIN')
+
+            perms_str = ', '.join(permissions) if permissions else 'None'
+
+            table_data.append([
+                user.username or '',
+                user.display_name or '',
+                user.email or '',
+                user.department or '',
+                perms_str
+            ])
+
+        # Create table
+        table = Table(table_data, colWidths=[1.2*inch, 1.5*inch, 1.8*inch, 1.2*inch, 2*inch])
+
+        # Style the table
+        table.setStyle(TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+
+            # Data rows
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ecf0f1')]),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+
+        elements.append(table)
+
+        # Add footer
+        elements.append(Spacer(1, 0.3*inch))
+        footer = Paragraph(
+            "<i>This report contains sensitive information. Handle with care.</i>",
+            styles['Normal']
+        )
+        elements.append(footer)
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        buffer.seek(0)
+
+        # Log the export
+        audit_manager.log_event(
+            AuditEventType.ACCESS_GRANTED,
+            f"User permissions exported to PDF ({len(users)} users)",
+            username="admin",
+            result="success"
+        )
+
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'MFT_Users_Export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to export users to PDF: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3407,6 +3643,69 @@ def delete_rule(rule_id):
 
     except Exception as e:
         logger.error(f"Failed to delete rule: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/rules/<rule_id>/execute', methods=['POST'])
+def execute_rule(rule_id):
+    """Execute a rule manually (primarily for CRON backup rules)"""
+    try:
+        if rule_id not in monitor_manager.rules:
+            return jsonify({'success': False, 'error': 'Rule not found'}), 404
+
+        rule = monitor_manager.rules[rule_id]
+
+        # Check if rule is enabled
+        if not rule.enabled:
+            return jsonify({'success': False, 'error': 'Rule is disabled'}), 400
+
+        # Execute based on schedule type
+        if rule.schedule_type == ScheduleType.CRON:
+            # For CRON rules, execute full folder backup
+            logger.info(f"🚀 Executing CRON backup rule: {rule.name}")
+
+            # Run the folder backup in a separate thread
+            import threading
+
+            def run_backup():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(monitor_manager.transfer_folder_recursive(rule))
+                    logger.info(f"Backup completed: {result}")
+                finally:
+                    loop.close()
+
+            backup_thread = threading.Thread(target=run_backup, daemon=True)
+            backup_thread.start()
+
+            return jsonify({
+                'success': True,
+                'message': f'CRON backup rule "{rule.name}" execution started',
+                'rule_type': 'cron_backup'
+            })
+
+        elif rule.schedule_type == ScheduleType.EVENT_DRIVEN:
+            # For event-driven rules, process existing files
+            logger.info(f"🚀 Processing existing files for rule: {rule.name}")
+            monitor_manager.process_existing_files(rule_id)
+
+            return jsonify({
+                'success': True,
+                'message': f'Event-driven rule "{rule.name}" processing started',
+                'rule_type': 'event_driven'
+            })
+
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Manual execution not supported for {rule.schedule_type.value} rules'
+            }), 400
+
+    except Exception as e:
+        logger.error(f"Failed to execute rule: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
