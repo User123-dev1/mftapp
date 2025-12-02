@@ -2816,16 +2816,19 @@ def export_users_pdf():
 
             perms_str = ', '.join(permissions) if permissions else 'None'
 
+            # Use Paragraph for permissions to enable text wrapping
+            perms_paragraph = Paragraph(perms_str, styles['Normal'])
+
             table_data.append([
                 user.username or '',
                 user.display_name or '',
                 user.email or '',
                 user.department or '',
-                perms_str
+                perms_paragraph  # Use Paragraph instead of plain string
             ])
 
-        # Create table
-        table = Table(table_data, colWidths=[1.2*inch, 1.5*inch, 1.8*inch, 1.2*inch, 2*inch])
+        # Create table with adjusted column widths (permissions column is wider)
+        table = Table(table_data, colWidths=[1*inch, 1.2*inch, 1.5*inch, 0.8*inch, 2.5*inch])
 
         # Style the table
         table.setStyle(TableStyle([
@@ -2834,7 +2837,7 @@ def export_users_pdf():
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
 
             # Data rows
@@ -2842,9 +2845,11 @@ def export_users_pdf():
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
             ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('TOPPADDING', (0, 1), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 1), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 4),
 
             # Alternating row colors
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ecf0f1')]),
@@ -2852,6 +2857,9 @@ def export_users_pdf():
             # Grid
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+
+            # Enable word wrap for all cells
+            ('WORDWRAP', (0, 0), (-1, -1), True),
         ]))
 
         elements.append(table)
