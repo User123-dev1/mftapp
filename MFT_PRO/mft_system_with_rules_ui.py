@@ -2086,10 +2086,11 @@ HTML_TEMPLATE = """
                             <span class="toggle-slider"></span>  
                         </label>  
                     </td>  
-                    <td>  
-                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>  
-                    </td>  
-                `;  
+                    <td>
+                        <button class="btn btn-small btn-primary" onclick="editRule('${rule.rule_id}')" style="margin-right: 5px;">Edit</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>
+                    </td>
+                `;
             });  
             
             console.log(`✅ Displayed ${data.rules.length} rules`);  
@@ -2130,6 +2131,44 @@ HTML_TEMPLATE = """
                         showMessage('rules-message', 'Failed to delete rule: ' + err.message, 'error');
                     });
             }
+        }
+
+        function editRule(ruleId) {
+            // Fetch rule details
+            fetch(`/api/v1/rules`)
+                .then(r => r.json())
+                .then(data => {
+                    const rule = data.rules.find(r => r.rule_id === ruleId);
+                    if (!rule) {
+                        showMessage('rules-message', 'Rule not found!', 'error');
+                        return;
+                    }
+
+                    // Populate form with rule data
+                    document.getElementById('rule-id').value = rule.rule_id;
+                    document.getElementById('rule-name').value = rule.name;
+                    document.getElementById('rule-source').value = rule.source_path;
+                    document.getElementById('rule-dest').value = rule.destination_path;
+                    document.getElementById('rule-pattern').value = rule.source_pattern || '*.*';
+                    document.getElementById('rule-protocol').value = rule.protocol || 'sftp';
+                    document.getElementById('rule-host').value = rule.host || '';
+                    document.getElementById('rule-port').value = rule.port || 22;
+                    document.getElementById('rule-username').value = rule.username || '';
+                    document.getElementById('rule-password').value = rule.password || '';
+                    document.getElementById('rule-schedule').value = rule.schedule_type || 'event_driven';
+                    document.getElementById('rule-trigger').value = rule.trigger_type || 'file_created';
+                    document.getElementById('rule-action').value = rule.action_type || 'copy';
+                    document.getElementById('rule-file-age').value = rule.file_age_seconds || 5;
+
+                    // Update modal title
+                    document.getElementById('modal-title').textContent = 'Edit Transfer Rule';
+
+                    // Show modal
+                    document.getElementById('rule-modal').style.display = 'block';
+                })
+                .catch(err => {
+                    showMessage('rules-message', 'Failed to load rule: ' + err.message, 'error');
+                });
         }
 
         function seedRules() {
@@ -3239,31 +3278,32 @@ def update_rule(rule_id):
             timeout=300
         )
 
-        # Create updated transfer rule
+        # Create updated transfer rule with correct fields
         rule = TransferRule(
+            rule_id=rule_id,  # Keep the same rule ID
             name=data.get('name'),
             source_path=data.get('source_path'),
             destination_path=data.get('destination_path'),
+            protocol=data.get('protocol', 'unc'),
+            host=data.get('host', ''),
+            port=data.get('port', 445),
+            username=data.get('username'),
+            password=data.get('password'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
-            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron')
         )
 
-        # Override the rule_id to keep the same ID
-        rule.rule_id = rule_id
-
         # Add updated rule to monitor manager
-        monitor_manager.rules[rule_id] = rule
-        monitor_manager.save_rules()
+        monitor_manager.add_rule(rule)
 
-        # Restart monitoring for this rule
-        monitor_manager.start_rule(rule_id)
+        # Sync servers for health monitoring
+        server_monitor.sync_servers_from_rules(monitor_manager.rules)
 
         # Log audit event
         audit_manager.log_event(
