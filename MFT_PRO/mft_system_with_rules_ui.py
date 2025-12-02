@@ -4,10 +4,12 @@ Complete integration with Active Directory and Compliance frameworks
 ENHANCED VERSION - Working search and permission editing
 """
 
-from flask import Flask, render_template_string, request, jsonify, send_file
+from flask import Flask, render_template_string, request, jsonify, send_file, session, redirect, url_for
 from flask_cors import CORS
+from functools import wraps
 import asyncio
 import uuid
+import os
 from datetime import datetime, timedelta
 import threading
 import logging
@@ -37,16 +39,23 @@ from compliance_system import (
 # Import state manager for multi-instance support
 from state_manager import StateManager
 
+# Import authentication manager
+from auth_manager import AuthenticationManager
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
+app.secret_key = 'mft-system-secret-key-change-this-in-production-' + os.urandom(24).hex()
 CORS(app)
 
 # Initialize State Manager for multi-instance support
 state_manager = StateManager()
+
+# Initialize Authentication Manager
+auth_manager = AuthenticationManager()
 
 # Initialize MFT application
 mft_app = MFTApplication()
@@ -147,6 +156,279 @@ ad_connection_status = {
     'last_test': None,
     'error_message': None
 }
+
+# ============================================================================
+# AUTHENTICATION DECORATOR
+# ============================================================================
+
+def login_required(f):
+    """Decorator to require authentication for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session_id = session.get('session_id')
+        if not session_id:
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+            return redirect(url_for('login_page'))
+
+        # Validate session
+        user_session = auth_manager.validate_session(session_id)
+        if not user_session:
+            session.clear()
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'Session expired'}), 401
+            return redirect(url_for('login_page'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================================
+# LOGIN PAGE HTML
+# ============================================================================
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MFT System - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 450px;
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-header h1 {
+            color: #667eea;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .login-header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .message.error {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .message.success {
+            background: #efe;
+            color: #3c3;
+            border: 1px solid #cfc;
+        }
+
+        .message.info {
+            background: #eef;
+            color: #33c;
+            border: 1px solid #ccf;
+        }
+
+        .account-type {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .account-type label {
+            display: inline-flex;
+            align-items: center;
+            margin: 0 15px;
+            cursor: pointer;
+        }
+
+        .account-type input[type="radio"] {
+            margin-right: 8px;
+        }
+
+        .divider {
+            text-align: center;
+            margin: 20px 0;
+            color: #999;
+            font-size: 12px;
+        }
+
+        .system-info {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .system-info strong {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>🔐 MFT System</h1>
+            <p>Managed File Transfer Platform</p>
+        </div>
+
+        <div id="message"></div>
+
+        <div class="account-type">
+            <label>
+                <input type="radio" name="account_type" value="local" checked>
+                Local Account
+            </label>
+            <label>
+                <input type="radio" name="account_type" value="domain">
+                Domain Account
+            </label>
+        </div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+
+            <button type="submit" class="login-btn">Login</button>
+        </form>
+
+        <div class="system-info">
+            <strong>Default System Admin:</strong><br>
+            Username: <code>sysadmin</code><br>
+            Password: <code>Admin@123</code><br>
+            <small style="color: #c33;">⚠️ Change password after first login</small>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('login-form');
+        const messageDiv = document.getElementById('message');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const accountType = document.querySelector('input[name="account_type"]:checked').value;
+
+            messageDiv.innerHTML = '<div class="message info">Authenticating...</div>';
+
+            try {
+                const response = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        account_type: accountType
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    messageDiv.innerHTML = '<div class="message success">Login successful! Redirecting...</div>';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    messageDiv.innerHTML = `<div class="message error">${data.error || 'Login failed'}</div>`;
+                }
+            } catch (err) {
+                messageDiv.innerHTML = `<div class="message error">Connection error: ${err.message}</div>`;
+            }
+        });
+    </script>
+</body>
+</html>
+"""
 
 # ============================================================================
 # ENHANCED HTML TEMPLATE WITH SEARCH AND FIXED PERMISSIONS
@@ -2489,10 +2771,193 @@ HTML_TEMPLATE = """
 """
 
 # ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@app.route('/login')
+def login_page():
+    """Login page"""
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route('/api/v1/auth/login', methods=['POST'])
+def login():
+    """Authenticate user"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        account_type = data.get('account_type', 'local')
+
+        if not username or not password:
+            return jsonify({
+                'success': False,
+                'error': 'Username and password required'
+            }), 400
+
+        ip_address = request.remote_addr
+
+        if account_type == 'local':
+            # Authenticate local user
+            result = auth_manager.authenticate_local(username, password, ip_address)
+        else:
+            # Authenticate domain user
+            result = auth_manager.authenticate_domain(username, password, ad_manager, ip_address)
+
+        if result['success']:
+            # Store session ID in Flask session
+            session['session_id'] = result['session_id']
+            session['username'] = result['user']['username']
+            session['is_admin'] = result['user'].get('is_admin', False)
+            session['is_domain_user'] = result['is_domain_user']
+
+            # Log audit event
+            audit_manager.log_event(
+                AuditEventType.USER_LOGIN,
+                f"User logged in: {username} ({account_type})",
+                username=username,
+                result="success",
+                details={'account_type': account_type, 'ip_address': ip_address}
+            )
+
+            return jsonify(result)
+        else:
+            # Log failed login
+            audit_manager.log_event(
+                AuditEventType.USER_LOGIN,
+                f"Failed login attempt: {username}",
+                username=username,
+                result="failure",
+                details={'account_type': account_type, 'error': result.get('error')}
+            )
+
+            return jsonify(result), 401
+
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Login failed'
+        }), 500
+
+@app.route('/api/v1/auth/logout', methods=['POST'])
+@login_required
+def logout():
+    """Logout user"""
+    try:
+        session_id = session.get('session_id')
+        username = session.get('username')
+
+        if session_id:
+            auth_manager.logout(session_id)
+
+        # Log audit event
+        audit_manager.log_event(
+            AuditEventType.USER_LOGOUT,
+            f"User logged out: {username}",
+            username=username,
+            result="success"
+        )
+
+        session.clear()
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logger.error(f"Logout error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Logout failed'
+        }), 500
+
+@app.route('/api/v1/auth/session', methods=['GET'])
+@login_required
+def get_session():
+    """Get current session info"""
+    try:
+        return jsonify({
+            'success': True,
+            'session': {
+                'username': session.get('username'),
+                'is_admin': session.get('is_admin'),
+                'is_domain_user': session.get('is_domain_user')
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get session error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local', methods=['GET'])
+@login_required
+def get_local_users():
+    """Get all local users (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        users = auth_manager.get_local_users()
+
+        return jsonify({
+            'success': True,
+            'users': users
+        })
+
+    except Exception as e:
+        logger.error(f"Get local users error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local', methods=['POST'])
+@login_required
+def create_local_user():
+    """Create new local user (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+
+        result = auth_manager.create_local_user(
+            username=data.get('username'),
+            password=data.get('password'),
+            full_name=data.get('full_name'),
+            email=data.get('email'),
+            is_admin=data.get('is_admin', False)
+        )
+
+        if result['success']:
+            audit_manager.log_event(
+                AuditEventType.USER_CREATED,
+                f"Local user created: {data.get('username')}",
+                username=session.get('username'),
+                result="success"
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Create user error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ============================================================================
 # API ENDPOINTS - KEEP ALL FROM ORIGINAL FILE
 # ============================================================================
 
 @app.route('/')
+@login_required
 def index():
     """Main page"""
     return render_template_string(HTML_TEMPLATE)
@@ -2626,10 +3091,15 @@ def sync_ad_users():
                 details=result
             )
 
+            # Disable local accounts (except system admin) when AD is synced
+            disable_result = auth_manager.disable_local_accounts(exclude_system_admin=True)
+            logger.info(f"🔒 Disabled {disable_result.get('disabled_count', 0)} local accounts (AD active)")
+
             return jsonify({
                 'success': True,
                 'users_synced': result['users_synced'],
-                'timestamp': result['timestamp']
+                'timestamp': result['timestamp'],
+                'local_accounts_disabled': disable_result.get('disabled_count', 0)
             })
         else:
             ad_connection_status['connected'] = False
