@@ -1374,6 +1374,7 @@ HTML_TEMPLATE = """
                     <th>Status</th>
                     <th>Created</th>
                     <th>Last Login</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -1756,10 +1757,15 @@ HTML_TEMPLATE = """
                             <td>${statusBadge}</td>
                             <td>${user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</td>
                             <td>${user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</td>
+                            <td>
+                                <button class="btn btn-small btn-primary" onclick="editLocalUserPermissions('${user.user_id}')">
+                                    🔐 Edit Permissions
+                                </button>
+                            </td>
                         `;
                     });
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No local users found</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #999;">No local users found</td></tr>';
                 }
             } catch (err) {
                 console.error('Failed to load local users:', err);
@@ -1831,6 +1837,44 @@ HTML_TEMPLATE = """
                 showLocalUsersMessage('Error creating user: ' + err.message, 'error');
             }
         });
+
+        // Edit local user permissions
+        async function editLocalUserPermissions(userId) {
+            try {
+                const response = await fetch(`/api/v1/auth/users/local/${userId}`);
+                const data = await response.json();
+
+                if (data.success && data.user) {
+                    const user = data.user;
+
+                    // Set user ID and username
+                    document.getElementById('perm-user-id').value = user.user_id;
+                    document.getElementById('perm-username').textContent = user.username;
+
+                    // Set a flag to indicate this is a local user
+                    document.getElementById('permissions-form').dataset.userType = 'local';
+
+                    // Populate permission checkboxes
+                    document.getElementById('perm-upload').checked = user.can_upload || false;
+                    document.getElementById('perm-download').checked = user.can_download || false;
+                    document.getElementById('perm-delete').checked = user.can_delete || false;
+                    document.getElementById('perm-create-rules').checked = user.can_create_rules || false;
+                    document.getElementById('perm-edit-rules').checked = user.can_edit_rules || false;
+                    document.getElementById('perm-manage-users').checked = user.can_manage_users || false;
+                    document.getElementById('perm-edit-permissions').checked = user.can_edit_permissions || false;
+                    document.getElementById('perm-export-users').checked = user.can_export_users || false;
+                    document.getElementById('perm-view-audit').checked = user.can_view_audit_logs || false;
+                    document.getElementById('perm-admin').checked = user.is_admin || false;
+
+                    // Show modal
+                    document.getElementById('permissions-modal').style.display = 'block';
+                } else {
+                    showLocalUsersMessage('Failed to load user: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (err) {
+                showLocalUsersMessage('Error loading user: ' + err.message, 'error');
+            }
+        }
         
         // Load dashboard statistics
         let performanceChart = null;
@@ -2234,13 +2278,17 @@ HTML_TEMPLATE = """
             }
         }
         
-        // ✅ FIXED EDIT USER PERMISSION
+        // ✅ FIXED EDIT USER PERMISSION (for AD users)
         function editUserPermission(userId) {
             fetch(`/api/v1/users/${userId}`)
                 .then(r => r.json())
                 .then(user => {
                     document.getElementById('perm-user-id').value = user.user_id;
                     document.getElementById('perm-username').textContent = user.username;
+
+                    // Set a flag to indicate this is an AD user
+                    document.getElementById('permissions-form').dataset.userType = 'ad';
+
                     document.getElementById('perm-upload').checked = user.can_upload || false;
                     document.getElementById('perm-download').checked = user.can_download || false;
                     document.getElementById('perm-delete').checked = user.can_delete || false;
@@ -2251,7 +2299,7 @@ HTML_TEMPLATE = """
                     document.getElementById('perm-export-users').checked = user.can_export_users || false;
                     document.getElementById('perm-view-audit').checked = user.can_view_audit_logs || false;
                     document.getElementById('perm-admin').checked = user.is_admin || false;
-                    
+
                     document.getElementById('permissions-modal').style.display = 'block';
                 })
                 .catch(err => {
@@ -2265,8 +2313,10 @@ HTML_TEMPLATE = """
         
         document.getElementById('permissions-form').addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const userId = document.getElementById('perm-user-id').value;
+            const userType = document.getElementById('permissions-form').dataset.userType || 'ad';
+
             const permissions = {
                 can_upload: document.getElementById('perm-upload').checked,
                 can_download: document.getElementById('perm-download').checked,
@@ -2279,20 +2329,35 @@ HTML_TEMPLATE = """
                 can_view_audit_logs: document.getElementById('perm-view-audit').checked,
                 is_admin: document.getElementById('perm-admin').checked
             };
-            
-            fetch(`/api/v1/users/${userId}/permissions`, {
+
+            // Determine API endpoint based on user type
+            const apiUrl = userType === 'local'
+                ? `/api/v1/auth/users/local/${userId}/permissions`
+                : `/api/v1/users/${userId}/permissions`;
+
+            fetch(apiUrl, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(permissions)
             })
             .then(r => r.json())
             .then(data => {
-                showMessage('users-message', 'Permissions updated successfully!', 'success');
-                closePermissionsModal();
-                loadUsers();
+                if (userType === 'local') {
+                    showLocalUsersMessage('Permissions updated successfully!', 'success');
+                    closePermissionsModal();
+                    loadLocalUsers();
+                } else {
+                    showMessage('users-message', 'Permissions updated successfully!', 'success');
+                    closePermissionsModal();
+                    loadUsers();
+                }
             })
             .catch(err => {
-                alert('Failed to update permissions: ' + err.message);
+                if (userType === 'local') {
+                    showLocalUsersMessage('Failed to update permissions: ' + err.message, 'error');
+                } else {
+                    alert('Failed to update permissions: ' + err.message);
+                }
             });
         });
         
@@ -3178,6 +3243,83 @@ def create_local_user():
 
     except Exception as e:
         logger.error(f"Create user error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local/<user_id>', methods=['GET'])
+@login_required
+def get_local_user(user_id):
+    """Get specific local user (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        user = auth_manager.get_local_user(user_id)
+
+        if user:
+            return jsonify({
+                'success': True,
+                'user': user.to_dict()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Get local user error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local/<user_id>/permissions', methods=['PUT'])
+@login_required
+def update_local_user_permissions(user_id):
+    """Update local user permissions (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+
+        result = auth_manager.update_local_user_permissions(
+            user_id,
+            can_upload=data.get('can_upload'),
+            can_download=data.get('can_download'),
+            can_delete=data.get('can_delete'),
+            can_create_rules=data.get('can_create_rules'),
+            can_edit_rules=data.get('can_edit_rules'),
+            can_manage_users=data.get('can_manage_users'),
+            can_edit_permissions=data.get('can_edit_permissions'),
+            can_export_users=data.get('can_export_users'),
+            can_view_audit_logs=data.get('can_view_audit_logs'),
+            is_admin=data.get('is_admin')
+        )
+
+        if result['success']:
+            user = auth_manager.get_local_user(user_id)
+            audit_manager.log_event(
+                AuditEventType.PERMISSION_GRANTED,
+                f"Permissions updated for local user {user.username}",
+                username=session.get('username'),
+                result="success",
+                details=data
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Update local user permissions error: {e}")
         return jsonify({
             'success': False,
             'error': str(e)

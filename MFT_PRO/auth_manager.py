@@ -31,6 +31,17 @@ class LocalUser:
     created_at: Optional[str] = None
     last_login: Optional[str] = None
 
+    # MFT Permissions (same as AD users)
+    can_upload: bool = False
+    can_download: bool = False
+    can_delete: bool = False
+    can_create_rules: bool = False
+    can_edit_rules: bool = False
+    can_manage_users: bool = False
+    can_edit_permissions: bool = False
+    can_export_users: bool = False
+    can_view_audit_logs: bool = False
+
     def to_dict(self) -> dict:
         """Convert to dictionary (excluding password hash)"""
         data = asdict(self)
@@ -208,6 +219,73 @@ class AuthenticationManager:
                 'success': False,
                 'error': str(e)
             }
+
+    def update_local_user_permissions(
+        self,
+        user_id: str,
+        can_upload: Optional[bool] = None,
+        can_download: Optional[bool] = None,
+        can_delete: Optional[bool] = None,
+        can_create_rules: Optional[bool] = None,
+        can_edit_rules: Optional[bool] = None,
+        can_manage_users: Optional[bool] = None,
+        can_edit_permissions: Optional[bool] = None,
+        can_export_users: Optional[bool] = None,
+        can_view_audit_logs: Optional[bool] = None,
+        is_admin: Optional[bool] = None
+    ) -> Dict:
+        """Update local user permissions"""
+        try:
+            with self.lock:
+                if user_id not in self.local_users:
+                    return {
+                        'success': False,
+                        'error': 'User not found'
+                    }
+
+                user = self.local_users[user_id]
+
+                # Update permissions
+                if can_upload is not None:
+                    user.can_upload = can_upload
+                if can_download is not None:
+                    user.can_download = can_download
+                if can_delete is not None:
+                    user.can_delete = can_delete
+                if can_create_rules is not None:
+                    user.can_create_rules = can_create_rules
+                if can_edit_rules is not None:
+                    user.can_edit_rules = can_edit_rules
+                if can_manage_users is not None:
+                    user.can_manage_users = can_manage_users
+                if can_edit_permissions is not None:
+                    user.can_edit_permissions = can_edit_permissions
+                if can_export_users is not None:
+                    user.can_export_users = can_export_users
+                if can_view_audit_logs is not None:
+                    user.can_view_audit_logs = can_view_audit_logs
+                if is_admin is not None:
+                    user.is_admin = is_admin
+
+                self._save_users()
+
+                logger.info(f"✅ Updated permissions for local user: {user.username}")
+
+                return {
+                    'success': True,
+                    'user': user.to_dict()
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to update permissions: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def get_local_user(self, user_id: str) -> Optional[LocalUser]:
+        """Get a specific local user by ID"""
+        return self.local_users.get(user_id)
 
     def disable_local_accounts(self, exclude_system_admin: bool = True):
         """
