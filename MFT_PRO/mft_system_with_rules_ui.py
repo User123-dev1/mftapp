@@ -944,10 +944,12 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="showTab('history')">📋 History</div>
             <div class="tab" onclick="showTab('rules')">⚙️ Transfer Rules</div>
             <div class="tab" onclick="showTab('users')">👥 Users</div>
+            <div class="tab" onclick="showTab('local-users')" id="local-users-tab" style="display: none;">👤 Local Users</div>
             <div class="tab" onclick="showTab('ad')">🔐 Active Directory</div>
             <div class="tab" onclick="showTab('compliance')">✅ Compliance</div>
             <div class="tab" onclick="showTab('audit')">📝 Audit Log</div>
             <div class="tab" onclick="showTab('activity')">📡 Activity Log</div>
+            <div class="tab" onclick="logout()" style="margin-left: auto; background: #e74c3c;">🚪 Logout</div>
         </div>
         
         <!-- Dashboard Tab -->
@@ -1340,6 +1342,44 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- Local Users Tab (Admin Only) -->
+    <div id="local-users-tab" class="tab-content">
+        <h2>Local User Accounts</h2>
+        <div id="local-users-message" class="message"></div>
+
+        <div class="info-box" style="margin-bottom: 20px;">
+            <h3>ℹ️ Local Users Information</h3>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li><strong>System Admin</strong> account cannot be disabled</li>
+                <li>Local accounts are <strong>automatically disabled</strong> when Active Directory is synced</li>
+                <li>When AD is active, users must login with domain credentials</li>
+                <li>Local accounts (except system admin) are <strong>re-enabled</strong> if AD disconnects</li>
+            </ul>
+        </div>
+
+        <button class="btn btn-success" onclick="showCreateUserModal()" style="margin-bottom: 20px;">
+            ➕ Create Local User
+        </button>
+        <button class="btn btn-secondary" onclick="loadLocalUsers()">
+            🔄 Refresh
+        </button>
+
+        <table id="local-users-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Last Login</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
     <!-- CREATE/EDIT RULE MODAL -->
     <div id="rule-modal" class="modal">
         <div class="modal-content">
@@ -1572,7 +1612,54 @@ HTML_TEMPLATE = """
             </form>
         </div>
     </div>
-    
+
+    <!-- CREATE LOCAL USER MODAL -->
+    <div id="create-user-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create Local User</h2>
+                <span class="close" onclick="closeCreateUserModal()">&times;</span>
+            </div>
+
+            <form id="create-user-form">
+                <div class="form-group">
+                    <label>Username: *</label>
+                    <input type="text" id="new-username" placeholder="Enter username" required>
+                    <div class="help-text">Lowercase, no spaces</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Password: *</label>
+                    <input type="password" id="new-password" placeholder="Enter password" required>
+                    <div class="help-text">Minimum 8 characters</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Full Name: *</label>
+                    <input type="text" id="new-fullname" placeholder="Enter full name" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Email:</label>
+                    <input type="email" id="new-email" placeholder="user@company.com">
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="new-is-admin">
+                        Administrator
+                    </label>
+                    <div class="help-text">Grant admin privileges</div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-success">➕ Create User</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateUserModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // ✅ Global variables for user/group data
         let allUsers = [];
@@ -1582,16 +1669,18 @@ HTML_TEMPLATE = """
         function showTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
+
             event.target.classList.add('active');
             document.getElementById(tabName + '-tab').classList.add('active');
-            
+
             if (tabName === 'rules') {
                 loadRules();
             } else if (tabName === 'history') {
                 loadHistory();
             } else if (tabName === 'users') {
                 loadUsers();
+            } else if (tabName === 'local-users') {
+                loadLocalUsers();
             } else if (tabName === 'dashboard') {
                 loadDashboard();
             } else if (tabName === 'ad') {
@@ -1604,6 +1693,141 @@ HTML_TEMPLATE = """
                 loadActivityLog();
             }
         }
+
+        // Logout function
+        async function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                try {
+                    await fetch('/api/v1/auth/logout', { method: 'POST' });
+                    window.location.href = '/login';
+                } catch (err) {
+                    console.error('Logout error:', err);
+                    window.location.href = '/login';
+                }
+            }
+        }
+
+        // Check session and show admin tabs
+        async function checkSession() {
+            try {
+                const response = await fetch('/api/v1/auth/session');
+                const data = await response.json();
+
+                if (data.success && data.session.is_admin) {
+                    // Show local users tab for admins
+                    document.getElementById('local-users-tab').style.display = 'block';
+                }
+            } catch (err) {
+                console.error('Session check error:', err);
+            }
+        }
+
+        // Load local users
+        async function loadLocalUsers() {
+            try {
+                const response = await fetch('/api/v1/auth/users/local');
+                const data = await response.json();
+
+                const tbody = document.querySelector('#local-users-table tbody');
+                tbody.innerHTML = '';
+
+                if (data.success && data.users && data.users.length > 0) {
+                    data.users.forEach(user => {
+                        const row = tbody.insertRow();
+
+                        const statusBadge = user.is_active ?
+                            '<span class="status-badge status-enabled">Active</span>' :
+                            '<span class="status-badge status-disabled">Disabled</span>';
+
+                        const userType = user.is_system_admin ?
+                            '<span class="status-badge" style="background: #e74c3c; color: white;">System Admin</span>' :
+                            user.is_admin ?
+                                '<span class="status-badge" style="background: #f39c12;">Admin</span>' :
+                                '<span class="status-badge" style="background: #95a5a6;">User</span>';
+
+                        row.innerHTML = `
+                            <td><strong>${user.username}</strong></td>
+                            <td>${user.full_name || ''}</td>
+                            <td>${user.email || ''}</td>
+                            <td>${userType}</td>
+                            <td>${statusBadge}</td>
+                            <td>${user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</td>
+                            <td>${user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</td>
+                        `;
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No local users found</td></tr>';
+                }
+            } catch (err) {
+                console.error('Failed to load local users:', err);
+                showLocalUsersMessage('Failed to load local users: ' + err.message, 'error');
+            }
+        }
+
+        // Show create user modal
+        function showCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'block';
+            // Clear form
+            document.getElementById('create-user-form').reset();
+        }
+
+        // Close create user modal
+        function closeCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'none';
+        }
+
+        // Show message in local users tab
+        function showLocalUsersMessage(msg, type) {
+            const messageDiv = document.getElementById('local-users-message');
+            messageDiv.innerHTML = `<div class="message ${type}">${msg}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Create local user form submission
+        document.getElementById('create-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('new-username').value;
+            const password = document.getElementById('new-password').value;
+            const fullName = document.getElementById('new-fullname').value;
+            const email = document.getElementById('new-email').value;
+            const isAdmin = document.getElementById('new-is-admin').checked;
+
+            if (password.length < 8) {
+                showLocalUsersMessage('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/auth/users/local', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        full_name: fullName,
+                        email: email,
+                        is_admin: isAdmin
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showLocalUsersMessage(`User "${username}" created successfully!`, 'success');
+                    closeCreateUserModal();
+                    loadLocalUsers();
+                } else {
+                    showLocalUsersMessage('Failed to create user: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showLocalUsersMessage('Error creating user: ' + err.message, 'error');
+            }
+        });
         
         // Load dashboard statistics
         let performanceChart = null;
@@ -2765,6 +2989,10 @@ HTML_TEMPLATE = """
                 loadRules();
             }
         }, 10000);
+
+        // Initialize on page load
+        checkSession();
+        loadDashboard();
     </script>
 </body>
 </html>
