@@ -519,11 +519,13 @@ HTML_TEMPLATE = """
             display: none;
             position: absolute;
             background-color: white;
-            min-width: 200px;
+            min-width: 220px;
             box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
             z-index: 1000;
             border-radius: 4px;
-            margin-top: 3px;
+            margin-top: 0;
+            left: 0;
+            top: 100%;
         }
 
         .dropdown-content a {
@@ -533,18 +535,24 @@ HTML_TEMPLATE = """
             display: block;
             cursor: pointer;
             transition: background 0.2s;
+            border-bottom: 1px solid #eee;
+        }
+
+        .dropdown-content a:last-child {
+            border-bottom: none;
         }
 
         .dropdown-content a:hover {
             background-color: #f1f1f1;
+            color: #667eea;
         }
 
-        .dropdown:hover .dropdown-content {
+        .dropdown.open .dropdown-content {
             display: block;
         }
 
-        .dropdown:hover .tab {
-            background: #e8e8e8;
+        .dropdown .tab {
+            user-select: none;
         }
 
         .tab-content {
@@ -983,30 +991,30 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="showTab('rules')">⚙️ Rules</div>
 
             <!-- Settings Dropdown -->
-            <div class="dropdown">
-                <div class="tab">⚙️ Settings ▾</div>
+            <div class="dropdown" id="settings-dropdown">
+                <div class="tab" onclick="toggleDropdown(event, 'settings-dropdown')">⚙️ Settings ▾</div>
                 <div class="dropdown-content">
-                    <a onclick="showTab('users')">👥 AD Users & Groups</a>
-                    <a onclick="showTab('local-users')" id="local-users-menu-item" style="display: none;">👤 Local Users</a>
-                    <a onclick="showTab('ad')">🔐 Active Directory</a>
-                    <a onclick="showTab('compliance')">✅ Compliance</a>
+                    <a onclick="showTab('users'); closeAllDropdowns()">👥 AD Users & Groups</a>
+                    <a onclick="showTab('local-users'); closeAllDropdowns()" id="local-users-menu-item" style="display: none;">👤 Local Users</a>
+                    <a onclick="showTab('ad'); closeAllDropdowns()">🔐 Active Directory</a>
+                    <a onclick="showTab('compliance'); closeAllDropdowns()">✅ Compliance</a>
                 </div>
             </div>
 
             <!-- Logs Dropdown -->
-            <div class="dropdown">
-                <div class="tab">📝 Logs ▾</div>
+            <div class="dropdown" id="logs-dropdown">
+                <div class="tab" onclick="toggleDropdown(event, 'logs-dropdown')">📝 Logs ▾</div>
                 <div class="dropdown-content">
-                    <a onclick="showTab('audit')">📝 Audit Log</a>
-                    <a onclick="showTab('activity')">📡 Activity Log</a>
+                    <a onclick="showTab('audit'); closeAllDropdowns()">📝 Audit Log</a>
+                    <a onclick="showTab('activity'); closeAllDropdowns()">📡 Activity Log</a>
                 </div>
             </div>
 
             <!-- Admin Dropdown (admin only) -->
-            <div class="dropdown" id="admin-menu" style="display: none;">
-                <div class="tab">🔧 Admin ▾</div>
+            <div class="dropdown" id="admin-dropdown" style="display: none;">
+                <div class="tab" onclick="toggleDropdown(event, 'admin-dropdown')">🔧 Admin ▾</div>
                 <div class="dropdown-content">
-                    <a onclick="showShutdownModal()">⛔ Shutdown Server</a>
+                    <a onclick="showShutdownModal(); closeAllDropdowns()">⛔ Shutdown Server</a>
                 </div>
             </div>
 
@@ -1768,12 +1776,44 @@ HTML_TEMPLATE = """
         let allUsers = [];
         let currentSearchType = 'users';
         
+        // Dropdown toggle functionality
+        function toggleDropdown(event, dropdownId) {
+            event.stopPropagation();
+            const dropdown = document.getElementById(dropdownId);
+            const isOpen = dropdown.classList.contains('open');
+
+            // Close all dropdowns first
+            closeAllDropdowns();
+
+            // Toggle the clicked dropdown
+            if (!isOpen) {
+                dropdown.classList.add('open');
+            }
+        }
+
+        function closeAllDropdowns() {
+            document.querySelectorAll('.dropdown').forEach(dropdown => {
+                dropdown.classList.remove('open');
+            });
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.dropdown')) {
+                closeAllDropdowns();
+            }
+        });
+
         // Tab switching
         function showTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
-            event.target.classList.add('active');
+            // Only try to set active on event.target if event exists
+            if (typeof event !== 'undefined' && event.target && event.target.classList.contains('tab')) {
+                event.target.classList.add('active');
+            }
+
             document.getElementById(tabName + '-tab').classList.add('active');
 
             if (tabName === 'rules') {
@@ -1823,10 +1863,10 @@ HTML_TEMPLATE = """
                         localUsersMenuItem.style.display = 'block';
                     }
 
-                    // Show admin menu for admins
-                    const adminMenu = document.getElementById('admin-menu');
-                    if (adminMenu) {
-                        adminMenu.style.display = 'inline-block';
+                    // Show admin dropdown for admins
+                    const adminDropdown = document.getElementById('admin-dropdown');
+                    if (adminDropdown) {
+                        adminDropdown.style.display = 'inline-block';
                     }
                 }
             } catch (err) {
