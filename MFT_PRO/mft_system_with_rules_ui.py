@@ -485,9 +485,9 @@ HTML_TEMPLATE = """
             border-bottom: 2px solid #ddd;
             overflow-x: auto;
         }
-        
+
         .tab {
-            flex: 1;
+            flex: 0 0 auto;
             padding: 15px 20px;
             text-align: center;
             cursor: pointer;
@@ -496,13 +496,12 @@ HTML_TEMPLATE = """
             transition: all 0.3s;
             border-bottom: 3px solid transparent;
             white-space: nowrap;
-            min-width: 120px;
         }
-        
+
         .tab:hover {
             background: #e8e8e8;
         }
-        
+
         .tab.active {
             color: #667eea;
             border-bottom-color: #667eea;
@@ -512,7 +511,7 @@ HTML_TEMPLATE = """
         /* Dropdown menu styles */
         .dropdown {
             position: relative;
-            display: inline-block;
+            flex: 0 0 auto;
         }
 
         .dropdown-content {
@@ -521,7 +520,7 @@ HTML_TEMPLATE = """
             background-color: white;
             min-width: 220px;
             box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            z-index: 1000;
+            z-index: 9999;
             border-radius: 4px;
             margin-top: 0;
             left: 0;
