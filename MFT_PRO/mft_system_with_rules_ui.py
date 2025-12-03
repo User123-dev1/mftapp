@@ -508,7 +508,45 @@ HTML_TEMPLATE = """
             border-bottom-color: #667eea;
             background: white;
         }
-        
+
+        /* Dropdown menu styles */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: white;
+            min-width: 200px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1000;
+            border-radius: 4px;
+            margin-top: 3px;
+        }
+
+        .dropdown-content a {
+            color: #333;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .dropdown-content a:hover {
+            background-color: #f1f1f1;
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+
+        .dropdown:hover .tab {
+            background: #e8e8e8;
+        }
+
         .tab-content {
             display: none;
             padding: 30px;
@@ -940,15 +978,38 @@ HTML_TEMPLATE = """
         
         <div class="tabs">
             <div class="tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
-            <div class="tab" onclick="showTab('transfer')">📤 New Transfer</div>
+            <div class="tab" onclick="showTab('transfer')">📤 Transfer</div>
             <div class="tab" onclick="showTab('history')">📋 History</div>
-            <div class="tab" onclick="showTab('rules')">⚙️ Transfer Rules</div>
-            <div class="tab" onclick="showTab('users')">👥 Users</div>
-            <div class="tab" onclick="showTab('local-users')" id="local-users-tab-button" style="display: none;">👤 Local Users</div>
-            <div class="tab" onclick="showTab('ad')">🔐 Active Directory</div>
-            <div class="tab" onclick="showTab('compliance')">✅ Compliance</div>
-            <div class="tab" onclick="showTab('audit')">📝 Audit Log</div>
-            <div class="tab" onclick="showTab('activity')">📡 Activity Log</div>
+            <div class="tab" onclick="showTab('rules')">⚙️ Rules</div>
+
+            <!-- Settings Dropdown -->
+            <div class="dropdown">
+                <div class="tab">⚙️ Settings ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showTab('users')">👥 AD Users & Groups</a>
+                    <a onclick="showTab('local-users')" id="local-users-menu-item" style="display: none;">👤 Local Users</a>
+                    <a onclick="showTab('ad')">🔐 Active Directory</a>
+                    <a onclick="showTab('compliance')">✅ Compliance</a>
+                </div>
+            </div>
+
+            <!-- Logs Dropdown -->
+            <div class="dropdown">
+                <div class="tab">📝 Logs ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showTab('audit')">📝 Audit Log</a>
+                    <a onclick="showTab('activity')">📡 Activity Log</a>
+                </div>
+            </div>
+
+            <!-- Admin Dropdown (admin only) -->
+            <div class="dropdown" id="admin-menu" style="display: none;">
+                <div class="tab">🔧 Admin ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showShutdownModal()">⛔ Shutdown Server</a>
+                </div>
+            </div>
+
             <div class="tab" onclick="logout()" style="margin-left: auto; background: #e74c3c;">🚪 Logout</div>
         </div>
         
@@ -1661,6 +1722,47 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- SHUTDOWN CONFIRMATION MODAL -->
+    <div id="shutdown-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⛔ Shutdown Server</h2>
+                <span class="close" onclick="closeShutdownModal()">&times;</span>
+            </div>
+
+            <div class="info-box" style="margin-bottom: 20px; background: #fff3cd; border-left: 4px solid #ffc107;">
+                <h3>⚠️ Warning</h3>
+                <p>Shutting down the server will:</p>
+                <ul style="margin-top: 10px; padding-left: 20px;">
+                    <li>Stop all active file transfers</li>
+                    <li>Disconnect all users</li>
+                    <li>Disable monitoring until restart</li>
+                </ul>
+                <p style="margin-top: 10px;"><strong>This action requires administrator authentication.</strong></p>
+            </div>
+
+            <form id="shutdown-form">
+                <div class="form-group">
+                    <label>Admin Password: *</label>
+                    <input type="password" id="shutdown-password" placeholder="Enter admin password" required>
+                    <div class="help-text">Enter your admin password to confirm</div>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="shutdown-confirm" required>
+                        I understand this will stop the MFT server
+                    </label>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn" style="background: #e74c3c;">⛔ Shutdown Server</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeShutdownModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // ✅ Global variables for user/group data
         let allUsers = [];
@@ -1708,17 +1810,23 @@ HTML_TEMPLATE = """
             }
         }
 
-        // Check session and show admin tabs
+        // Check session and show admin menus
         async function checkSession() {
             try {
                 const response = await fetch('/api/v1/auth/session');
                 const data = await response.json();
 
                 if (data.success && data.session.is_admin) {
-                    // Show local users tab for admins
-                    const localUsersTabButton = document.getElementById('local-users-tab-button');
-                    if (localUsersTabButton) {
-                        localUsersTabButton.style.display = 'block';
+                    // Show local users menu item for admins
+                    const localUsersMenuItem = document.getElementById('local-users-menu-item');
+                    if (localUsersMenuItem) {
+                        localUsersMenuItem.style.display = 'block';
+                    }
+
+                    // Show admin menu for admins
+                    const adminMenu = document.getElementById('admin-menu');
+                    if (adminMenu) {
+                        adminMenu.style.display = 'inline-block';
                     }
                 }
             } catch (err) {
@@ -1875,7 +1983,58 @@ HTML_TEMPLATE = """
                 showLocalUsersMessage('Error loading user: ' + err.message, 'error');
             }
         }
-        
+
+        // Shutdown modal functions
+        function showShutdownModal() {
+            document.getElementById('shutdown-modal').style.display = 'block';
+            // Clear form
+            document.getElementById('shutdown-form').reset();
+        }
+
+        function closeShutdownModal() {
+            document.getElementById('shutdown-modal').style.display = 'none';
+        }
+
+        // Shutdown form submission
+        document.getElementById('shutdown-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const password = document.getElementById('shutdown-password').value;
+            const confirmed = document.getElementById('shutdown-confirm').checked;
+
+            if (!confirmed) {
+                alert('Please confirm you understand the consequences of shutting down the server');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/admin/shutdown', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    closeShutdownModal();
+                    alert('✅ Server is shutting down. The application will close in a few seconds.');
+                    // Redirect to a shutdown page or login page
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                } else {
+                    alert('❌ Shutdown failed: ' + (data.error || 'Invalid password'));
+                }
+            } catch (err) {
+                alert('❌ Error during shutdown: ' + err.message);
+            }
+        });
+
         // Load dashboard statistics
         let performanceChart = null;
 
@@ -4901,8 +5060,88 @@ def seed_rules():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/v1/admin/shutdown', methods=['POST'])
+@login_required
+def shutdown_server():
+    """Shutdown the MFT server (admin only with password verification)"""
+    try:
+        # Check if user is admin
+        session_id = session.get('session_id')
+        user_session = auth_manager.validate_session(session_id)
 
-    # ============================================================================
+        if not user_session or not user_session.is_admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+        password = data.get('password')
+
+        if not password:
+            return jsonify({
+                'success': False,
+                'error': 'Password required'
+            }), 400
+
+        # Verify admin password
+        username = user_session.username
+        is_domain_user = user_session.is_domain_user
+
+        # Authenticate the admin user again
+        if is_domain_user:
+            # For domain users, we can't verify password again easily
+            # So we'll just check if they're admin
+            logger.warning(f"⚠️ Domain admin {username} initiated shutdown without password re-verification")
+        else:
+            # For local users, verify password
+            result = auth_manager.authenticate_local(username, password)
+            if not result['success']:
+                logger.warning(f"❌ Failed shutdown attempt by {username}: Invalid password")
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid password'
+                }), 401
+
+        # Log the shutdown event
+        audit_manager.log_event(
+            AuditEventType.CONFIG_CHANGED,
+            f"Server shutdown initiated by admin {username}",
+            username=username,
+            result="success",
+            details={'action': 'shutdown'}
+        )
+
+        logger.warning(f"🛑 SERVER SHUTDOWN INITIATED BY: {username}")
+        logger.warning("🛑 Shutting down in 2 seconds...")
+
+        # Shutdown the Flask server
+        def shutdown():
+            import time
+            time.sleep(2)
+            import os
+            import signal
+            os.kill(os.getpid(), signal.SIGINT)
+
+        # Start shutdown in background
+        import threading
+        shutdown_thread = threading.Thread(target=shutdown)
+        shutdown_thread.daemon = True
+        shutdown_thread.start()
+
+        return jsonify({
+            'success': True,
+            'message': 'Server is shutting down'
+        })
+
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
