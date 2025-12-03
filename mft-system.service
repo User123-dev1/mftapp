@@ -1,0 +1,40 @@
+[Unit]
+Description=MFT Professional System
+Documentation=https://github.com/yourorg/mftapp
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/mft-system
+Environment="PATH=/opt/mft-system/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/etc/mft-system/config.env
+ExecStart=/opt/mft-system/venv/bin/python /opt/mft-system/mft_system_with_rules_ui.py
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mft-system /var/log/mft-system
+
+# Logging
+StandardOutput=append:/var/log/mft-system/mft-system.log
+StandardError=append:/var/log/mft-system/mft-system-error.log
+SyslogIdentifier=mft-system
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
