@@ -944,7 +944,7 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="showTab('history')">📋 History</div>
             <div class="tab" onclick="showTab('rules')">⚙️ Transfer Rules</div>
             <div class="tab" onclick="showTab('users')">👥 Users</div>
-            <div class="tab" onclick="showTab('local-users')" id="local-users-tab" style="display: none;">👤 Local Users</div>
+            <div class="tab" onclick="showTab('local-users')" id="local-users-tab-button" style="display: none;">👤 Local Users</div>
             <div class="tab" onclick="showTab('ad')">🔐 Active Directory</div>
             <div class="tab" onclick="showTab('compliance')">✅ Compliance</div>
             <div class="tab" onclick="showTab('audit')">📝 Audit Log</div>
@@ -1715,7 +1715,10 @@ HTML_TEMPLATE = """
 
                 if (data.success && data.session.is_admin) {
                     // Show local users tab for admins
-                    document.getElementById('local-users-tab').style.display = 'block';
+                    const localUsersTabButton = document.getElementById('local-users-tab-button');
+                    if (localUsersTabButton) {
+                        localUsersTabButton.style.display = 'block';
+                    }
                 }
             } catch (err) {
                 console.error('Session check error:', err);
