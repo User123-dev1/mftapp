@@ -31,12 +31,36 @@ REM Check Python version
 for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PYTHON_VERSION=%%i
 echo Found Python: %PYTHON_VERSION%
 
+REM Check if MFT_PRO folder exists
+if not exist "MFT_PRO" (
+    echo ERROR: MFT_PRO folder not found!
+    echo.
+    echo Please make sure you are running this script from the extracted folder.
+    echo.
+    echo Expected folder structure:
+    echo   mft-system-v1.0.0\
+    echo   ├── MFT_PRO\
+    echo   ├── install.bat  ^(you are here^)
+    echo   └── other files...
+    echo.
+    echo Current directory: %CD%
+    echo.
+    pause
+    exit /b 1
+)
+
 REM Create installation directory
 set INSTALL_DIR=C:\Program Files\MFT-System
 echo.
 echo Creating installation directory: %INSTALL_DIR%
 mkdir "%INSTALL_DIR%" 2>nul
+echo Copying files...
 xcopy /E /I /Y MFT_PRO "%INSTALL_DIR%"
+if %errorLevel% neq 0 (
+    echo ERROR: Failed to copy files
+    pause
+    exit /b 1
+)
 
 REM Create virtual environment
 echo.
