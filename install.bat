@@ -2,9 +2,14 @@
 REM MFT Professional System - Windows Installation Script
 REM Usage: Run as Administrator
 
+REM Change to the directory where this script is located
+cd /d "%~dp0"
+
 echo ========================================
 echo MFT Professional System - Installer
 echo ========================================
+echo.
+echo Working directory: %CD%
 echo.
 
 REM Check for admin privileges
