@@ -67,6 +67,16 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
+REM Copy launcher scripts and icon
+echo Copying launcher scripts...
+if exist "launch_mft_hidden.vbs" copy /Y launch_mft_hidden.vbs "%INSTALL_DIR%"
+if exist "mft_icon.ico" (
+    copy /Y mft_icon.ico "%INSTALL_DIR%"
+    echo Custom icon copied
+) else (
+    echo Note: No custom icon found. Using default icon.
+)
+
 REM Create virtual environment
 echo.
 echo Creating Python virtual environment...
@@ -141,17 +151,43 @@ echo Checking for NSSM (for Windows service installation)...
 where nssm >nul 2>&1
 if %errorLevel% equ 0 (
     echo NSSM found. Installing Windows service...
-    nssm install MFT-System "%INSTALL_DIR%\venv\Scripts\python.exe" "%INSTALL_DIR%\mft_system_with_rules_ui.py"
+
+    REM Remove service if it already exists
+    nssm stop MFT-System >nul 2>&1
+    nssm remove MFT-System confirm >nul 2>&1
+
+    REM Install the service
+    nssm install MFT-System "%INSTALL_DIR%\venv\Scripts\pythonw.exe" "%INSTALL_DIR%\mft_system_with_rules_ui.py"
     nssm set MFT-System AppDirectory "%INSTALL_DIR%"
     nssm set MFT-System DisplayName "MFT Professional System"
     nssm set MFT-System Description "Managed File Transfer System with Enterprise Features"
     nssm set MFT-System Start SERVICE_AUTO_START
     nssm set MFT-System AppStdout "C:\ProgramData\MFT-System\logs\mft-system.log"
     nssm set MFT-System AppStderr "C:\ProgramData\MFT-System\logs\mft-system-error.log"
+
+    REM Set service to restart on failure
+    nssm set MFT-System AppExit Default Restart
+    nssm set MFT-System AppRestartDelay 5000
+
     echo Service installed successfully!
+
+    REM Start the service automatically
+    echo Starting MFT System service...
+    net start MFT-System
+    if %errorLevel% equ 0 (
+        echo Service started successfully!
+        echo The MFT System is now running in the background.
+    ) else (
+        echo Warning: Service installed but failed to start.
+        echo You can start it manually with: net start MFT-System
+    )
 ) else (
     echo NSSM not found. Skipping service installation.
-    echo To install as a service, download NSSM from https://nssm.cc/
+    echo.
+    echo To install as a Windows service:
+    echo 1. Download NSSM from https://nssm.cc/
+    echo 2. Extract nssm.exe to C:\Windows\System32\
+    echo 3. Re-run this installer
 )
 
 REM Create firewall rule
@@ -167,8 +203,20 @@ if %errorLevel% equ 0 (
 REM Create desktop shortcut
 echo.
 echo Creating desktop shortcuts...
-set SCRIPT_PATH=%~dp0
-powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\start-mft-system.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Save()"
+if exist "%INSTALL_DIR%\launch_mft_hidden.vbs" (
+    REM Create shortcut with hidden launcher
+    if exist "%INSTALL_DIR%\mft_icon.ico" (
+        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_hidden.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.IconLocation='%INSTALL_DIR%\mft_icon.ico';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
+        echo Desktop shortcut created with custom icon (hidden console)
+    ) else (
+        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_hidden.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
+        echo Desktop shortcut created (hidden console)
+    )
+) else (
+    REM Fallback to batch file launcher
+    powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\start-mft-system.bat';$s.WorkingDirectory='%INSTALL_DIR%';$s.Save()"
+    echo Desktop shortcut created
+)
 
 echo.
 echo ========================================
@@ -177,24 +225,29 @@ echo ========================================
 echo.
 echo Next steps:
 echo.
-echo 1. Edit configuration:
+echo 1. Edit configuration (optional):
 echo    notepad "C:\ProgramData\MFT-System\config\config.env"
 echo.
-echo 2. Start the service (if installed):
-echo    net start MFT-System
-echo    or
-echo    Double-click the desktop shortcut "MFT System"
+echo 2. The MFT System is ready to use:
+echo    - If service is running: Already started in background
+echo    - Or double-click "MFT System" on your desktop
+echo    - Or manually: "%INSTALL_DIR%\start-mft-system.bat"
 echo.
-echo 3. Or manually start:
-echo    "%INSTALL_DIR%\start-mft-system.bat"
-echo.
-echo 4. Access the web interface:
+echo 3. Access the web interface:
 echo    http://localhost:5000
 echo.
-echo Default login:
+echo 4. Default login:
 echo    Username: sysadmin
 echo    Password: Admin@123
 echo    (CHANGE THIS IMMEDIATELY!)
+echo.
+echo 5. Service Management:
+echo    Start:   net start MFT-System
+echo    Stop:    net stop MFT-System
+echo    Status:  sc query MFT-System
+echo.
+echo Note: The console window is hidden when running as a service
+echo       or using the desktop shortcut.
 echo.
 echo ========================================
 pause
