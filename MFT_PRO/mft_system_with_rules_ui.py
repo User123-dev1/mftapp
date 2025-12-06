@@ -5542,11 +5542,21 @@ def get_dashboard_stats():
         # Calculate success rate
         success_rate = round((completed_count / total_transfers * 100) if total_transfers > 0 else 0, 1)
 
-        # Get total files transferred from rules
-        total_files = sum(rule.files_transferred for rule in monitor_manager.rules.values())
+        # Calculate total files and bytes from completed transfers
+        total_files = 0
+        total_bytes = 0
 
-        # Get total bytes transferred from rules
-        total_bytes = sum(rule.bytes_transferred for rule in monitor_manager.rules.values())
+        # Count from completed transfers
+        for task in monitor.completed_transfers:
+            # Each completed transfer counts as 1 file (or could be a directory)
+            total_files += 1
+            # Add bytes if available
+            if hasattr(task, 'file_size') and task.file_size:
+                total_bytes += task.file_size
+
+        # Also add from rules (for rule-based transfers)
+        total_files += sum(rule.files_transferred for rule in monitor_manager.rules.values())
+        total_bytes += sum(rule.bytes_transferred for rule in monitor_manager.rules.values())
 
         # Get active rules count
         active_rules = len([r for r in monitor_manager.rules.values() if r.enabled])
