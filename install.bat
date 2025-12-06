@@ -54,8 +54,8 @@ if not exist "MFT_PRO" (
     exit /b 1
 )
 
-REM Create installation directory
-set INSTALL_DIR=C:\Program Files\MFT-System
+REM Create installation directory (outside Program Files to avoid permission issues)
+set INSTALL_DIR=C:\MFT-System
 echo.
 echo Creating installation directory: %INSTALL_DIR%
 mkdir "%INSTALL_DIR%" 2>nul

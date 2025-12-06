@@ -5,7 +5,7 @@ Dim objShell, objWMI, installDir, serviceName
 Set objShell = CreateObject("WScript.Shell")
 Set objWMI = GetObject("winmgmts:\\.\root\cimv2")
 
-installDir = "C:\Program Files\MFT-System"
+installDir = "C:\MFT-System"
 serviceName = "MFT-System"
 
 ' Function to check if service exists and is running

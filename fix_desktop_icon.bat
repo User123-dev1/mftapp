@@ -16,7 +16,7 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-set INSTALL_DIR=C:\Program Files\MFT-System
+set INSTALL_DIR=C:\MFT-System
 
 REM Check if installation exists
 if not exist "%INSTALL_DIR%" (
