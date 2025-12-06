@@ -212,7 +212,7 @@ LOGIN_TEMPLATE = """
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1D1D77;
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -489,7 +489,7 @@ HTML_TEMPLATE = """
         }
         
         .header {
-            background: #170A57;
+            background: ;
             color: white;
             padding: 30px;
             text-align: center;
@@ -583,6 +583,7 @@ HTML_TEMPLATE = """
         .tab-content {
             display: none;
             padding: 30px;
+            color: white;
         }
         
         .tab-content.active {
@@ -597,7 +598,7 @@ HTML_TEMPLATE = """
             display: block;
             margin-bottom: 8px;
             font-weight: 600;
-            color: #333;
+            color: #F7F7F7;
         }
         
         .form-group input,
@@ -712,7 +713,7 @@ HTML_TEMPLATE = """
         }
         
         tr:hover {
-            background: #f9f9f9;
+            background: #9C2B75;
         }
         
         .status-badge {
@@ -958,7 +959,7 @@ HTML_TEMPLATE = """
         .info-box strong {
             display: block;
             margin-bottom: 5px;
-            color: #1976D2;
+            color: #1D2A77;
         }
         
         /* ✅ SEARCH BAR STYLES */
@@ -1500,12 +1501,14 @@ HTML_TEMPLATE = """
                 </div>
             </form>
             
-            <div class="info-box" style="margin-top: 30px;">
-                <strong>Connection Status</strong>
-                <p id="ad-connection-status">Not configured</p>
-                <p>Last sync: <span id="ad-last-sync">Never</span></p>
-                <p>Users synced: <span id="ad-users-synced">0</span></p>
-            </div>
+            
+<div class="info-box" style="margin-top: 30px; color: #1A1E70;">
+    <strong>Connection Status</strong>
+    <p id="ad-connection-status">Not configured</p>
+    <p>Last sync: <span id="ad-last-sync">Never</span></p>
+    <p>Users synced: <span id="ad-users-synced">0</span></p>
+</div>
+
         </div>
         
         <!-- Compliance Tab -->
@@ -1515,7 +1518,7 @@ HTML_TEMPLATE = """
             
             <div class="info-box">
                 <strong>About Compliance Frameworks</strong>
-                <p>Enable compliance frameworks to ensure file transfers meet regulatory requirements. Each framework enforces specific security and auditing standards.</p>
+                <p style="color: #040C53;">Enable compliance frameworks to ensure file transfers meet regulatory requirements. Each framework enforces specific security and auditing standards.</p>
             </div>
             
             <div class="compliance-grid" id="compliance-grid">
@@ -1576,7 +1579,7 @@ HTML_TEMPLATE = """
             <h2>Server Activity Log</h2>
 
             <div class="info-box" style="margin-bottom: 20px;">
-                <h3>📡 Server Health Monitoring</h3>
+                <h3 style="color: #5E0BBC;">📡 Server Health Monitoring</h3>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 10px;">
                     <div>
                         <strong>Total Servers:</strong> <span id="activity-total-servers">0</span>
