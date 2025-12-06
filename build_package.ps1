@@ -2,11 +2,15 @@
 # Creates a complete deployment package with all dependencies
 
 param(
-    [string]$Version = "1.0.2"
+    [string]$Version = "1.0.2",
+    [switch]$Offline  # Include Python wheels for offline installation
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "MFT System Package Builder v$Version" -ForegroundColor Cyan
+if ($Offline) {
+    Write-Host "(OFFLINE MODE - Including Python wheels)" -ForegroundColor Yellow
+}
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -60,6 +64,29 @@ if (Test-Path "mft_icon.ico") {
     Copy-Item -Path "mft_icon.ico" -Destination "$distDir\" -Force
 }
 
+# Copy wheels for offline installation if requested
+if ($Offline) {
+    Write-Host ""
+    Write-Host "🔒 Preparing offline installation..." -ForegroundColor Yellow
+
+    if (-not (Test-Path "wheels")) {
+        Write-Host "   Downloading Python dependencies..." -ForegroundColor Gray
+        & .\download_dependencies.ps1 -Force
+    }
+
+    if (Test-Path "wheels") {
+        Write-Host "   Copying Python wheels..." -ForegroundColor Gray
+        Copy-Item -Path "wheels" -Destination "$distDir\" -Recurse -Force
+
+        $wheelCount = (Get-ChildItem -Path "$distDir\wheels" -Filter "*.whl").Count
+        $wheelSize = [math]::Round((Get-ChildItem -Path "$distDir\wheels" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+        Write-Host "   ✅ $wheelCount wheel files included ($wheelSize MB)" -ForegroundColor Green
+        Write-Host "   📦 Package will work WITHOUT internet access!" -ForegroundColor Green
+    } else {
+        Write-Host "   ⚠️  Could not download wheels. Package will require internet." -ForegroundColor Yellow
+    }
+}
+
 # Step 4: Create ZIP archive
 Write-Host ""
 Write-Host "🗜️  Creating ZIP archive..." -ForegroundColor Yellow
@@ -80,9 +107,16 @@ Write-Host "✅ Package Created Successfully!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Package: $zipName" -ForegroundColor Cyan
-Write-Host "Size:    $([math]::Round((Get-Item $zipName).Length / 1KB, 2)) KB" -ForegroundColor Cyan
+Write-Host "Size:    $([math]::Round((Get-Item $zipName).Length / 1MB, 2)) MB" -ForegroundColor Cyan
 Write-Host "SHA256:  $($hash.Hash)" -ForegroundColor Cyan
 Write-Host ""
+
+if ($Offline) {
+    Write-Host "🔒 OFFLINE MODE: Package includes Python wheels" -ForegroundColor Green
+    Write-Host "   Installation will work WITHOUT internet access!" -ForegroundColor Green
+    Write-Host ""
+}
+
 
 # Step 7: Verify contents
 Write-Host "📋 Package Contents:" -ForegroundColor Yellow
@@ -126,4 +160,10 @@ Write-Host "✓ Hidden console (no black window)" -ForegroundColor Gray
 Write-Host "✓ Custom desktop icon" -ForegroundColor Gray
 Write-Host "✓ Firewall rule creation" -ForegroundColor Gray
 Write-Host "✓ Service installation and startup" -ForegroundColor Gray
+
+if ($Offline) {
+    Write-Host "✓ Python wheels bundled (offline installation)" -ForegroundColor Gray
+} else {
+    Write-Host "⚠️  Python dependencies require internet (use -Offline flag)" -ForegroundColor Yellow
+}
 Write-Host ""

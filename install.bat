@@ -99,11 +99,38 @@ echo.
 echo Installing Python dependencies...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-if %errorLevel% neq 0 (
-    echo ERROR: Failed to install dependencies
-    pause
-    exit /b 1
+
+REM Check if offline wheels are available
+if exist "wheels\" (
+    echo Installing from offline wheels ^(no internet required^)...
+    pip install --no-index --find-links=wheels -r requirements.txt
+    if %errorLevel% equ 0 (
+        echo Dependencies installed successfully from offline cache
+    ) else (
+        echo Warning: Offline installation failed, trying online...
+        pip install -r requirements.txt
+    )
+) else (
+    echo Installing from PyPI ^(internet required^)...
+    pip install -r requirements.txt
+    if %errorLevel% neq 0 (
+        echo.
+        echo ========================================
+        echo ERROR: Failed to install dependencies
+        echo ========================================
+        echo.
+        echo This could be because:
+        echo - No internet connection
+        echo - PyPI is blocked by firewall
+        echo - Network restrictions
+        echo.
+        echo For offline installation:
+        echo 1. Get the package with bundled wheels
+        echo 2. Contact your administrator
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 REM Create data directories
