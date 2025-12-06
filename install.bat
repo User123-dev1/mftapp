@@ -1,9 +1,17 @@
 @echo off
 REM MFT Professional System - Windows Installation Script
-REM Usage: Run as Administrator
+REM Automatically elevates to Administrator if needed
 
 REM Change to the directory where this script is located
 cd /d "%~dp0"
+
+REM Check for admin privileges and auto-elevate if needed
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Requesting administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
 
 echo ========================================
 echo MFT Professional System - Installer
@@ -11,15 +19,6 @@ echo ========================================
 echo.
 echo Working directory: %CD%
 echo.
-
-REM Check for admin privileges
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo ERROR: Please run as Administrator
-    echo Right-click install.bat and select "Run as administrator"
-    pause
-    exit /b 1
-)
 
 REM Check for Python
 echo Checking for Python...
@@ -100,11 +99,38 @@ echo.
 echo Installing Python dependencies...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-if %errorLevel% neq 0 (
-    echo ERROR: Failed to install dependencies
-    pause
-    exit /b 1
+
+REM Check if offline wheels are available
+if exist "wheels\" (
+    echo Installing from offline wheels ^(no internet required^)...
+    pip install --no-index --find-links=wheels -r requirements.txt
+    if %errorLevel% equ 0 (
+        echo Dependencies installed successfully from offline cache
+    ) else (
+        echo Warning: Offline installation failed, trying online...
+        pip install -r requirements.txt
+    )
+) else (
+    echo Installing from PyPI ^(internet required^)...
+    pip install -r requirements.txt
+    if %errorLevel% neq 0 (
+        echo.
+        echo ========================================
+        echo ERROR: Failed to install dependencies
+        echo ========================================
+        echo.
+        echo This could be because:
+        echo - No internet connection
+        echo - PyPI is blocked by firewall
+        echo - Network restrictions
+        echo.
+        echo For offline installation:
+        echo 1. Get the package with bundled wheels
+        echo 2. Contact your administrator
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 REM Create data directories
@@ -152,9 +178,22 @@ echo Creating startup script...
     echo pause
 ) > "%INSTALL_DIR%\start-mft-system.bat"
 
-REM Create Windows service (optional, requires NSSM)
+REM Create Windows service (install NSSM if bundled)
 echo.
-echo Checking for NSSM (for Windows service installation)...
+echo Setting up Windows service for auto-start...
+
+REM Check if bundled NSSM exists, if so install it
+if exist "nssm.exe" (
+    echo Installing bundled NSSM...
+    copy /Y nssm.exe "%WINDIR%\System32\" >nul 2>&1
+    if %errorLevel% equ 0 (
+        echo NSSM installed successfully
+    ) else (
+        echo Warning: Could not copy NSSM to System32
+    )
+)
+
+REM Now check if NSSM is available
 where nssm >nul 2>&1
 if %errorLevel% equ 0 (
     echo NSSM found. Installing Windows service...
@@ -182,19 +221,29 @@ if %errorLevel% equ 0 (
     echo Starting MFT System service...
     net start MFT-System
     if %errorLevel% equ 0 (
-        echo Service started successfully!
+        echo.
+        echo ========================================
+        echo SUCCESS! Service is running!
+        echo ========================================
         echo The MFT System is now running in the background.
+        echo It will automatically start when Windows boots.
+        echo.
     ) else (
         echo Warning: Service installed but failed to start.
         echo You can start it manually with: net start MFT-System
     )
 ) else (
-    echo NSSM not found. Skipping service installation.
     echo.
-    echo To install as a Windows service:
-    echo 1. Download NSSM from https://nssm.cc/
-    echo 2. Extract nssm.exe to C:\Windows\System32\
-    echo 3. Re-run this installer
+    echo ========================================
+    echo WARNING: NSSM not found
+    echo ========================================
+    echo.
+    echo The MFT System will be installed but will NOT auto-start on boot.
+    echo To enable auto-start:
+    echo 1. Place nssm.exe in the same folder as install.bat
+    echo 2. Run install.bat again
+    echo.
+    pause
 )
 
 REM Create firewall rule
