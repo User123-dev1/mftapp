@@ -731,10 +731,80 @@ HTML_TEMPLATE = """
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 30px;
             margin-bottom: 30px;
         }
+
+        /* Circular Gauge Styles */
+        .gauge-container {
+            background: white;
+            padding: 30px 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .gauge-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .circular-gauge {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            margin: 0 auto 15px;
+        }
+
+        .gauge-circle {
+            transform: rotate(-90deg);
+        }
+
+        .gauge-bg {
+            fill: none;
+            stroke: #f0f0f0;
+            stroke-width: 12;
+        }
+
+        .gauge-progress {
+            fill: none;
+            stroke-width: 12;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 1.5s ease-in-out;
+        }
+
+        .gauge-value {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .gauge-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+            font-weight: 500;
+        }
+
+        .gauge-subtitle {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        /* Color themes for different gauges */
+        .gauge-blue .gauge-progress { stroke: url(#gradient-blue); }
+        .gauge-green .gauge-progress { stroke: url(#gradient-green); }
+        .gauge-orange .gauge-progress { stroke: url(#gradient-orange); }
+        .gauge-purple .gauge-progress { stroke: url(#gradient-purple); }
+        .gauge-red .gauge-progress { stroke: url(#gradient-red); }
+        .gauge-cyan .gauge-progress { stroke: url(#gradient-cyan); }
         
         .stat-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1032,222 +1102,181 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="logout()" style="margin-left: auto; background: #e74c3c;">🚪 Logout</div>
         </div>
         
-        const CircularGauge = ({ value, max = 100, label, unit = '', color = '#667eea', size = 140 }) => {
-  const percentage = Math.min((value / max) * 100, 100);
-  const strokeWidth = 14; // Thicker stroke
-  const radius = (size / 2) - (strokeWidth / 2) - 4;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
-  
-  return (
-    <div className="flex flex-col items-center justify-center">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="transform -rotate-90 drop-shadow-lg">
-          {/* Background circle */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="#e5e7eb"
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-          />
-          {/* Progress circle */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            className="transition-all duration-1000"
-            filter="drop-shadow(0 0 10px rgba(102, 126, 234, 0.7))"
-          />
-        </svg>
-        {/* Center text */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <div className="text-lg font-bold text-gray-900">{value}</div>
-          <div className="text-xs text-gray-600">{unit}</div>
-        </div>
-      </div>
-      <p className="mt-3 text-xs font-medium text-gray-700 text-center">{label}</p>
-    </div>
-  );
-};
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <h2>System Dashboard</h2>
 
-const DashboardTab = () => {
-  const [metrics] = useState({
-    totalBytesTransferred: '2.5 GB',
-    totalFilesTransferred: 1847,
-    activeRules: 42,
-    totalTransfers: 5234,
-    successRate: 98.5,
-    activeTransfers: 12,
-    completedTransfers: 4892,
-    failedTransfers: 342,
-    totalUsers: 156
-  });
+            <!-- SVG Gradient Definitions -->
+            <svg width="0" height="0" style="position: absolute;">
+                <defs>
+                    <linearGradient id="gradient-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-green" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#11998e;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#38ef7d;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-orange" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#ee0979;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#ff6a00;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#4776e6;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#8e54e9;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#06beb6;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#48b1bf;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-red" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#eb3349;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#f45c43;stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+            </svg>
 
-  const [lastAdSync] = useState('2 hours ago');
-  const [enabledFrameworks] = useState('GDPR, HIPAA, SOC 2');
+            <!-- Statistics Grid with Circular Gauges -->
+            <div class="stats-grid">
+                <div class="gauge-container gauge-blue">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-data-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-bytes-transferred">0 B</div>
+                    </div>
+                    <div class="gauge-label">Data Transferred</div>
+                    <div class="gauge-subtitle">Total volume</div>
+                </div>
 
-  const chartData = [
-    { time: '00:00', transfers: 120 },
-    { time: '04:00', transfers: 240 },
-    { time: '08:00', transfers: 420 },
-    { time: '12:00', transfers: 580 },
-    { time: '16:00', transfers: 680 },
-    { time: '20:00', transfers: 520 },
-    { time: '23:59', transfers: 380 },
-  ];
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-files-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-files-transferred">0</div>
+                    </div>
+                    <div class="gauge-label">Files Transferred</div>
+                    <div class="gauge-subtitle">Total count</div>
+                </div>
 
-  return (
-    <div id="dashboard-tab" className="tab-content active p-8 bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
-      <h2 className="text-3xl font-bold text-gray-900 mb-8">System Dashboard</h2>
+                <div class="gauge-container gauge-purple">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-rules-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="active-rules">0</div>
+                    </div>
+                    <div class="gauge-label">Active Rules</div>
+                    <div class="gauge-subtitle">Monitoring</div>
+                </div>
 
-      {/* Primary Gauges Grid */}
-      <div className="grid grid-cols-5 gap-8 mb-12">
-        <div className="bg-white rounded-xl p-6 shadow-lg">
-          <CircularGauge
-            value={metrics.totalBytesTransferred}
-            max={10}
-            label="Total Data Transferred"
-            unit="GB"
-            color="#667eea"
-            size={140}
-          />
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow-lg">
-          <CircularGauge
-            value={metrics.totalFilesTransferred}
-            max={10000}
-            label="Total Files Transferred"
-            unit="files"
-            color="#764ba2"
-            size={140}
-          />
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow-lg">
-          <CircularGauge
-            value={metrics.activeRules}
-            max={100}
-            label="Active Rules"
-            unit="rules"
-            color="#11998e"
-            size={140}
-          />
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow-lg">
-          <CircularGauge
-            value={metrics.totalTransfers}
-            max={10000}
-            label="Total Transfers"
-            unit="transfers"
-            color="#38ef7d"
-            size={140}
-          />
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow-lg">
-          <CircularGauge
-            value={metrics.successRate}
-            max={100}
-            label="Success Rate"
-            unit="%"
-            color="#4776e6"
-            size={140}
-          />
-        </div>
-      </div>
+                <div class="gauge-container gauge-cyan">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-transfers-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Total Transfers</div>
+                    <div class="gauge-subtitle">All time</div>
+                </div>
 
-      {/* Secondary Gauges Grid */}
-      <div className="grid grid-cols-4 gap-8 mb-12">
-        <div className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-xl p-6 shadow-lg">
-          <div className="flex justify-center">
-            <CircularGauge
-              value={metrics.activeTransfers}
-              max={100}
-              label="Active Transfers"
-              unit="active"
-              color="#a78bfa"
-              size={140}
-            />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-green-600 to-emerald-600 rounded-xl p-6 shadow-lg">
-          <div className="flex justify-center">
-            <CircularGauge
-              value={metrics.completedTransfers}
-              max={10000}
-              label="Completed"
-              unit="done"
-              color="#86efac"
-              size={140}
-            />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-orange-600 to-red-600 rounded-xl p-6 shadow-lg">
-          <div className="flex justify-center">
-            <CircularGauge
-              value={metrics.failedTransfers}
-              max={1000}
-              label="Failed"
-              unit="failed"
-              color="#fed7aa"
-              size={140}
-            />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl p-6 shadow-lg">
-          <div className="flex justify-center">
-            <CircularGauge
-              value={metrics.totalUsers}
-              max={500}
-              label="AD Users"
-              unit="users"
-              color="#93c5fd"
-              size={140}
-            />
-          </div>
-        </div>
-      </div>
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-success-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="success-rate">0%</div>
+                    </div>
+                    <div class="gauge-label">Success Rate</div>
+                    <div class="gauge-subtitle">Completed successfully</div>
+                </div>
 
-      {/* Performance Chart */}
-      <div className="bg-white rounded-xl p-8 shadow-lg mb-8">
-        <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-          📈 Transfer Performance (Last 24 Hours)
-        </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="time" />
-            <YAxis />
-            <Tooltip />
-            <Line type="monotone" dataKey="transfers" stroke="#667eea" strokeWidth={3} dot={{ fill: '#667eea', r: 6 }} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+                <div class="gauge-container gauge-orange">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-active-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="active-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Active Transfers</div>
+                    <div class="gauge-subtitle">In progress</div>
+                </div>
 
-      {/* System Status */}
-      <div className="bg-white border-l-4 border-blue-500 rounded-xl p-6 shadow-lg">
-        <h4 className="text-lg font-bold text-gray-900 mb-4">🔍 System Status</h4>
-        <p className="text-gray-700 mb-2">
-          <span className="inline-flex items-center gap-2">
-            <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
-            All systems operational
-          </span>
-        </p>
-        <p className="text-gray-700 mb-3">Last AD sync: <span className="font-semibold text-blue-600">{lastAdSync}</span></p>
-        <p className="text-gray-700">Enabled compliance frameworks: <span className="font-semibold text-green-600">{enabledFrameworks}</span></p>
-      </div>
-    </div>
-  );
-};
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-completed-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="completed-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Completed</div>
+                    <div class="gauge-subtitle">Successful</div>
+                </div>
 
-export default DashboardTab;
+                <div class="gauge-container gauge-red">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-failed-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="failed-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Failed</div>
+                    <div class="gauge-subtitle">Errors</div>
+                </div>
+
+                <div class="gauge-container gauge-purple">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-users-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-users">0</div>
+                    </div>
+                    <div class="gauge-label">AD Users</div>
+                    <div class="gauge-subtitle">Directory</div>
+                </div>
+            </div>
+
+            <!-- Performance Chart -->
+            <div style="background: white; padding: 20px; border-radius: 10px; margin-top: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h3 style="margin-bottom: 15px;">📈 Transfer Performance (Last 24 Hours)</h3>
+                <canvas id="performanceChart" height="80"></canvas>
+            </div>
+
+            <div class="info-box" style="margin-top: 20px;">
+                <strong>System Status</strong>
+                <p>All systems operational. Last AD sync: <span id="last-ad-sync">Never</span></p>
+                <p>Enabled compliance frameworks: <span id="enabled-frameworks">None</span></p>
+            </div>
+        </div>
         
         <!-- Transfer Tab -->
         <div id="transfer-tab" class="tab-content">
@@ -2253,22 +2282,81 @@ export default DashboardTab;
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        // Update circular gauge animation
+        function updateGauge(circleId, valueId, value, maxValue, displayValue) {
+            const circle = document.getElementById(circleId);
+            const valueElement = document.getElementById(valueId);
+
+            if (!circle || !valueElement) return;
+
+            // Calculate percentage (0-100)
+            let percentage = 0;
+            if (maxValue > 0) {
+                percentage = Math.min(100, (value / maxValue) * 100);
+            } else if (value > 0) {
+                // For gauges without a max value, use the value as percentage directly
+                percentage = Math.min(100, value);
+            }
+
+            // SVG circle circumference: 2πr = 2 * 3.14159 * 70 = 440
+            const circumference = 440;
+            const offset = circumference - (circumference * percentage / 100);
+
+            // Animate the gauge
+            circle.style.strokeDashoffset = offset;
+
+            // Update the center value
+            valueElement.textContent = displayValue;
+        }
+
         function loadDashboard() {
             // Load enhanced dashboard statistics
             fetch('/api/v1/dashboard/stats')
                 .then(r => r.json())
                 .then(data => {
-                    // Update main stats
-                    document.getElementById('total-bytes-transferred').textContent = formatBytes(data.total_bytes_transferred || 0);
-                    document.getElementById('total-files-transferred').textContent = data.total_files_transferred || 0;
-                    document.getElementById('active-rules').textContent = data.active_rules || 0;
-                    document.getElementById('total-transfers').textContent = data.total_transfers || 0;
-                    document.getElementById('success-rate').textContent = (data.success_rate || 0) + '%';
+                    // Calculate max values for gauges (for scaling)
+                    const maxTransfers = Math.max(1, data.total_transfers || 1);
+                    const maxFiles = Math.max(100, data.total_files_transferred || 100);
 
-                    // Update transfer breakdown
-                    document.getElementById('active-transfers').textContent = data.active_transfers || 0;
-                    document.getElementById('completed-transfers').textContent = data.completed_transfers || 0;
-                    document.getElementById('failed-transfers').textContent = data.failed_transfers || 0;
+                    // Update Data Transferred gauge
+                    const bytesValue = data.total_bytes_transferred || 0;
+                    const bytesGB = bytesValue / (1024 * 1024 * 1024);
+                    updateGauge('gauge-data-circle', 'total-bytes-transferred',
+                        bytesGB, Math.max(10, bytesGB * 1.2), formatBytes(bytesValue));
+
+                    // Update Files Transferred gauge
+                    updateGauge('gauge-files-circle', 'total-files-transferred',
+                        data.total_files_transferred || 0, maxFiles,
+                        (data.total_files_transferred || 0).toString());
+
+                    // Update Active Rules gauge (scale to max 20 rules)
+                    updateGauge('gauge-rules-circle', 'active-rules',
+                        data.active_rules || 0, Math.max(10, data.active_rules || 10),
+                        (data.active_rules || 0).toString());
+
+                    // Update Total Transfers gauge
+                    updateGauge('gauge-transfers-circle', 'total-transfers',
+                        data.total_transfers || 0, maxTransfers,
+                        (data.total_transfers || 0).toString());
+
+                    // Update Success Rate gauge (0-100%)
+                    updateGauge('gauge-success-circle', 'success-rate',
+                        data.success_rate || 0, 100, (data.success_rate || 0) + '%');
+
+                    // Update Active Transfers gauge
+                    updateGauge('gauge-active-circle', 'active-transfers',
+                        data.active_transfers || 0, Math.max(5, data.active_transfers || 5),
+                        (data.active_transfers || 0).toString());
+
+                    // Update Completed Transfers gauge
+                    updateGauge('gauge-completed-circle', 'completed-transfers',
+                        data.completed_transfers || 0, maxTransfers,
+                        (data.completed_transfers || 0).toString());
+
+                    // Update Failed Transfers gauge
+                    updateGauge('gauge-failed-circle', 'failed-transfers',
+                        data.failed_transfers || 0, Math.max(10, data.failed_transfers || 10),
+                        (data.failed_transfers || 0).toString());
 
                     // Update performance chart
                     updatePerformanceChart(data.performance_data);
@@ -2278,7 +2366,10 @@ export default DashboardTab;
             fetch('/api/v1/users')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('total-users').textContent = data.length || 0;
+                    const userCount = data.length || 0;
+                    // Update AD Users gauge
+                    updateGauge('gauge-users-circle', 'total-users',
+                        userCount, Math.max(50, userCount || 50), userCount.toString());
                 })
                 .catch(err => console.error('Failed to load users:', err));
 
