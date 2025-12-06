@@ -70,12 +70,19 @@ if %errorLevel% neq 0 (
 REM Copy launcher scripts and icon
 echo Copying launcher scripts...
 if exist "launch_mft_hidden.vbs" copy /Y launch_mft_hidden.vbs "%INSTALL_DIR%"
+if exist "launch_mft.ps1" copy /Y launch_mft.ps1 "%INSTALL_DIR%"
 if exist "mft_icon.ico" (
     copy /Y mft_icon.ico "%INSTALL_DIR%"
     echo Custom icon copied
 ) else (
     echo Note: No custom icon found. Using default icon.
 )
+
+REM Create PowerShell wrapper for hidden console
+(
+    echo Set objShell = CreateObject^("WScript.Shell"^)
+    echo objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File ""%INSTALL_DIR%\launch_mft.ps1""", 0, False
+) > "%INSTALL_DIR%\launch_mft_wrapper.vbs"
 
 REM Create virtual environment
 echo.
@@ -203,13 +210,13 @@ if %errorLevel% equ 0 (
 REM Create desktop shortcut
 echo.
 echo Creating desktop shortcuts...
-if exist "%INSTALL_DIR%\launch_mft_hidden.vbs" (
-    REM Create shortcut with hidden launcher
+if exist "%INSTALL_DIR%\launch_mft_wrapper.vbs" (
+    REM Create shortcut with PowerShell hidden launcher
     if exist "%INSTALL_DIR%\mft_icon.ico" (
-        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_hidden.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.IconLocation='%INSTALL_DIR%\mft_icon.ico';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
+        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_wrapper.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.IconLocation='%INSTALL_DIR%\mft_icon.ico';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
         echo Desktop shortcut created with custom icon (hidden console)
     ) else (
-        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_hidden.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
+        powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%PUBLIC%\Desktop\MFT System.lnk');$s.TargetPath='%INSTALL_DIR%\launch_mft_wrapper.vbs';$s.WorkingDirectory='%INSTALL_DIR%';$s.Description='MFT Professional System - Managed File Transfer';$s.Save()"
         echo Desktop shortcut created (hidden console)
     )
 ) else (
