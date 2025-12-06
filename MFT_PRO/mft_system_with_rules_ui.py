@@ -1008,11 +1008,55 @@ HTML_TEMPLATE = """
             background: #f0f7ff !important;
             border-left: 4px solid #667eea;
         }
-        
+
         .group-row:hover {
             background: #e3f2fd !important;
         }
-        
+
+        /* PAGINATION STYLES */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .pagination-controls select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .pagination-controls select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        #users-page-display {
+            font-weight: 600;
+            color: #333;
+            min-width: 100px;
+            text-align: center;
+        }
+
         /* MODAL STYLES */
         .modal {
             display: none;
@@ -1429,6 +1473,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="users-pagination-info">Showing 0 of 0 users</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="users-page-size" onchange="changeUsersPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousUsersPage()" id="users-prev-btn">← Previous</button>
+                    <span id="users-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextUsersPage()" id="users-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- Active Directory Tab -->
@@ -1990,7 +2053,10 @@ HTML_TEMPLATE = """
         // ✅ Global variables for user/group data
         let allUsers = [];
         let currentSearchType = 'users';
-        
+        let usersCurrentPage = 1;
+        let usersPageSize = 25;
+        let currentDisplayedUsers = [];
+
         // Dropdown toggle functionality
         function toggleDropdown(event, dropdownId) {
             event.stopPropagation();
@@ -2494,27 +2560,46 @@ HTML_TEMPLATE = """
         }
         
         function displayUsers(users) {
+            currentDisplayedUsers = users;
             const tbody = document.querySelector('#users-table tbody');
             tbody.innerHTML = '';
-            
+
             if (!users || users.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users found</td></tr>';
+                updateUsersPaginationControls(0, 0, 0);
                 return;
             }
-            
-            users.forEach(u => {
+
+            // Calculate pagination
+            const totalUsers = users.length;
+            const totalPages = Math.ceil(totalUsers / usersPageSize);
+
+            // Ensure current page is valid
+            if (usersCurrentPage > totalPages) {
+                usersCurrentPage = Math.max(1, totalPages);
+            }
+
+            // Calculate start and end indices
+            const startIndex = (usersCurrentPage - 1) * usersPageSize;
+            const endIndex = Math.min(startIndex + usersPageSize, totalUsers);
+
+            // Get users for current page
+            const pageUsers = users.slice(startIndex, endIndex);
+
+            // Display users
+            pageUsers.forEach(u => {
                 const permissions = [];
                 if (u.can_upload) permissions.push('Upload');
                 if (u.can_download) permissions.push('Download');
                 if (u.can_delete) permissions.push('Delete');
                 if (u.can_create_rules) permissions.push('Rules');
                 if (u.is_admin) permissions.push('Admin');
-                
+
                 // ✅ Display groups as badges
                 const groupsHTML = u.groups && u.groups.length > 0
                     ? u.groups.map(g => `<span class="group-badge">${g}</span>`).join(' ')
                     : '<span style="color: #999;">No groups</span>';
-                
+
                 const row = tbody.insertRow();
                 row.innerHTML = `
                     <td>${u.username || 'N/A'}</td>
@@ -2528,30 +2613,73 @@ HTML_TEMPLATE = """
                     </td>
                 `;
             });
+
+            // Update pagination controls
+            updateUsersPaginationControls(startIndex + 1, endIndex, totalUsers);
+        }
+
+        // Update pagination controls
+        function updateUsersPaginationControls(start, end, total) {
+            const totalPages = Math.ceil(total / usersPageSize);
+
+            // Update info text
+            document.getElementById('users-pagination-info').textContent =
+                total > 0 ? `Showing ${start} to ${end} of ${total} users` : 'Showing 0 of 0 users';
+
+            // Update page display
+            document.getElementById('users-page-display').textContent =
+                totalPages > 0 ? `Page ${usersCurrentPage} of ${totalPages}` : 'Page 1 of 1';
+
+            // Enable/disable buttons
+            document.getElementById('users-prev-btn').disabled = usersCurrentPage <= 1;
+            document.getElementById('users-next-btn').disabled = usersCurrentPage >= totalPages || totalPages === 0;
+        }
+
+        // Pagination navigation functions
+        function nextUsersPage() {
+            const totalPages = Math.ceil(currentDisplayedUsers.length / usersPageSize);
+            if (usersCurrentPage < totalPages) {
+                usersCurrentPage++;
+                displayUsers(currentDisplayedUsers);
+            }
+        }
+
+        function previousUsersPage() {
+            if (usersCurrentPage > 1) {
+                usersCurrentPage--;
+                displayUsers(currentDisplayedUsers);
+            }
+        }
+
+        function changeUsersPageSize() {
+            usersPageSize = parseInt(document.getElementById('users-page-size').value);
+            usersCurrentPage = 1; // Reset to first page
+            displayUsers(currentDisplayedUsers);
         }
         
         // ✅ SEARCH FUNCTION
         function performSearch() {
             const searchInput = document.getElementById('user-search-input').value.trim().toLowerCase();
             const searchType = document.getElementById('search-type').value;
-            
+
             if (!searchInput) {
                 showMessage('users-message', 'Please enter a search term', 'error');
                 return;
             }
-            
+
             currentSearchType = searchType;
-            
+            usersCurrentPage = 1; // Reset to first page when searching
+
             if (searchType === 'users') {
                 // Search in users
-                const filtered = allUsers.filter(u => 
+                const filtered = allUsers.filter(u =>
                     (u.username && u.username.toLowerCase().includes(searchInput)) ||
                     (u.display_name && u.display_name.toLowerCase().includes(searchInput)) ||
                     (u.email && u.email.toLowerCase().includes(searchInput)) ||
                     (u.department && u.department.toLowerCase().includes(searchInput)) ||
                     (u.groups && u.groups.some(g => g.toLowerCase().includes(searchInput)))
                 );
-                
+
                 displayUsers(filtered);
                 showMessage('users-message', `Found ${filtered.length} user(s)`, 'success');
             } else {
@@ -2607,6 +2735,7 @@ HTML_TEMPLATE = """
         function clearSearch() {
             document.getElementById('user-search-input').value = '';
             document.getElementById('search-type').value = 'users';
+            usersCurrentPage = 1; // Reset to first page when clearing search
             loadUsers();
             showMessage('users-message', 'Search cleared - showing all users', 'success');
         }
