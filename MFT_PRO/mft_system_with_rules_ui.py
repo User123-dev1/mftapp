@@ -4,6 +4,19 @@ Complete integration with Active Directory and Compliance frameworks
 ENHANCED VERSION - Working search and permission editing
 """
 
+# Fix Windows console encoding for emoji/unicode support
+import sys
+import io
+if sys.platform == 'win32':
+    # Reconfigure stdout/stderr to use UTF-8 encoding
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    else:
+        # Fallback for older Python versions
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from flask import Flask, render_template_string, request, jsonify, send_file, session, redirect, url_for
 from flask_cors import CORS
 from functools import wraps
@@ -13,7 +26,6 @@ import os
 from datetime import datetime, timedelta
 import threading
 import logging
-import io
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib import colors
 from reportlab.lib.units import inch
