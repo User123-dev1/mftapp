@@ -1075,7 +1075,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="header">
             <div class="header-title">
-                <img src="/static/mft_icon.ico" alt="MFT" class="header-icon">
+                <img src="/favicon.ico" alt="MFT" class="header-icon">
                 <h1>MFT Professional File Transfer System</h1>
             </div>
             <p>Managed File Transfer with Advanced Monitoring, Compliance & Active Directory Integration</p>
