@@ -452,6 +452,19 @@ HTML_TEMPLATE = """
 <head>
     <title>MFT System - Professional File Transfer</title>
     <style>
+    .header-icon {
+            width: 48px;
+            height: 48px;
+            vertical-align: middle;
+            margin-right: 15px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+        
+        .header-title {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
         * {
             margin: 0;
             padding: 0;
@@ -460,7 +473,7 @@ HTML_TEMPLATE = """
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #081235;
             min-height: 100vh;
             padding: 20px;
         }
@@ -468,14 +481,14 @@ HTML_TEMPLATE = """
         .container {
             max-width: 1600px;
             margin: 0 auto;
-            background: white;
+            background: #BABABA;
             border-radius: 15px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             overflow: hidden;
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #170A57;
             color: white;
             padding: 30px;
             text-align: center;
@@ -692,7 +705,7 @@ HTML_TEMPLATE = """
         }
         
         th {
-            background: #f5f5f5;
+            background: #BABABA;
             font-weight: 600;
             color: #333;
         }
@@ -1059,9 +1072,11 @@ HTML_TEMPLATE = """
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 MFT Professional File Transfer System</h1>
+    <div class="header">
+            <div class="header-title">
+                <img src="/static/mft_icon.ico" alt="MFT" class="header-icon">
+                <h1>MFT Professional File Transfer System</h1>
+            </div>
             <p>Managed File Transfer with Advanced Monitoring, Compliance & Active Directory Integration</p>
         </div>
         
@@ -5438,6 +5453,18 @@ def shutdown_server():
             'success': False,
             'error': str(e)
         }), 500
+
+    @app.route('/static/mft_icon.ico')
+    def serve_icon():
+        """Serve the MFT icon"""
+        try:
+            return send_file(
+                '/mnt/user-data/uploads/1765044070466_mft_icon.ico',
+                mimetype='image/x-icon'
+            )
+        except Exception as e:
+            logger.error(f"Failed to serve icon: {e}")
+            return '', 404
 
 # ============================================================================
 # MAIN

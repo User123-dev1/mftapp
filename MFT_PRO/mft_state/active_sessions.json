@@ -1,12 +1,12 @@
 {
-  "jipiWAuD-HkoGOWj94qe0wz68fTe4pJfWM6bnECgl9c": {
-    "session_id": "jipiWAuD-HkoGOWj94qe0wz68fTe4pJfWM6bnECgl9c",
-    "user_id": "sysadmin-001",
-    "username": "sysadmin",
-    "is_domain_user": false,
+  "JLGT8ZoE-O-EgBzq-WcKudIypwKj7w3ZzORXH6Sr9uM": {
+    "session_id": "JLGT8ZoE-O-EgBzq-WcKudIypwKj7w3ZzORXH6Sr9uM",
+    "user_id": "administrator",
+    "username": "Administrator",
+    "is_domain_user": true,
     "is_admin": true,
-    "login_time": "2025-12-05T20:50:47.577297",
-    "last_activity": "2025-12-05T20:58:58.721304",
+    "login_time": "2025-12-06T13:12:12.848160",
+    "last_activity": "2025-12-06T13:16:41.502501",
     "ip_address": "127.0.0.1"
   }
 }
