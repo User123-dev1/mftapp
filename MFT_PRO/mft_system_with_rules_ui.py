@@ -1408,6 +1408,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="history-pagination-info">Showing 0 of 0 transfers</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="history-page-size" onchange="changeHistoryPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousHistoryPage()" id="history-prev-btn">← Previous</button>
+                    <span id="history-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextHistoryPage()" id="history-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- Transfer Rules Tab -->
@@ -1438,6 +1457,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="rules-pagination-info">Showing 0 of 0 rules</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="rules-page-size" onchange="changeRulesPageSize()">
+                        <option value="10" selected>10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousRulesPage()" id="rules-prev-btn">← Previous</button>
+                    <span id="rules-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextRulesPage()" id="rules-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- ✅ ENHANCED Users Tab with Search -->
@@ -1635,6 +1673,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="audit-pagination-info">Showing 0 of 0 events</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="audit-page-size" onchange="changeAuditPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50" selected>50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousAuditPage()" id="audit-prev-btn">← Previous</button>
+                    <span id="audit-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextAuditPage()" id="audit-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
 
         <!-- Activity Log Tab -->
@@ -1657,6 +1714,7 @@ HTML_TEMPLATE = """
             </div>
 
             <button class="btn btn-primary" onclick="loadActivityLog()">🔄 Refresh</button>
+            <button class="btn btn-danger" onclick="clearActivityLog()" style="margin-left: 10px;">🗑️ Clear Log</button>
 
             <h3 style="margin-top: 30px;">Recent Server Events</h3>
             <table id="activity-table">
@@ -2056,6 +2114,19 @@ HTML_TEMPLATE = """
         let usersCurrentPage = 1;
         let usersPageSize = 25;
         let currentDisplayedUsers = [];
+
+        // Pagination variables for other tables
+        let historyCurrentPage = 1;
+        let historyPageSize = 25;
+        let currentDisplayedHistory = [];
+
+        let rulesCurrentPage = 1;
+        let rulesPageSize = 10;
+        let currentDisplayedRules = [];
+
+        let auditCurrentPage = 1;
+        let auditPageSize = 50;
+        let currentDisplayedAudit = [];
 
         // Dropdown toggle functionality
         function toggleDropdown(event, dropdownId) {
@@ -2656,7 +2727,233 @@ HTML_TEMPLATE = """
             usersCurrentPage = 1; // Reset to first page
             displayUsers(currentDisplayedUsers);
         }
-        
+
+        // ========================================
+        // HISTORY PAGINATION FUNCTIONS
+        // ========================================
+        function nextHistoryPage() {
+            const totalPages = Math.ceil(currentDisplayedHistory.length / historyPageSize);
+            if (historyCurrentPage < totalPages) {
+                historyCurrentPage++;
+                displayHistory(currentDisplayedHistory);
+            }
+        }
+
+        function previousHistoryPage() {
+            if (historyCurrentPage > 1) {
+                historyCurrentPage--;
+                displayHistory(currentDisplayedHistory);
+            }
+        }
+
+        function changeHistoryPageSize() {
+            historyPageSize = parseInt(document.getElementById('history-page-size').value);
+            historyCurrentPage = 1;
+            displayHistory(currentDisplayedHistory);
+        }
+
+        function displayHistory(transfers) {
+            currentDisplayedHistory = transfers;
+            const tbody = document.querySelector('#history-table tbody');
+            tbody.innerHTML = '';
+
+            if (!transfers || transfers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No transfers yet.</td></tr>';
+                updatePaginationControls('history', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = transfers.length;
+            const totalPages = Math.ceil(totalItems / historyPageSize);
+            if (historyCurrentPage > totalPages) historyCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (historyCurrentPage - 1) * historyPageSize;
+            const endIndex = Math.min(startIndex + historyPageSize, totalItems);
+            const pageItems = transfers.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(t => {
+                let details = '';
+                if (t.status === 'failed' && t.error) {
+                    details = `<span style="color: #e74c3c; font-weight: bold;" title="${t.error}">❌ ${t.error}</span>`;
+                } else if (t.status === 'completed') {
+                    details = '<span style="color: #27ae60;">✅ Success</span>';
+                } else if (t.status === 'in_progress') {
+                    details = '<span style="color: #3498db;">🔄 In Progress</span>';
+                } else {
+                    details = '<span style="color: #95a5a6;">⏳ Pending</span>';
+                }
+
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${t.task_id.substring(0, 8)}...</td>
+                    <td>${t.source_path}</td>
+                    <td>${t.destination_path}</td>
+                    <td>${t.protocol}</td>
+                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>
+                    <td>${new Date(t.timestamp).toLocaleString()}</td>
+                    <td>${details}</td>
+                `;
+            });
+
+            updatePaginationControls('history', startIndex + 1, endIndex, totalItems);
+        }
+
+        // ========================================
+        // RULES PAGINATION FUNCTIONS
+        // ========================================
+        function nextRulesPage() {
+            const totalPages = Math.ceil(currentDisplayedRules.length / rulesPageSize);
+            if (rulesCurrentPage < totalPages) {
+                rulesCurrentPage++;
+                displayRules(currentDisplayedRules);
+            }
+        }
+
+        function previousRulesPage() {
+            if (rulesCurrentPage > 1) {
+                rulesCurrentPage--;
+                displayRules(currentDisplayedRules);
+            }
+        }
+
+        function changeRulesPageSize() {
+            rulesPageSize = parseInt(document.getElementById('rules-page-size').value);
+            rulesCurrentPage = 1;
+            displayRules(currentDisplayedRules);
+        }
+
+        function displayRules(rules) {
+            currentDisplayedRules = rules;
+            const tbody = document.querySelector('#rules-table tbody');
+            tbody.innerHTML = '';
+
+            if (!rules || rules.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No rules created yet.</td></tr>';
+                updatePaginationControls('rules', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = rules.length;
+            const totalPages = Math.ceil(totalItems / rulesPageSize);
+            if (rulesCurrentPage > totalPages) rulesCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (rulesCurrentPage - 1) * rulesPageSize;
+            const endIndex = Math.min(startIndex + rulesPageSize, totalItems);
+            const pageItems = rules.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(rule => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td><strong>${rule.name}</strong></td>
+                    <td>${rule.source_path}<br><small>${rule.source_pattern}</small></td>
+                    <td>${rule.destination_path}</td>
+                    <td><span class="status-badge">${rule.schedule_type}</span></td>
+                    <td><span class="status-badge">${rule.action_type}</span></td>
+                    <td>${rule.files_transferred || 0}</td>
+                    <td><span class="status-badge status-${rule.status}">${rule.status}</span></td>
+                    <td>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${rule.enabled ? 'checked' : ''}
+                                   onchange="toggleRule('${rule.rule_id}', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </td>
+                    <td>
+                        ${rule.schedule_type === 'cron' ?
+                            `<button class="btn btn-small btn-success" onclick="executeRule('${rule.rule_id}')" style="margin-right: 5px;" title="Run full folder backup now">▶️ Run Now</button>` :
+                            ''}
+                        <button class="btn btn-small btn-primary" onclick="editRule('${rule.rule_id}')" style="margin-right: 5px;">Edit</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>
+                    </td>
+                `;
+            });
+
+            updatePaginationControls('rules', startIndex + 1, endIndex, totalItems);
+        }
+
+        // ========================================
+        // AUDIT LOG PAGINATION FUNCTIONS
+        // ========================================
+        function nextAuditPage() {
+            const totalPages = Math.ceil(currentDisplayedAudit.length / auditPageSize);
+            if (auditCurrentPage < totalPages) {
+                auditCurrentPage++;
+                displayAuditLog(currentDisplayedAudit);
+            }
+        }
+
+        function previousAuditPage() {
+            if (auditCurrentPage > 1) {
+                auditCurrentPage--;
+                displayAuditLog(currentDisplayedAudit);
+            }
+        }
+
+        function changeAuditPageSize() {
+            auditPageSize = parseInt(document.getElementById('audit-page-size').value);
+            auditCurrentPage = 1;
+            displayAuditLog(currentDisplayedAudit);
+        }
+
+        function displayAuditLog(events) {
+            currentDisplayedAudit = events;
+            const tbody = document.querySelector('#audit-table tbody');
+            tbody.innerHTML = '';
+
+            if (!events || events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No audit events found.</td></tr>';
+                updatePaginationControls('audit', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = events.length;
+            const totalPages = Math.ceil(totalItems / auditPageSize);
+            if (auditCurrentPage > totalPages) auditCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (auditCurrentPage - 1) * auditPageSize;
+            const endIndex = Math.min(startIndex + auditPageSize, totalItems);
+            const pageItems = events.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(event => {
+                const row = tbody.insertRow();
+                const resultClass = event.result === 'success' ? 'status-completed' :
+                                   event.result === 'failure' ? 'status-failed' : 'status-pending';
+
+                row.innerHTML = `
+                    <td>${new Date(event.timestamp).toLocaleString()}</td>
+                    <td>${event.event_type}</td>
+                    <td>${event.username || 'System'}</td>
+                    <td>${event.action}</td>
+                    <td><span class="status-badge ${resultClass}">${event.result}</span></td>
+                    <td>${event.details || '-'}</td>
+                `;
+            });
+
+            updatePaginationControls('audit', startIndex + 1, endIndex, totalItems);
+        }
+
+        // Generic pagination control updater
+        function updatePaginationControls(type, start, end, total) {
+            const totalPages = Math.ceil(total / (type === 'history' ? historyPageSize : type === 'rules' ? rulesPageSize : auditPageSize));
+            const currentPage = type === 'history' ? historyCurrentPage : type === 'rules' ? rulesCurrentPage : auditCurrentPage;
+            const itemName = type === 'history' ? 'transfers' : type === 'rules' ? 'rules' : 'events';
+
+            document.getElementById(`${type}-pagination-info`).textContent =
+                total > 0 ? `Showing ${start} to ${end} of ${total} ${itemName}` : `Showing 0 of 0 ${itemName}`;
+
+            document.getElementById(`${type}-page-display`).textContent =
+                totalPages > 0 ? `Page ${currentPage} of ${totalPages}` : 'Page 1 of 1';
+
+            document.getElementById(`${type}-prev-btn`).disabled = currentPage <= 1;
+            document.getElementById(`${type}-next-btn`).disabled = currentPage >= totalPages || totalPages === 0;
+        }
+
         // ✅ SEARCH FUNCTION
         function performSearch() {
             const searchInput = document.getElementById('user-search-input').value.trim().toLowerCase();
@@ -3116,30 +3413,21 @@ HTML_TEMPLATE = """
         function loadAuditLog() {
             const eventType = document.getElementById('audit-filter-type').value;
             const result = document.getElementById('audit-filter-result').value;
-            
-            let url = '/api/v1/audit/events?limit=100';
+
+            let url = '/api/v1/audit/events?limit=1000'; // Increased limit for pagination
             if (eventType) url += `&event_type=${eventType}`;
             if (result) url += `&result=${result}`;
-            
+
             fetch(url)
                 .then(r => r.json())
                 .then(data => {
-                    const tbody = document.querySelector('#audit-table tbody');
-                    tbody.innerHTML = '';
-                    
-                    data.events.forEach(event => {
-                        const row = tbody.insertRow();
-                        row.innerHTML = `
-                            <td>${new Date(event.timestamp).toLocaleString()}</td>
-                            <td><span class="status-badge">${event.event_type}</span></td>
-                            <td>${event.username || 'System'}</td>
-                            <td>${event.action}</td>
-                            <td><span class="status-badge status-${event.result}">${event.result}</span></td>
-                            <td>${JSON.stringify(event.details).substring(0, 50)}...</td>
-                        `;
-                    });
+                    auditCurrentPage = 1; // Reset to first page
+                    displayAuditLog(data.events || []);
                 })
-                .catch(err => console.error('Failed to load audit log:', err));
+                .catch(err => {
+                    console.error('Failed to load audit log:', err);
+                    displayAuditLog([]);
+                });
         }
         
         function exportAuditLog() {
@@ -3223,6 +3511,25 @@ HTML_TEMPLATE = """
                 .catch(err => console.error('Failed to load activity log:', err));
         }
 
+        function clearActivityLog() {
+            if (confirm('Are you sure you want to clear the activity log? This action cannot be undone.')) {
+                fetch('/api/v1/servers/activity/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Activity log cleared successfully!');
+                            loadActivityLog(); // Reload the log
+                        } else {
+                            alert('Failed to clear activity log: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error clearing activity log: ' + err.message);
+                        console.error('Failed to clear activity log:', err);
+                    });
+            }
+        }
+
         // ========================================
         // TRANSFER FUNCTIONS
         // ========================================
@@ -3265,151 +3572,73 @@ HTML_TEMPLATE = """
             });
         });
         
-        function loadHistory() {  
-    console.log('🔵 Loading transfer history...');  
-    
-    fetch('/api/v1/transfers')  
-        .then(r => {  
-            console.log('📡 History response status:', r.status);  
-            if (!r.ok) {  
-                throw new Error(`HTTP error! status: ${r.status}`);  
-            }  
-            return r.json();  
-        })  
-        .then(data => {  
-            console.log('✅ Transfer history data received:', data);  
-            
-            const tbody = document.querySelector('#history-table tbody');  
-            
-            // Check if we have transfers
-            if (!data || !data.transfers) {
-                console.warn('⚠️ No transfers array in response');
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: orange;">Invalid data format received</td></tr>';
-                return;
-            }  
-            
-            if (data.transfers.length === 0) {
-                console.log('ℹ️ No transfers yet');
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No transfers yet. Create a transfer to see history.</td></tr>';
-                return;
-            }
+        function loadHistory() {
+            console.log('🔵 Loading transfer history...');
 
-            // Clear table
-            tbody.innerHTML = '';
+            fetch('/api/v1/transfers')
+                .then(r => {
+                    console.log('📡 History response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('✅ Transfer history data received:', data);
 
-            // Add each transfer
-            data.transfers.forEach((t, index) => {
-                console.log(`  📤 Transfer ${index + 1}:`, t.task_id.substring(0, 8));
+                    if (!data || !data.transfers) {
+                        console.warn('⚠️ No transfers array in response');
+                        displayHistory([]);
+                        return;
+                    }
 
-                // Determine details to show
-                let details = '';
-                if (t.status === 'failed' && t.error) {
-                    details = `<span style="color: #e74c3c; font-weight: bold;" title="${t.error}">❌ ${t.error}</span>`;
-                } else if (t.status === 'completed') {
-                    details = '<span style="color: #27ae60;">✅ Success</span>';
-                } else if (t.status === 'in_progress') {
-                    details = '<span style="color: #3498db;">🔄 In Progress</span>';
-                } else {
-                    details = '<span style="color: #95a5a6;">⏳ Pending</span>';
-                }
-
-                const row = tbody.insertRow();
-                row.innerHTML = `
-                    <td>${t.task_id.substring(0, 8)}...</td>
-                    <td>${t.source_path}</td>
-                    <td>${t.destination_path}</td>
-                    <td>${t.protocol}</td>
-                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>
-                    <td>${new Date(t.timestamp).toLocaleString()}</td>
-                    <td>${details}</td>
-                `;
-            });  
-            
-            console.log(`✅ Displayed ${data.transfers.length} transfers`);  
-        })  
-        .catch(err => {
-            console.error('❌ Failed to load history:', err);
-            const tbody = document.querySelector('#history-table tbody');
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: red;">
-                Error loading transfers: ${err.message}<br>
-                <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>
-            </td></tr>`;
-        });  
-}  
+                    historyCurrentPage = 1; // Reset to first page
+                    displayHistory(data.transfers);
+                    console.log(`✅ Loaded ${data.transfers.length} transfers`);
+                })
+                .catch(err => {
+                    console.error('❌ Failed to load history:', err);
+                    const tbody = document.querySelector('#history-table tbody');
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: red;">
+                        Error loading transfers: ${err.message}<br>
+                        <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>
+                    </td></tr>`;
+                });
+        }  
         
-        function loadRules() {  
-    console.log('🔵 Loading rules...');  
-    
-    fetch('/api/v1/rules')  
-        .then(r => {  
-            console.log('📡 Rules response status:', r.status);  
-            if (!r.ok) {  
-                throw new Error(`HTTP error! status: ${r.status}`);  
-            }  
-            return r.json();  
-        })  
-        .then(data => {  
-            console.log('✅ Rules data received:', data);  
-            
-            const tbody = document.querySelector('#rules-table tbody');  
-            
-            // Check if we have rules  
-            if (!data || !data.rules) {  
-                console.warn('⚠️ No rules array in response');  
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: orange;">Invalid data format received</td></tr>';  
-                return;  
-            }  
-            
-            if (data.rules.length === 0) {  
-                console.log('ℹ️ No rules created yet');  
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No rules created yet. Click "Create New Rule" to get started.</td></tr>';  
-                return;  
-            }  
-            
-            // Clear table  
-            tbody.innerHTML = '';  
-            
-            // Add each rule  
-            data.rules.forEach((rule, index) => {  
-                console.log(`  📋 Rule ${index + 1}:`, rule.name);  
-                
-                const row = tbody.insertRow();  
-                row.innerHTML = `  
-                    <td><strong>${rule.name}</strong></td>  
-                    <td>${rule.source_path}<br><small>${rule.source_pattern}</small></td>  
-                    <td>${rule.destination_path}</td>  
-                    <td><span class="status-badge">${rule.schedule_type}</span></td>  
-                    <td><span class="status-badge">${rule.action_type}</span></td>  
-                    <td>${rule.files_transferred || 0}</td>  
-                    <td><span class="status-badge status-${rule.status}">${rule.status}</span></td>  
-                    <td>  
-                        <label class="toggle-switch">  
-                            <input type="checkbox" ${rule.enabled ? 'checked' : ''}   
-                                   onchange="toggleRule('${rule.rule_id}', this.checked)">  
-                            <span class="toggle-slider"></span>  
-                        </label>  
-                    </td>
-                    <td>
-                        ${rule.schedule_type === 'cron' ?
-                            `<button class="btn btn-small btn-success" onclick="executeRule('${rule.rule_id}')" style="margin-right: 5px;" title="Run full folder backup now">▶️ Run Now</button>` :
-                            ''}
-                        <button class="btn btn-small btn-primary" onclick="editRule('${rule.rule_id}')" style="margin-right: 5px;">Edit</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>
-                    </td>
-                `;
-            });  
-            
-            console.log(`✅ Displayed ${data.rules.length} rules`);  
-        })  
-        .catch(err => {  
-            console.error('❌ Failed to load rules:', err);  
-            const tbody = document.querySelector('#rules-table tbody');  
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: red;">  
-                Error loading rules: ${err.message}<br>  
-                <button class="btn btn-small btn-primary" onclick="loadRules()" style="margin-top: 10px;">🔄 Retry</button>  
-            </td></tr>`;  
-        });  
-}  
+        function loadRules() {
+            console.log('🔵 Loading rules...');
+
+            fetch('/api/v1/rules')
+                .then(r => {
+                    console.log('📡 Rules response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('✅ Rules data received:', data);
+
+                    if (!data || !data.rules) {
+                        console.warn('⚠️ No rules array in response');
+                        displayRules([]);
+                        return;
+                    }
+
+                    rulesCurrentPage = 1; // Reset to first page
+                    displayRules(data.rules);
+                    console.log(`✅ Loaded ${data.rules.length} rules`);
+                })
+                .catch(err => {
+                    console.error('❌ Failed to load rules:', err);
+                    const tbody = document.querySelector('#rules-table tbody');
+                    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: red;">
+                        Error loading rules: ${err.message}<br>
+                        <button class="btn btn-small btn-primary" onclick="loadRules()" style="margin-top: 10px;">🔄 Retry</button>
+                    </td></tr>`;
+                });
+        }  
         
         function toggleRule(ruleId, enabled) {
             const endpoint = enabled ? 'enable' : 'disable';
@@ -5434,6 +5663,25 @@ def get_server_activity():
             'error': str(e),
             'activity': [],
             'total': 0
+        }), 500
+
+
+@app.route('/api/v1/servers/activity/clear', methods=['POST'])
+def clear_server_activity():
+    """Clear server activity log"""
+    try:
+        server_monitor.clear_activity_log()
+        logger.info("Server activity log cleared")
+
+        return jsonify({
+            'success': True,
+            'message': 'Activity log cleared successfully'
+        })
+    except Exception as e:
+        logger.error(f"Failed to clear server activity: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 
