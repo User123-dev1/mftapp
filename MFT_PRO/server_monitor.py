@@ -310,6 +310,11 @@ class ServerHealthMonitor:
         """Get recent activity log entries"""
         return self.activity_log[:limit]
 
+    def clear_activity_log(self):
+        """Clear the activity log"""
+        self.activity_log.clear()
+        logger.info("Activity log cleared")
+
     def sync_servers_from_rules(self, rules: Dict):
         """Sync monitored servers from transfer rules"""
         # Collect all unique servers from rules
