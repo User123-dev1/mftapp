@@ -17,7 +17,7 @@ if sys.platform == 'win32':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-from flask import Flask, render_template_string, request, jsonify, send_file, session, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, send_file, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
 from functools import wraps
 import asyncio
@@ -451,6 +451,7 @@ HTML_TEMPLATE = """
 <html>
 <head>
     <title>MFT System - Professional File Transfer</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <style>
     .header-icon {
             width: 48px;
@@ -3806,6 +3807,19 @@ def update_local_user_permissions(user_id):
 def index():
     """Main page"""
     return render_template_string(HTML_TEMPLATE)
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon"""
+    try:
+        return send_from_directory(
+            os.path.join(os.path.dirname(__file__)),
+            'mft_icon.ico',
+            mimetype='image/x-icon'
+        )
+    except Exception as e:
+        logger.error(f"Failed to serve favicon: {e}")
+        return '', 404
 
 # Active Directory Configuration
 ad_config_data = {}
