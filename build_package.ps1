@@ -154,16 +154,16 @@ Write-Host "2. Double-click install.bat" -ForegroundColor White
 Write-Host "3. Double-click desktop icon to use" -ForegroundColor White
 Write-Host ""
 Write-Host "The installation is fully automated and includes:" -ForegroundColor Yellow
-Write-Host "✓ Auto-elevation (no need to right-click → Run as admin)" -ForegroundColor Gray
-Write-Host "✓ NSSM bundled (auto-start on boot)" -ForegroundColor Gray
-Write-Host "✓ Hidden console (no black window)" -ForegroundColor Gray
-Write-Host "✓ Custom desktop icon" -ForegroundColor Gray
-Write-Host "✓ Firewall rule creation" -ForegroundColor Gray
-Write-Host "✓ Service installation and startup" -ForegroundColor Gray
+Write-Host "- Auto-elevation (no need to right-click -> Run as admin)" -ForegroundColor Gray
+Write-Host "- NSSM bundled (auto-start on boot)" -ForegroundColor Gray
+Write-Host "- Hidden console (no black window)" -ForegroundColor Gray
+Write-Host "- Custom desktop icon" -ForegroundColor Gray
+Write-Host "- Firewall rule creation" -ForegroundColor Gray
+Write-Host "- Service installation and startup" -ForegroundColor Gray
 
 if ($Offline) {
-    Write-Host "✓ Python wheels bundled (offline installation)" -ForegroundColor Gray
+    Write-Host "- Python wheels bundled (offline installation)" -ForegroundColor Gray
 } else {
-    Write-Host "⚠️  Python dependencies require internet (use -Offline flag)" -ForegroundColor Yellow
+    Write-Host "! Python dependencies require internet (use -Offline flag)" -ForegroundColor Yellow
 }
 Write-Host ""
