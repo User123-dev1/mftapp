@@ -1032,66 +1032,222 @@ HTML_TEMPLATE = """
             <div class="tab" onclick="logout()" style="margin-left: auto; background: #e74c3c;">🚪 Logout</div>
         </div>
         
-        <!-- Dashboard Tab -->
-        <div id="dashboard-tab" class="tab-content active">
-            <h2>System Dashboard</h2>
-
-            <!-- Statistics Grid -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3 id="total-bytes-transferred">0 B</h3>
-                    <p>Total Data Transferred</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="total-files-transferred">0</h3>
-                    <p>Total Files Transferred</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="active-rules">0</h3>
-                    <p>Active Rules</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="total-transfers">0</h3>
-                    <p>Total Transfers</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="success-rate">0%</h3>
-                    <p>Success Rate</p>
-                </div>
-            </div>
-
-            <!-- Secondary Stats Grid -->
-            <div class="stats-grid" style="margin-top: 20px;">
-                <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    <h3 id="active-transfers">0</h3>
-                    <p>Active Transfers</p>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">
-                    <h3 id="completed-transfers">0</h3>
-                    <p>Completed</p>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%); color: white;">
-                    <h3 id="failed-transfers">0</h3>
-                    <p>Failed</p>
-                </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #4776e6 0%, #8e54e9 100%); color: white;">
-                    <h3 id="total-users">0</h3>
-                    <p>AD Users</p>
-                </div>
-            </div>
-
-            <!-- Performance Chart -->
-            <div style="background: white; padding: 20px; border-radius: 10px; margin-top: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h3 style="margin-bottom: 15px;">📈 Transfer Performance (Last 24 Hours)</h3>
-                <canvas id="performanceChart" height="80"></canvas>
-            </div>
-
-            <div class="info-box" style="margin-top: 20px;">
-                <strong>System Status</strong>
-                <p>All systems operational. Last AD sync: <span id="last-ad-sync">Never</span></p>
-                <p>Enabled compliance frameworks: <span id="enabled-frameworks">None</span></p>
-            </div>
+        const CircularGauge = ({ value, max = 100, label, unit = '', color = '#667eea', size = 140 }) => {
+  const percentage = Math.min((value / max) * 100, 100);
+  const strokeWidth = 14; // Thicker stroke
+  const radius = (size / 2) - (strokeWidth / 2) - 4;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+  
+  return (
+    <div className="flex flex-col items-center justify-center">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="transform -rotate-90 drop-shadow-lg">
+          {/* Background circle */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="#e5e7eb"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          {/* Progress circle */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            className="transition-all duration-1000"
+            filter="drop-shadow(0 0 10px rgba(102, 126, 234, 0.7))"
+          />
+        </svg>
+        {/* Center text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-lg font-bold text-gray-900">{value}</div>
+          <div className="text-xs text-gray-600">{unit}</div>
         </div>
+      </div>
+      <p className="mt-3 text-xs font-medium text-gray-700 text-center">{label}</p>
+    </div>
+  );
+};
+
+const DashboardTab = () => {
+  const [metrics] = useState({
+    totalBytesTransferred: '2.5 GB',
+    totalFilesTransferred: 1847,
+    activeRules: 42,
+    totalTransfers: 5234,
+    successRate: 98.5,
+    activeTransfers: 12,
+    completedTransfers: 4892,
+    failedTransfers: 342,
+    totalUsers: 156
+  });
+
+  const [lastAdSync] = useState('2 hours ago');
+  const [enabledFrameworks] = useState('GDPR, HIPAA, SOC 2');
+
+  const chartData = [
+    { time: '00:00', transfers: 120 },
+    { time: '04:00', transfers: 240 },
+    { time: '08:00', transfers: 420 },
+    { time: '12:00', transfers: 580 },
+    { time: '16:00', transfers: 680 },
+    { time: '20:00', transfers: 520 },
+    { time: '23:59', transfers: 380 },
+  ];
+
+  return (
+    <div id="dashboard-tab" className="tab-content active p-8 bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+      <h2 className="text-3xl font-bold text-gray-900 mb-8">System Dashboard</h2>
+
+      {/* Primary Gauges Grid */}
+      <div className="grid grid-cols-5 gap-8 mb-12">
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <CircularGauge
+            value={metrics.totalBytesTransferred}
+            max={10}
+            label="Total Data Transferred"
+            unit="GB"
+            color="#667eea"
+            size={140}
+          />
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <CircularGauge
+            value={metrics.totalFilesTransferred}
+            max={10000}
+            label="Total Files Transferred"
+            unit="files"
+            color="#764ba2"
+            size={140}
+          />
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <CircularGauge
+            value={metrics.activeRules}
+            max={100}
+            label="Active Rules"
+            unit="rules"
+            color="#11998e"
+            size={140}
+          />
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <CircularGauge
+            value={metrics.totalTransfers}
+            max={10000}
+            label="Total Transfers"
+            unit="transfers"
+            color="#38ef7d"
+            size={140}
+          />
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <CircularGauge
+            value={metrics.successRate}
+            max={100}
+            label="Success Rate"
+            unit="%"
+            color="#4776e6"
+            size={140}
+          />
+        </div>
+      </div>
+
+      {/* Secondary Gauges Grid */}
+      <div className="grid grid-cols-4 gap-8 mb-12">
+        <div className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-xl p-6 shadow-lg">
+          <div className="flex justify-center">
+            <CircularGauge
+              value={metrics.activeTransfers}
+              max={100}
+              label="Active Transfers"
+              unit="active"
+              color="#a78bfa"
+              size={140}
+            />
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-green-600 to-emerald-600 rounded-xl p-6 shadow-lg">
+          <div className="flex justify-center">
+            <CircularGauge
+              value={metrics.completedTransfers}
+              max={10000}
+              label="Completed"
+              unit="done"
+              color="#86efac"
+              size={140}
+            />
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-orange-600 to-red-600 rounded-xl p-6 shadow-lg">
+          <div className="flex justify-center">
+            <CircularGauge
+              value={metrics.failedTransfers}
+              max={1000}
+              label="Failed"
+              unit="failed"
+              color="#fed7aa"
+              size={140}
+            />
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl p-6 shadow-lg">
+          <div className="flex justify-center">
+            <CircularGauge
+              value={metrics.totalUsers}
+              max={500}
+              label="AD Users"
+              unit="users"
+              color="#93c5fd"
+              size={140}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Performance Chart */}
+      <div className="bg-white rounded-xl p-8 shadow-lg mb-8">
+        <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+          📈 Transfer Performance (Last 24 Hours)
+        </h3>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="time" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="transfers" stroke="#667eea" strokeWidth={3} dot={{ fill: '#667eea', r: 6 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* System Status */}
+      <div className="bg-white border-l-4 border-blue-500 rounded-xl p-6 shadow-lg">
+        <h4 className="text-lg font-bold text-gray-900 mb-4">🔍 System Status</h4>
+        <p className="text-gray-700 mb-2">
+          <span className="inline-flex items-center gap-2">
+            <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+            All systems operational
+          </span>
+        </p>
+        <p className="text-gray-700 mb-3">Last AD sync: <span className="font-semibold text-blue-600">{lastAdSync}</span></p>
+        <p className="text-gray-700">Enabled compliance frameworks: <span className="font-semibold text-green-600">{enabledFrameworks}</span></p>
+      </div>
+    </div>
+  );
+};
+
+export default DashboardTab;
         
         <!-- Transfer Tab -->
         <div id="transfer-tab" class="tab-content">
