@@ -1,7 +1,7 @@
 # MFT System - PowerShell Hidden Launcher
 # More reliable than VBScript for hiding console
 
-$installDir = "C:\Program Files\MFT-System"
+$installDir = "C:\MFT-System"
 $serviceName = "MFT-System"
 
 # Function to check if service is running
