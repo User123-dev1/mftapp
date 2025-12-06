@@ -557,26 +557,58 @@ class UNCHandler(BaseProtocolHandler):
             logger.info(f"📂 Dest (raw): {destination_path}")
             logger.info(f"📂 Dest (normalized): {dest_normalized}")
 
-            # Authenticate to UNC share if credentials provided
-            if config.username and config.password and config.host:
-                unc_share = f"\\\\{config.host}"
-                logger.info(f"🔐 Authenticating to {unc_share} as {config.username}...")
+            # Extract hosts from UNC paths for authentication
+            source_host = None
+            dest_host = None
 
-                try:
-                    # Use net use to authenticate
-                    auth_cmd = f'net use "{unc_share}" /user:{config.username} {config.password}'
-                    result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+            # Extract source host if it's a UNC path
+            if source_normalized.startswith('\\\\'):
+                parts = source_normalized[2:].split('\\', 1)
+                if parts:
+                    source_host = parts[0]
+                    logger.info(f"🔍 Source host extracted: {source_host}")
 
-                    if result.returncode == 0:
-                        logger.info(f"✅ Authentication successful")
-                    elif "already in use" in result.stdout.lower() or "multiple connections" in result.stdout.lower():
-                        logger.info(f"ℹ️  Connection already exists")
-                    else:
-                        logger.warning(f"⚠️  Authentication warning: {result.stdout}")
+            # Extract destination host if it's a UNC path
+            if dest_normalized.startswith('\\\\'):
+                parts = dest_normalized[2:].split('\\', 1)
+                if parts:
+                    dest_host = parts[0]
+                    logger.info(f"🔍 Dest host extracted: {dest_host}")
 
-                except Exception as auth_error:
-                    logger.error(f"❌ Authentication failed: {auth_error}")
-                    raise Exception(f"Failed to authenticate to {unc_share}: {auth_error}")
+            # Authenticate to both source and destination if credentials provided
+            if config.username and config.password:
+                hosts_to_auth = set()
+
+                # Add source host if it's remote
+                if source_host:
+                    hosts_to_auth.add(source_host)
+
+                # Add destination host if it's remote
+                if dest_host:
+                    hosts_to_auth.add(dest_host)
+                elif config.host:  # Fallback to config.host for destination
+                    hosts_to_auth.add(config.host)
+
+                # Authenticate to each unique host
+                for host in hosts_to_auth:
+                    unc_share = f"\\\\{host}"
+                    logger.info(f"🔐 Authenticating to {unc_share} as {config.username}...")
+
+                    try:
+                        # Use net use to authenticate
+                        auth_cmd = f'net use "{unc_share}" /user:{config.username} {config.password}'
+                        result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+
+                        if result.returncode == 0:
+                            logger.info(f"✅ Authentication successful to {host}")
+                        elif "already in use" in result.stdout.lower() or "multiple connections" in result.stdout.lower():
+                            logger.info(f"ℹ️  Connection already exists to {host}")
+                        else:
+                            logger.warning(f"⚠️  Authentication warning for {host}: {result.stdout}")
+
+                    except Exception as auth_error:
+                        logger.error(f"❌ Authentication failed to {host}: {auth_error}")
+                        raise Exception(f"Failed to authenticate to {unc_share}: {auth_error}")
             else:
                 logger.info(f"ℹ️  No credentials provided, using current Windows session")
 
