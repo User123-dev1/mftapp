@@ -668,26 +668,35 @@ class UNCHandler(BaseProtocolHandler):
                 shutil.copy2(source_normalized, dest_normalized)
 
             # Verify
-            if os.path.exists(dest_normalized):
-                if is_dir:
-                    dest_size = sum(os.path.getsize(os.path.join(dirpath, filename))
-                                   for dirpath, dirnames, filenames in os.walk(dest_normalized)
-                                   for filename in filenames)
-                else:
-                    dest_size = os.path.getsize(dest_normalized)
+            if not os.path.exists(dest_normalized):
+                raise Exception(f"Destination file/directory not found after copy: {dest_normalized}")
 
-                logger.info(f"📊 Dest size: {dest_size:,} bytes")
-
-                if dest_size == file_size:
-                    logger.info(f"✅ Size verification: PASSED")
-                else:
-                    logger.warning(f"⚠️  Size verification: MISMATCH (source={file_size}, dest={dest_size})")
-
-                logger.info(f"{'='*80}")
-                logger.info(f"✅ UNC TRANSFER SUCCESSFUL!")
-                logger.info(f"{'='*80}\n")
+            # Calculate destination size
+            if is_dir:
+                dest_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                               for dirpath, dirnames, filenames in os.walk(dest_normalized)
+                               for filename in filenames)
             else:
-                raise Exception("Destination file/directory not found after copy")
+                dest_size = os.path.getsize(dest_normalized)
+
+            logger.info(f"📊 Dest size: {dest_size:,} bytes")
+
+            # CRITICAL: Verify size matches
+            if dest_size != file_size:
+                error_msg = f"Size verification FAILED! Source: {file_size:,} bytes, Destination: {dest_size:,} bytes"
+                logger.error(f"❌ {error_msg}")
+                raise Exception(error_msg)
+
+            # CRITICAL: For directories, verify at least some files were copied (if source wasn't empty)
+            if is_dir and file_size > 0 and dest_size == 0:
+                error_msg = "Transfer FAILED! Source had files but destination is empty"
+                logger.error(f"❌ {error_msg}")
+                raise Exception(error_msg)
+
+            logger.info(f"✅ Size verification: PASSED ({dest_size:,} bytes)")
+            logger.info(f"{'='*80}")
+            logger.info(f"✅ UNC TRANSFER SUCCESSFUL!")
+            logger.info(f"{'='*80}\n")
 
             return {
                 'file_size': file_size,
