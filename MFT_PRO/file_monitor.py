@@ -585,6 +585,17 @@ class FileMonitorManager:
                         logger.info(f"   ✅ UNC points to localhost - converted to local: {source_path}")
 
             # Check if path exists
+            # For remote UNC paths, set status to monitoring but don't create observer
+            # (file system monitoring only works for local paths)
+            is_remote_unc = source_path.startswith('\\\\')
+
+            if is_remote_unc:
+                logger.warning(f"⚠️  Remote UNC path detected: {source_path}")
+                logger.warning(f"   File system monitoring is not supported for remote paths.")
+                logger.warning(f"   Setting status to 'monitoring' for UI display.")
+                rule.status = "monitoring"
+                return
+
             if not os.path.exists(source_path):
                 logger.error(f"❌ Source path does not exist: {source_path}")
                 logger.error(f"   Original: {rule.source_path}")

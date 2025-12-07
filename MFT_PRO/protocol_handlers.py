@@ -516,6 +516,7 @@ class UNCHandler(BaseProtocolHandler):
         Examples:
             //192.168.1.1/C$/folder → \\\\192.168.1.1\\C$\\folder
             /C$/folder + host=192.168.1.1 → \\\\192.168.1.1\\C$\\folder
+            C:\Users\file.txt + host=192.168.1.1 → \\\\192.168.1.1\\C$\\Users\\file.txt
         """
         logger.info(f"Normalizing UNC path: {path} (host={host})")
 
@@ -529,8 +530,20 @@ class UNCHandler(BaseProtocolHandler):
 
         # If host provided and path doesn't start with \\, prepend it
         if host and not path.startswith('\\\\'):
-            # Fix: Calculate stripped path before f-string
-            stripped_path = path.lstrip('\\')
+            # Check if this is a local Windows path (e.g., C:\Users\...)
+            # and convert to UNC admin share format (e.g., C$\Users\...)
+            import re
+            drive_match = re.match(r'^([A-Za-z]):[\\/](.*)$', path)
+            if drive_match:
+                # Convert C:\path to C$\path
+                drive_letter = drive_match.group(1).upper()
+                rest_of_path = drive_match.group(2)
+                stripped_path = f"{drive_letter}$\\{rest_of_path}"
+                logger.info(f"  Converted local path to admin share: {drive_letter}: → {drive_letter}$")
+            else:
+                # Not a local path, just strip leading slashes
+                stripped_path = path.lstrip('\\')
+
             result = f"\\\\{host}\\{stripped_path}"
             logger.info(f"  Added host prefix: {result}")
             return result
@@ -549,7 +562,17 @@ class UNCHandler(BaseProtocolHandler):
 
         try:
             # Normalize paths to Windows UNC format
-            source_normalized = self.normalize_unc_path(source_path, config.host)
+            # For source: only add host prefix if it's not a local path that exists
+            import re
+            is_local_source = re.match(r'^[A-Za-z]:[\\/]', source_path) and os.path.exists(source_path)
+
+            if is_local_source:
+                source_normalized = self.normalize_unc_path(source_path, None)  # Don't add host to local paths
+                logger.info(f"✅ Source is local and accessible - not adding UNC prefix")
+            else:
+                source_normalized = self.normalize_unc_path(source_path, config.host)
+
+            # For destination: always normalize with host
             dest_normalized = self.normalize_unc_path(destination_path, config.host)
 
             logger.info(f"📂 Source (raw): {source_path}")
