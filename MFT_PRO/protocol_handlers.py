@@ -708,13 +708,45 @@ class UNCHandler(BaseProtocolHandler):
             # Copy file or directory
             logger.info(f"📤 Copying {'directory' if is_dir else 'file'}...")
             if is_dir:
-                # For directories, use copytree
+                # For directories, use copytree with error handling
                 if os.path.exists(dest_normalized):
-                    shutil.rmtree(dest_normalized)
-                shutil.copytree(source_normalized, dest_normalized)
+                    logger.info(f"🗑️  Removing existing destination: {dest_normalized}")
+                    try:
+                        shutil.rmtree(dest_normalized)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to remove existing destination: {e}")
+                        raise Exception(f"Cannot remove existing destination: {e}")
+
+                # Copy directory with error tracking
+                errors = []
+                def copy_error_handler(func, path, exc_info):
+                    error_msg = f"Error copying {path}: {exc_info[1]}"
+                    errors.append(error_msg)
+                    logger.error(f"❌ {error_msg}")
+
+                try:
+                    shutil.copytree(source_normalized, dest_normalized,
+                                   ignore_dangling_symlinks=True,
+                                   onerror=copy_error_handler)
+
+                    if errors:
+                        logger.error(f"❌ Directory copy completed with {len(errors)} errors:")
+                        for err in errors[:5]:  # Show first 5 errors
+                            logger.error(f"   - {err}")
+                        raise Exception(f"Directory copy failed with {len(errors)} errors")
+
+                    logger.info(f"✅ Directory copied successfully")
+                except Exception as e:
+                    logger.error(f"❌ Directory copy failed: {e}")
+                    raise
             else:
                 # For files, use copy2
-                shutil.copy2(source_normalized, dest_normalized)
+                try:
+                    shutil.copy2(source_normalized, dest_normalized)
+                    logger.info(f"✅ File copied successfully")
+                except Exception as e:
+                    logger.error(f"❌ File copy failed: {e}")
+                    raise
 
             # Verify
             if not os.path.exists(dest_normalized):
