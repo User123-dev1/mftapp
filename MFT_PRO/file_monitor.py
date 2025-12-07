@@ -388,13 +388,17 @@ class FileMonitorHandler(FileSystemEventHandler):
             # For network transfers, use MFT application
             transfer_success = False
             try:
-                asyncio.run(self.transfer_callback(
+                # Execute transfer and capture return value
+                result = asyncio.run(self.transfer_callback(
                     source_path=file_path,
                     destination_path=dest_path,
                     rule=self.rule
                 ))
-                transfer_success = True
-                logger.info("✅ Network transfer completed successfully")
+                transfer_success = result  # Use actual return value from callback
+                if transfer_success:
+                    logger.info("✅ Network transfer completed successfully")
+                else:
+                    logger.warning("⚠️ Network transfer reported failure (polling timeout or failed status)")
             except Exception as transfer_error:
                 logger.error(f"❌ Network transfer failed: {transfer_error}")
                 transfer_success = False
@@ -673,6 +677,7 @@ class FileMonitorManager:
             max_wait = 60
             elapsed = 0
             poll_interval = 0.5
+            last_logged_status = None
 
             while elapsed < max_wait:
                 await asyncio.sleep(poll_interval)
@@ -682,8 +687,13 @@ class FileMonitorManager:
                 if status:
                     current_status = status.get('status', 'unknown')
 
+                    # Log status changes
+                    if current_status != last_logged_status:
+                        logger.info(f"📊 Transfer status: {current_status} (elapsed: {elapsed:.1f}s)")
+                        last_logged_status = current_status
+
                     if current_status == 'completed':
-                        logger.info(f"✅ AUTO-TRANSFER COMPLETED!")
+                        logger.info(f"✅ AUTO-TRANSFER COMPLETED! (took {elapsed:.1f}s)")
                         rule.status = "monitoring"
                         return True
                     elif current_status == 'failed':
@@ -691,8 +701,11 @@ class FileMonitorManager:
                         logger.error(f"❌ AUTO-TRANSFER FAILED: {error_msg}")
                         rule.status = "error"
                         return False
+                else:
+                    logger.debug(f"⏳ Waiting for status... (elapsed: {elapsed:.1f}s)")
 
-            logger.warning(f"⚠️ Transfer timeout after {max_wait}s")
+            logger.warning(f"⚠️ Transfer timeout after {max_wait}s - task may still be running")
+            logger.warning(f"⚠️ Final status check: {self.mft_app.get_transfer_status(task_id)}")
             rule.status = "monitoring"
             return False
 
