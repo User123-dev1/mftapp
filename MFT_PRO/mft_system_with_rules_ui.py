@@ -3320,7 +3320,13 @@ HTML_TEMPLATE = """
         });
         
         function testADConnection() {
-            fetch('/api/v1/ad/test', { method: 'POST' })
+            fetch('/api/v1/ad/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {

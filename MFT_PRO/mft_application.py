@@ -107,7 +107,7 @@ class MFTApplication:
                            config: TransferConfig, metadata: Optional[Dict] = None) -> str:
         """Transfer a file"""
         task_id = str(uuid.uuid4())
-        
+
         task = TransferTask(
             task_id=task_id,
             protocol=config.protocol,
@@ -117,13 +117,13 @@ class MFTApplication:
             status=TransferStatus.PENDING,
             created_at=datetime.utcnow()
         )
-        
+
         self.monitor.add_transfer(task)
-        
-        # Execute async
-        import asyncio
-        asyncio.create_task(self._execute_transfer(task))
-        
+
+        # Execute transfer immediately - await completion before returning
+        # This ensures the transfer completes before the event loop closes
+        await self._execute_transfer(task)
+
         return task_id
     
     async def _execute_transfer(self, task):

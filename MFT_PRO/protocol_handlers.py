@@ -626,8 +626,13 @@ class UNCHandler(BaseProtocolHandler):
                             logger.info(f"✅ Authentication successful to {host}")
                         elif "already in use" in result.stdout.lower() or "multiple connections" in result.stdout.lower():
                             logger.info(f"ℹ️  Connection already exists to {host}")
+                        elif "already in use" in result.stderr.lower() or "multiple connections" in result.stderr.lower():
+                            logger.info(f"ℹ️  Connection already exists to {host}")
                         else:
-                            logger.warning(f"⚠️  Authentication warning for {host}: {result.stdout}")
+                            # Log both stdout and stderr for debugging
+                            output = result.stdout.strip() or result.stderr.strip() or "(no output)"
+                            logger.warning(f"⚠️  Authentication warning for {host}: {output}")
+                            logger.warning(f"   Return code: {result.returncode}")
 
                     except Exception as auth_error:
                         logger.error(f"❌ Authentication failed to {host}: {auth_error}")
@@ -636,8 +641,29 @@ class UNCHandler(BaseProtocolHandler):
                 logger.info(f"ℹ️  No credentials provided, using current Windows session")
 
             # Check if source exists
-            if not os.path.exists(source_normalized):
+            logger.info(f"🔍 Checking if source exists: {source_normalized}")
+
+            # Try with and without trailing backslash
+            source_check = source_normalized.rstrip('\\')
+            if not os.path.exists(source_check):
+                logger.error(f"❌ Source not found: {source_check}")
+                logger.error(f"   Attempted authentication to: {', '.join(hosts_to_auth) if config.username else 'No credentials'}")
+
+                # Try to list parent directory for debugging
+                parent_dir = os.path.dirname(source_check)
+                if os.path.exists(parent_dir):
+                    try:
+                        contents = os.listdir(parent_dir)
+                        logger.info(f"   Parent directory exists and contains: {contents[:5]}..." if len(contents) > 5 else f"   Parent directory exists and contains: {contents}")
+                    except Exception as e:
+                        logger.error(f"   Cannot list parent directory: {e}")
+                else:
+                    logger.error(f"   Parent directory also not accessible: {parent_dir}")
+
                 raise FileNotFoundError(f"Source file/directory not found: {source_normalized}")
+
+            source_normalized = source_check
+            logger.info(f"✅ Source exists: {source_normalized}")
 
             # Get file info
             is_dir = os.path.isdir(source_normalized)
