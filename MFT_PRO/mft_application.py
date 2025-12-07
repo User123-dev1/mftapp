@@ -78,7 +78,9 @@ class MFTApplication:
                 WebDAVHandler, SMBHandler, UNCHandler,
                 TFTPHandler, AS2Handler
             )
-            
+
+            logger.info("🔧 Initializing protocol handlers...")
+
             self.protocol_handlers = {
                 TransferProtocol.SFTP: SFTPHandler(),
                 TransferProtocol.FTPS: FTPSHandler(),
@@ -91,9 +93,15 @@ class MFTApplication:
                 TransferProtocol.TFTP: TFTPHandler(),
                 TransferProtocol.AS2: AS2Handler(),
             }
-            logger.info(f"Initialized {len(self.protocol_handlers)} protocol handlers")
+            logger.info(f"✅ Initialized {len(self.protocol_handlers)} protocol handlers")
+            for protocol in self.protocol_handlers.keys():
+                logger.info(f"   - {protocol.value}: {self.protocol_handlers[protocol].__class__.__name__}")
         except Exception as e:
-            logger.error(f"Error initializing handlers: {e}")
+            logger.error(f"❌ Error initializing handlers: {e}")
+            import traceback
+            traceback.print_exc()
+            # Initialize empty dict so app doesn't crash
+            self.protocol_handlers = {}
     
     async def transfer_file(self, source_path: str, destination_path: str,
                            config: TransferConfig, metadata: Optional[Dict] = None) -> str:

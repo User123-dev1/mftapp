@@ -511,12 +511,12 @@ class UNCHandler(BaseProtocolHandler):
     """UNC path handler (Windows network shares) - FIXED VERSION"""
 
     def normalize_unc_path(self, path: str, host: str = None) -> str:
-        """Normalize UNC path to Windows format
+        r"""Normalize UNC path to Windows format
 
         Examples:
-            //192.168.1.1/C$/folder → \\\\192.168.1.1\\C$\\folder
-            /C$/folder + host=192.168.1.1 → \\\\192.168.1.1\\C$\\folder
-            C:\Users\file.txt + host=192.168.1.1 → \\\\192.168.1.1\\C$\\Users\\file.txt
+            //192.168.1.1/C$/folder → \\192.168.1.1\C$\folder
+            /C$/folder + host=192.168.1.1 → \\192.168.1.1\C$\folder
+            C:\Users\file.txt + host=192.168.1.1 → \\192.168.1.1\C$\Users\file.txt
         """
         logger.info(f"Normalizing UNC path: {path} (host={host})")
 
