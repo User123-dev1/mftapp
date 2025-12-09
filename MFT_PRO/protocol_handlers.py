@@ -717,25 +717,21 @@ class UNCHandler(BaseProtocolHandler):
                         logger.error(f"❌ Failed to remove existing destination: {e}")
                         raise Exception(f"Cannot remove existing destination: {e}")
 
-                # Copy directory with error tracking
-                errors = []
-                def copy_error_handler(func, path, exc_info):
-                    error_msg = f"Error copying {path}: {exc_info[1]}"
-                    errors.append(error_msg)
-                    logger.error(f"❌ {error_msg}")
-
+                # Copy directory and catch errors
                 try:
                     shutil.copytree(source_normalized, dest_normalized,
-                                   ignore_dangling_symlinks=True,
-                                   onerror=copy_error_handler)
-
-                    if errors:
-                        logger.error(f"❌ Directory copy completed with {len(errors)} errors:")
-                        for err in errors[:5]:  # Show first 5 errors
-                            logger.error(f"   - {err}")
-                        raise Exception(f"Directory copy failed with {len(errors)} errors")
-
+                                   ignore_dangling_symlinks=True)
                     logger.info(f"✅ Directory copied successfully")
+                except shutil.Error as e:
+                    # shutil.Error contains a list of errors that occurred during copy
+                    logger.error(f"❌ Directory copy completed with errors:")
+                    try:
+                        for src, dst, error in e.args[0]:
+                            logger.error(f"   Failed to copy {src} to {dst}: {error}")
+                        raise Exception(f"Directory copy failed with {len(e.args[0])} errors")
+                    except (IndexError, TypeError):
+                        logger.error(f"   Error details: {e}")
+                        raise Exception(f"Directory copy failed: {e}")
                 except Exception as e:
                     logger.error(f"❌ Directory copy failed: {e}")
                     raise
