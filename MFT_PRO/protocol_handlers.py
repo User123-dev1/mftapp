@@ -692,23 +692,21 @@ class UNCHandler(BaseProtocolHandler):
             else:
                 checksums = {'checksum_md5': None, 'checksum_sha256': None}
 
-            # Ensure destination directory exists
-            if is_dir:
-                dest_base = dest_normalized
-            else:
+            # Ensure destination directory exists (for files only)
+            # For directories, copytree will create the destination itself
+            if not is_dir:
                 dest_base = os.path.dirname(dest_normalized)
-
-            if dest_base:
-                try:
-                    os.makedirs(dest_base, exist_ok=True)
-                    logger.info(f"📁 Created dest directory: {dest_base}")
-                except Exception as e:
-                    logger.warning(f"⚠️  Could not create dest dir (may already exist): {e}")
+                if dest_base:
+                    try:
+                        os.makedirs(dest_base, exist_ok=True)
+                        logger.info(f"📁 Created parent directory: {dest_base}")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Could not create parent dir (may already exist): {e}")
 
             # Copy file or directory
             logger.info(f"📤 Copying {'directory' if is_dir else 'file'}...")
             if is_dir:
-                # For directories, use copytree with error handling
+                # For directories, remove destination if it exists, then use copytree
                 if os.path.exists(dest_normalized):
                     logger.info(f"🗑️  Removing existing destination: {dest_normalized}")
                     try:
@@ -718,7 +716,10 @@ class UNCHandler(BaseProtocolHandler):
                         raise Exception(f"Cannot remove existing destination: {e}")
 
                 # Copy directory and catch errors
+                # copytree will create the destination directory
                 try:
+                    logger.info(f"📂 Copying from: {source_normalized}")
+                    logger.info(f"📂 Copying to: {dest_normalized}")
                     shutil.copytree(source_normalized, dest_normalized,
                                    ignore_dangling_symlinks=True)
                     logger.info(f"✅ Directory copied successfully")
@@ -734,6 +735,8 @@ class UNCHandler(BaseProtocolHandler):
                         raise Exception(f"Directory copy failed: {e}")
                 except Exception as e:
                     logger.error(f"❌ Directory copy failed: {e}")
+                    import traceback
+                    traceback.print_exc()
                     raise
             else:
                 # For files, use copy2
@@ -750,13 +753,23 @@ class UNCHandler(BaseProtocolHandler):
 
             # Calculate destination size
             if is_dir:
-                dest_size = sum(os.path.getsize(os.path.join(dirpath, filename))
-                               for dirpath, dirnames, filenames in os.walk(dest_normalized)
-                               for filename in filenames)
+                logger.info(f"🔍 Calculating destination size by walking: {dest_normalized}")
+                file_count = 0
+                dest_size = 0
+                for dirpath, dirnames, filenames in os.walk(dest_normalized):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        try:
+                            size = os.path.getsize(filepath)
+                            dest_size += size
+                            file_count += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️  Could not get size of {filepath}: {e}")
+                logger.info(f"📊 Found {file_count} files in destination")
+                logger.info(f"📊 Dest size: {dest_size:,} bytes")
             else:
                 dest_size = os.path.getsize(dest_normalized)
-
-            logger.info(f"📊 Dest size: {dest_size:,} bytes")
+                logger.info(f"📊 Dest size: {dest_size:,} bytes")
 
             # CRITICAL: Verify size matches
             if dest_size != file_size:
