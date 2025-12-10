@@ -148,6 +148,9 @@ logger.info("="*80 + "\n")
 # Start monitoring on startup
 monitor_manager.start_all()
 
+# Start scheduler for RECURRING and CRON rules
+monitor_manager.start_scheduler()
+
 # Start server health monitoring
 server_monitor.start_monitoring()
 
@@ -5842,6 +5845,15 @@ def shutdown_server():
         def shutdown():
             import time
             time.sleep(2)
+
+            # Stop scheduler
+            logger.info("⏰ Stopping scheduler...")
+            monitor_manager.stop_scheduler()
+
+            # Stop monitoring
+            logger.info("🛑 Stopping file monitoring...")
+            monitor_manager.stop_all()
+
             import os
             import signal
             os.kill(os.getpid(), signal.SIGINT)

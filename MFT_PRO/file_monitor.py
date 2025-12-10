@@ -507,6 +507,11 @@ class FileMonitorManager:
         self.observers: Dict[str, Observer] = {}
         self.active = False
 
+        # Scheduler for RECURRING and CRON rules
+        self.scheduler_thread = None
+        self.scheduler_running = False
+        self.scheduler_interval = 60  # Check every 60 seconds
+
     def add_rule(self, rule: TransferRule):
         """Add a new transfer rule"""
         logger.info(f"➕ Adding rule: {rule.name} (ID: {rule.rule_id})")
@@ -1038,6 +1043,185 @@ class FileMonitorManager:
 
         self.active = False
         logger.info(f"✅ All monitors stopped")
+
+    def start_scheduler(self):
+        """Start the background scheduler for RECURRING and CRON rules"""
+        if self.scheduler_running:
+            logger.info("⏰ Scheduler already running")
+            return
+
+        self.scheduler_running = True
+        self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
+        self.scheduler_thread.start()
+        logger.info("⏰ Scheduler started - checking RECURRING and CRON rules every 60 seconds")
+
+    def stop_scheduler(self):
+        """Stop the background scheduler"""
+        self.scheduler_running = False
+        if self.scheduler_thread:
+            self.scheduler_thread.join(timeout=5)
+        logger.info("⏰ Scheduler stopped")
+
+    def _scheduler_loop(self):
+        """Background thread that checks and executes scheduled rules"""
+        while self.scheduler_running:
+            try:
+                current_time = datetime.now()
+
+                for rule in self.rules.values():
+                    if not rule.enabled:
+                        continue
+
+                    # Check RECURRING rules
+                    if rule.schedule_type == ScheduleType.RECURRING:
+                        if self._should_run_recurring_rule(rule, current_time):
+                            logger.info(f"⏰ Running recurring rule: {rule.name}")
+                            self._execute_scheduled_transfer(rule)
+
+                    # Check CRON rules
+                    elif rule.schedule_type == ScheduleType.CRON:
+                        if self._should_run_cron_rule(rule, current_time):
+                            logger.info(f"⏰ Running cron rule: {rule.name}")
+                            self._execute_scheduled_transfer(rule)
+
+                # Sleep for scheduler interval
+                time.sleep(self.scheduler_interval)
+
+            except Exception as e:
+                logger.error(f"❌ Error in scheduler loop: {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(self.scheduler_interval)
+
+    def _should_run_recurring_rule(self, rule: TransferRule, current_time: datetime) -> bool:
+        """Check if a recurring rule should run based on interval"""
+        if not rule.schedule_interval_minutes:
+            logger.warning(f"⚠️  Recurring rule '{rule.name}' has no interval set, defaulting to 60 minutes")
+            rule.schedule_interval_minutes = 60
+
+        # If never run, run now
+        if not rule.last_run:
+            return True
+
+        # Check if enough time has passed since last run
+        time_since_last = current_time - rule.last_run
+        interval_seconds = rule.schedule_interval_minutes * 60
+
+        if time_since_last.total_seconds() >= interval_seconds:
+            return True
+
+        return False
+
+    def _should_run_cron_rule(self, rule: TransferRule, current_time: datetime) -> bool:
+        """Check if a cron rule should run based on cron expression"""
+        if not rule.schedule_cron:
+            logger.warning(f"⚠️  Cron rule '{rule.name}' has no cron expression")
+            return False
+
+        try:
+            from croniter import croniter
+
+            # If never run, check if it should run now
+            if not rule.last_run:
+                cron = croniter(rule.schedule_cron, current_time)
+                next_run = cron.get_prev(datetime)
+                # Run if we're past the previous scheduled time
+                return True
+
+            # Check if we're past the next scheduled run time
+            cron = croniter(rule.schedule_cron, rule.last_run)
+            next_run = cron.get_next(datetime)
+
+            if current_time >= next_run:
+                return True
+
+        except Exception as e:
+            logger.error(f"❌ Error parsing cron expression '{rule.schedule_cron}': {e}")
+            return False
+
+        return False
+
+    def _execute_scheduled_transfer(self, rule: TransferRule):
+        """Execute a scheduled transfer for a rule"""
+        try:
+            rule.status = "transferring"
+            rule.last_run = datetime.now()
+
+            # Get list of files matching the pattern
+            import glob
+            source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
+
+            # Build the search pattern
+            if source_path.endswith('\\') or source_path.endswith('/'):
+                search_pattern = os.path.join(source_path, rule.source_pattern)
+            else:
+                search_pattern = os.path.join(source_path, '*', rule.source_pattern) if os.path.isdir(source_path) else source_path
+
+            # Find matching files
+            matching_files = glob.glob(search_pattern, recursive=False)
+
+            if not matching_files:
+                logger.info(f"📂 No files found matching pattern: {rule.source_pattern}")
+                rule.status = "monitoring"
+                return
+
+            logger.info(f"📂 Found {len(matching_files)} file(s) to transfer")
+
+            # Transfer each file
+            transferred_count = 0
+            for file_path in matching_files:
+                if not os.path.isfile(file_path):
+                    continue
+
+                try:
+                    # Build destination path
+                    filename = os.path.basename(file_path)
+                    dest_path = os.path.join(rule.destination_path, filename)
+
+                    # Execute transfer using the callback
+                    logger.info(f"📤 Transferring: {filename}")
+                    asyncio.run(self._transfer_callback(file_path, dest_path, rule))
+
+                    # Update statistics
+                    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    rule.files_transferred += 1
+                    rule.bytes_transferred += file_size
+                    rule.last_transfer_time = datetime.now()
+
+                    # Handle post-transfer action (COPY/MOVE)
+                    if rule.action_type == ActionType.MOVE:
+                        try:
+                            os.remove(file_path)
+                            logger.info(f"🗑️  Deleted source file (MOVE): {file_path}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to delete source file: {e}")
+                    elif rule.action_type == ActionType.MOVE_WITH_DELAY:
+                        # Schedule delayed deletion
+                        def delayed_delete():
+                            time.sleep(rule.delete_delay_seconds)
+                            try:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                    logger.info(f"🗑️  Deleted source file after delay: {file_path}")
+                            except Exception as e:
+                                logger.error(f"❌ Failed to delete source file: {e}")
+
+                        thread = threading.Thread(target=delayed_delete, daemon=True)
+                        thread.start()
+
+                    transferred_count += 1
+
+                except Exception as e:
+                    logger.error(f"❌ Failed to transfer {file_path}: {e}")
+
+            logger.info(f"✅ Transferred {transferred_count}/{len(matching_files)} files for rule: {rule.name}")
+            rule.status = "monitoring"
+
+        except Exception as e:
+            logger.error(f"❌ Error executing scheduled transfer for '{rule.name}': {e}")
+            import traceback
+            traceback.print_exc()
+            rule.status = "error"
 
     def get_statistics(self):
         """Get statistics for all rules"""
