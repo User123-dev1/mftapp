@@ -50,3 +50,15 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# MFT Runtime Files
+mft_state/
+MFT_PRO/mft_state/
+audit_trail.jsonl
+compliance_config.json
+*.log
+
+# Third-party binaries
+nssm/
+nssm.zip
+*.ico
