@@ -589,23 +589,29 @@ class FileMonitorManager:
                         source_path = source_path_part
                         logger.info(f"   ✅ UNC points to localhost - converted to local: {source_path}")
 
-            # Check if path exists
-            # For remote UNC paths, set status to monitoring but don't create observer
-            # (file system monitoring only works for local paths)
+            # Check if path exists and is accessible
             is_remote_unc = source_path.startswith('\\\\')
 
-            if is_remote_unc:
-                logger.warning(f"⚠️  Remote UNC path detected: {source_path}")
-                logger.warning(f"   File system monitoring is not supported for remote paths.")
-                logger.warning(f"   Setting status to 'monitoring' for UI display.")
-                rule.status = "monitoring"
-                return
-
             if not os.path.exists(source_path):
-                logger.error(f"❌ Source path does not exist: {source_path}")
+                logger.error(f"❌ Source path does not exist or is not accessible: {source_path}")
                 logger.error(f"   Original: {rule.source_path}")
                 logger.error(f"   Normalized: {source_path}")
+
+                if is_remote_unc:
+                    logger.error(f"")
+                    logger.error(f"⚠️  This is a REMOTE UNC path that cannot be accessed.")
+                    logger.error(f"   For remote UNC/SMB/SFTP sources, use RECURRING schedule instead of EVENT_DRIVEN:")
+                    logger.error(f"   - RECURRING: Polls the remote location every X minutes")
+                    logger.error(f"   - EVENT_DRIVEN: Only works for LOCAL or ACCESSIBLE paths")
+                    logger.error(f"")
+                    rule.status = "error"
                 return
+
+            # If we reach here, path is accessible (even if it's UNC)
+            if is_remote_unc:
+                logger.info(f"✅ Remote UNC path is accessible: {source_path}")
+                logger.info(f"   Will attempt to monitor for file events...")
+                logger.info(f"   Note: If events don't trigger, switch to RECURRING schedule")
 
             # Create event handler
             event_handler = FileMonitorHandler(
@@ -1152,13 +1158,17 @@ class FileMonitorManager:
             source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
 
             # Build the search pattern
-            if source_path.endswith('\\') or source_path.endswith('/'):
-                search_pattern = os.path.join(source_path, rule.source_pattern)
-            else:
-                search_pattern = os.path.join(source_path, '*', rule.source_pattern) if os.path.isdir(source_path) else source_path
+            search_pattern = os.path.join(source_path, rule.source_pattern)
+            logger.debug(f"🔍 Searching for files: {search_pattern}")
 
             # Find matching files
-            matching_files = glob.glob(search_pattern, recursive=False)
+            try:
+                matching_files = glob.glob(search_pattern, recursive=False)
+            except Exception as e:
+                logger.error(f"❌ Error accessing source path: {e}")
+                logger.error(f"   This may be a remote SFTP/FTP path that requires protocol-specific access")
+                rule.status = "error"
+                return
 
             if not matching_files:
                 logger.info(f"📂 No files found matching pattern: {rule.source_pattern}")
