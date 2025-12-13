@@ -2304,7 +2304,7 @@ def get_group_members(group_id):
 
 
 @app.route('/api/v1/groups/<group_id>/members', methods=['POST'])
-def add_user_to_group(group_id, user_id):
+def add_user_to_group(group_id):
     """Add user to group"""
     try:
         data = request.get_json()
@@ -2782,31 +2782,27 @@ def create_rule():
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Create transfer config
-        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
+        # Generate unique rule ID
+        rule_id = str(uuid.uuid4())
 
-        config = TransferConfig(
+        # Get protocol as string (not enum)
+        protocol = data.get('protocol', 'unc').lower()
+
+        # Create transfer rule
+        rule = TransferRule(
+            rule_id=rule_id,
+            name=data.get('name'),
+            source_path=data.get('source_path'),
+            destination_path=data.get('destination_path'),
             protocol=protocol,
             host=data.get('host'),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
-            encryption_enabled=compliance_manager.is_encryption_required(),
-            retry_count=3,
-            retry_delay=5,
-            timeout=300
-        )
-
-        # Create transfer rule
-        rule = TransferRule(
-            name=data.get('name'),
-            source_path=data.get('source_path'),
-            destination_path=data.get('destination_path'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
-            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
@@ -2814,7 +2810,7 @@ def create_rule():
         )
 
         # Add rule to monitor manager
-        rule_id = monitor_manager.add_rule(rule)
+        monitor_manager.add_rule(rule)
 
         # Log audit event
         audit_manager.log_event(
@@ -2887,46 +2883,36 @@ def update_rule(rule_id):
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Create transfer config
-        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
+        # Get protocol as string (not enum)
+        protocol = data.get('protocol', 'unc').lower()
 
-        config = TransferConfig(
+        # Create updated transfer rule
+        rule = TransferRule(
+            rule_id=rule_id,
+            name=data.get('name'),
+            source_path=data.get('source_path'),
+            destination_path=data.get('destination_path'),
             protocol=protocol,
             host=data.get('host'),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
-            encryption_enabled=compliance_manager.is_encryption_required(),
-            retry_count=3,
-            retry_delay=5,
-            timeout=300
-        )
-
-        # Create updated transfer rule
-        rule = TransferRule(
-            name=data.get('name'),
-            source_path=data.get('source_path'),
-            destination_path=data.get('destination_path'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
-            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron')
         )
 
-        # Override the rule_id to keep the same ID
-        rule.rule_id = rule_id
-
         # Add updated rule to monitor manager
         monitor_manager.rules[rule_id] = rule
-        monitor_manager.save_rules()
 
-        # Restart monitoring for this rule
-        monitor_manager.start_rule(rule_id)
+        # Restart monitoring for this rule if it's enabled and event-driven
+        if rule.enabled and rule.schedule_type == ScheduleType.EVENT_DRIVEN:
+            monitor_manager._start_monitoring(rule)
 
         # Log audit event
         audit_manager.log_event(
