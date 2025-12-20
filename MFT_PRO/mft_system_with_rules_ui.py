@@ -2804,7 +2804,7 @@ def create_rule():
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 300),
+            delete_delay_seconds=data.get('delete_delay_seconds', 5),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron')
         )
@@ -2902,7 +2902,7 @@ def update_rule(rule_id):
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 300),
+            delete_delay_seconds=data.get('delete_delay_seconds', 5),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron')
         )
@@ -2990,6 +2990,29 @@ def disable_rule(rule_id):
 
     except Exception as e:
         logger.error(f"Failed to disable rule: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/rules/<rule_id>/skipped', methods=['GET'])
+def get_skipped_files(rule_id):
+    """Get skipped files report for a rule"""
+    try:
+        if rule_id not in monitor_manager.rules:
+            return jsonify({'success': False, 'error': 'Rule not found'}), 404
+
+        rule = monitor_manager.rules[rule_id]
+        skipped_files = rule.skipped_files
+
+        return jsonify({
+            'success': True,
+            'rule_id': rule_id,
+            'rule_name': rule.name,
+            'skipped_count': len(skipped_files),
+            'skipped_files': skipped_files
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get skipped files: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

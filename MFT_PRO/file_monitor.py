@@ -1,6 +1,7 @@
 """
 File Monitoring & Automated Transfer System
 Watches source folders and automatically transfers new/modified files
+Enhanced with CSV validation and recursive folder monitoring
 """
 
 import os
@@ -11,9 +12,11 @@ from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 import asyncio
 from typing import Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import logging
+import csv
+import fnmatch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,7 +75,14 @@ class TransferRule:
     min_file_size: int = 0        # Minimum file size in bytes
     max_file_size: int = 0        # Maximum file size (0 = no limit)
     file_age_seconds: int = 5     # Wait before transfer (file stability)
-    delete_delay_seconds: int = 0  # Delay before deleting (for MOVE_WITH_DELAY)
+    delete_delay_seconds: int = 5  # Delay before deleting (for MOVE_WITH_DELAY) - changed from 0 to 5
+
+    # CSV Processing options
+    search_subfolders: bool = False  # Search through subfolders recursively
+    csv_filename_pattern: Optional[str] = None  # Specific CSV filename to search for
+    rename_to: Optional[str] = None  # Rename file to this name (with auto-increment)
+    validate_csv_content: bool = False  # Check for empty files and header-only CSV files
+    skip_empty_files: bool = False  # Skip files with no content or only headers
 
     # Schedule options (if schedule_type is RECURRING or CRON)
     schedule_cron: Optional[str] = None           # Cron expression: "0 */4 * * *"
@@ -82,6 +92,65 @@ class TransferRule:
     files_transferred: int = 0
     last_transfer_time: Optional[datetime] = None
     status: str = "idle"  # idle, monitoring, transferring, error
+    rename_counter: int = 1  # Auto-increment counter for file renaming
+    skipped_files: List[Dict] = field(default_factory=list)  # Track skipped files with reasons
+
+
+# ============================================================================
+# CSV VALIDATION HELPER FUNCTIONS
+# ============================================================================
+
+def validate_csv_file(file_path: str) -> tuple[bool, str]:
+    """
+    Validate CSV file for content.
+    Returns (is_valid, reason) tuple.
+    - is_valid: True if file has content beyond headers
+    - reason: Explanation if file is invalid
+    """
+    try:
+        # Check if file is empty
+        if os.path.getsize(file_path) == 0:
+            return False, "File is empty (0 bytes)"
+
+        # Try to read CSV
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            csv_reader = csv.reader(f)
+            rows = list(csv_reader)
+
+            if len(rows) == 0:
+                return False, "CSV has no rows"
+
+            if len(rows) == 1:
+                return False, "CSV only contains header row (no data)"
+
+            # Check if all data rows are empty
+            data_rows = rows[1:]  # Skip header
+            all_empty = all(all(cell.strip() == '' for cell in row) for row in data_rows)
+
+            if all_empty:
+                return False, "CSV contains only empty data rows"
+
+            return True, "Valid CSV with data"
+
+    except Exception as e:
+        return False, f"Error reading CSV: {str(e)}"
+
+
+def find_csv_in_subfolders(parent_path: str, filename_pattern: str) -> Optional[str]:
+    """
+    Recursively search for CSV file matching pattern in subfolders.
+    Returns path to first matching file, or None if not found.
+    """
+    try:
+        for root, dirs, files in os.walk(parent_path):
+            for file in files:
+                if file.lower().endswith('.csv'):
+                    if fnmatch.fnmatch(file, filename_pattern):
+                        return os.path.join(root, file)
+        return None
+    except Exception as e:
+        logger.error(f"Error searching subfolders: {e}")
+        return None
 
 
 class FileMonitorHandler(FileSystemEventHandler):
@@ -130,6 +199,20 @@ class FileMonitorHandler(FileSystemEventHandler):
             if file_path in self.transferring_files:
                 logger.debug(f"File {filename} already being transferred")
                 return False
+
+            # CSV Validation (if enabled)
+            if self.rule.validate_csv_content and file_path.lower().endswith('.csv'):
+                is_valid, reason = validate_csv_file(file_path)
+                if not is_valid:
+                    logger.warning(f"⚠️ Skipping invalid CSV file: {filename} - {reason}")
+                    # Track skipped file
+                    self.rule.skipped_files.append({
+                        'file': file_path,
+                        'reason': reason,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    if self.rule.skip_empty_files:
+                        return False
 
             return True
 
@@ -183,6 +266,16 @@ class FileMonitorHandler(FileSystemEventHandler):
         try:
             self.transferring_files.add(file_path)
             filename = os.path.basename(file_path)
+
+            # Handle file renaming (if configured)
+            if self.rule.rename_to:
+                # Extract file extension
+                _, ext = os.path.splitext(filename)
+                # Create new filename with auto-increment counter
+                new_filename = f"{self.rule.rename_to}_{self.rule.rename_counter:02d}{ext}"
+                self.rule.rename_counter += 1
+                logger.info(f"🔄 Renaming: {filename} → {new_filename}")
+                filename = new_filename
 
             # Build destination path
             dest_path = os.path.join(self.rule.destination_path, filename)
@@ -426,9 +519,9 @@ class FileMonitorManager:
                 transfer_callback=self._transfer_callback
             )
 
-            # Create observer
+            # Create observer with recursive monitoring if enabled
             observer = Observer()
-            observer.schedule(event_handler, source_path, recursive=False)
+            observer.schedule(event_handler, source_path, recursive=rule.search_subfolders)
             observer.start()
 
             self.observers[rule.rule_id] = observer
@@ -437,6 +530,11 @@ class FileMonitorManager:
             logger.info(f"👀 Started monitoring: {source_path}")
             logger.info(f"   Pattern: {rule.source_pattern}")
             logger.info(f"   Trigger: {rule.trigger_type.value}")
+            logger.info(f"   Recursive: {rule.search_subfolders}")
+            if rule.csv_filename_pattern:
+                logger.info(f"   CSV Pattern: {rule.csv_filename_pattern}")
+            if rule.rename_to:
+                logger.info(f"   Rename To: {rule.rename_to}_XX")
 
         except Exception as e:
             logger.error(f"❌ Failed to start monitoring: {e}")
