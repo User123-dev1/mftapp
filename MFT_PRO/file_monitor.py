@@ -90,10 +90,13 @@ class TransferRule:
 
     # Statistics
     files_transferred: int = 0
+    bytes_transferred: int = 0  # Total bytes transferred
     last_transfer_time: Optional[datetime] = None
     status: str = "idle"  # idle, monitoring, transferring, error
     rename_counter: int = 1  # Auto-increment counter for file renaming
     skipped_files: List[Dict] = field(default_factory=list)  # Track skipped files with reasons
+    created_at: Optional[datetime] = None  # When the rule was created
+    last_run: Optional[datetime] = None  # When the rule last executed
 
 
 # ============================================================================
