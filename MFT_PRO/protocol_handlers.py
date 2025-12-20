@@ -66,6 +66,71 @@ class SFTPHandler(BaseProtocolHandler):
     async def transfer(self, source_path: str, destination_path: str, config: Any) -> Dict[str, Any]:
         """Transfer file via SFTP"""
         try:
+            logger.info(f"🔵 SFTP Transfer starting...")
+            logger.info(f"   Source (raw): {source_path}")
+            logger.info(f"   Destination (raw): {destination_path}")
+            logger.info(f"   Host: {config.host}")
+
+            # Normalize source path to Windows UNC format
+            source_normalized = source_path
+
+            # Convert forward slashes to backslashes
+            if '//' in source_path or '\\\\' in source_path:
+                # This is a UNC path - keep it as UNC, just normalize format
+                source_normalized = source_path.replace('/', '\\')
+                # Ensure it starts with exactly two backslashes
+                if not source_normalized.startswith('\\\\'):
+                    source_normalized = '\\\\' + source_normalized.lstrip('\\')
+
+                # Convert C$ to C: for Windows paths
+                import re
+                source_normalized = re.sub(r'\\([A-Za-z])\$\\', r'\\\1:\\', source_normalized)
+
+                logger.info(f"   UNC path normalized: {source_normalized}")
+            else:
+                # Convert forward slashes to backslashes for Windows
+                source_normalized = source_path.replace('/', '\\')
+
+            logger.info(f"   Source (normalized): {source_normalized}")
+
+            # If source is a UNC path pointing to localhost, convert to local path
+            if source_normalized.startswith('\\\\'):
+                import socket
+                # Extract host from UNC path (\\host\path)
+                unc_parts = source_normalized.lstrip('\\').split('\\', 1)
+                if len(unc_parts) >= 1:
+                    source_host = unc_parts[0]
+                    source_path_part = unc_parts[1] if len(unc_parts) > 1 else ''
+
+                    # Get local machine IPs and hostname
+                    local_ips = []
+                    local_hostname = 'localhost'
+                    try:
+                        local_hostname = socket.gethostname()
+                        local_ips = [local_hostname.lower()]
+                        # Get all local IP addresses
+                        for ip_info in socket.getaddrinfo(local_hostname, None):
+                            ip = ip_info[4][0]
+                            local_ips.append(ip)
+                    except Exception as e:
+                        logger.warning(f"Could not get local IPs: {e}")
+
+                    # Check if source_host is the local machine
+                    is_local = (
+                        source_host.lower() in ['localhost', '127.0.0.1', local_hostname.lower()] or
+                        source_host in local_ips
+                    )
+
+                    if is_local:
+                        # This is a local UNC path - convert to local drive path
+                        source_normalized = source_path_part
+                        logger.info(f"   ✅ UNC points to localhost - converted to local: {source_normalized}")
+                    else:
+                        # Remote UNC path - needs authentication
+                        logger.info(f"   🌐 UNC points to remote host: {source_host}")
+                        logger.warning(f"   ⚠️  Remote UNC paths require the share to be accessible")
+                        logger.warning(f"   ⚠️  Run this first: net use \\\\{source_host} /user:username password")
+
             # Create SSH client
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -84,7 +149,9 @@ class SFTPHandler(BaseProtocolHandler):
             elif config.password:
                 connect_kwargs['password'] = config.password
 
+            logger.info(f"🔐 Connecting to {config.host}:{config.port} as {config.username}...")
             ssh.connect(**connect_kwargs)
+            logger.info(f"✅ SSH connection established")
 
             # Create SFTP client
             sftp = ssh.open_sftp()
@@ -96,33 +163,119 @@ class SFTPHandler(BaseProtocolHandler):
                     sftp.stat(dest_dir)
                 except IOError:
                     # Directory doesn't exist, create it
+                    logger.info(f"📁 Creating remote directory: {dest_dir}")
                     self._mkdir_p(sftp, dest_dir)
 
-            # Calculate checksums before transfer
-            checksums = self.calculate_checksums(source_path)
-            file_size = os.path.getsize(source_path)
+            # Check if source exists
+            if not os.path.exists(source_normalized):
+                raise FileNotFoundError(f"Source file not found: {source_normalized}")
 
-            # Transfer file
-            sftp.put(source_path, destination_path)
+            # Check if source is a directory or file
+            is_directory = os.path.isdir(source_normalized)
 
-            # Verify file size
-            remote_stat = sftp.stat(destination_path)
-            if remote_stat.st_size != file_size:
-                raise Exception(f"File size mismatch: local={file_size}, remote={remote_stat.st_size}")
+            if is_directory:
+                # Transfer directory recursively
+                logger.info(f"📁 Source is a DIRECTORY - transferring all files recursively")
+                total_files = 0
+                total_size = 0
 
-            # Close connections
-            sftp.close()
-            ssh.close()
+                # Ensure destination directory exists
+                try:
+                    sftp.stat(destination_path)
+                except IOError:
+                    logger.info(f"📁 Creating destination directory: {destination_path}")
+                    self._mkdir_p(sftp, destination_path)
 
-            logger.info(f"SFTP transfer successful: {source_path} -> {destination_path}")
+                # Walk through all files in directory
+                for root, dirs, files in os.walk(source_normalized):
+                    # Calculate relative path from source
+                    rel_path = os.path.relpath(root, source_normalized)
 
-            return {
-                'file_size': file_size,
-                **checksums
-            }
+                    # Create remote directory structure
+                    if rel_path != '.':
+                        remote_dir = destination_path + '/' + rel_path.replace('\\', '/')
+                    else:
+                        remote_dir = destination_path
+
+                    # Ensure remote directory exists
+                    try:
+                        sftp.stat(remote_dir)
+                    except IOError:
+                        logger.info(f"📁 Creating remote directory: {remote_dir}")
+                        self._mkdir_p(sftp, remote_dir)
+
+                    # Transfer all files in this directory
+                    for filename in files:
+                        local_file = os.path.join(root, filename)
+                        remote_file = remote_dir + '/' + filename
+
+                        try:
+                            file_size = os.path.getsize(local_file)
+                            logger.info(f"   📤 Uploading: {filename} ({file_size:,} bytes)")
+
+                            sftp.put(local_file, remote_file)
+
+                            # Verify
+                            remote_stat = sftp.stat(remote_file)
+                            if remote_stat.st_size == file_size:
+                                total_files += 1
+                                total_size += file_size
+                                logger.info(f"      ✅ Verified: {filename}")
+                            else:
+                                logger.warning(f"      ⚠️ Size mismatch: {filename}")
+                        except Exception as file_error:
+                            logger.error(f"      ❌ Failed to upload {filename}: {file_error}")
+                            # Continue with other files
+
+                logger.info(f"✅ Directory transfer complete: {total_files} files, {total_size:,} bytes total")
+
+                # Close connections
+                sftp.close()
+                ssh.close()
+
+                return {
+                    'file_size': total_size,
+                    'files_transferred': total_files,
+                    'checksum_md5': None,
+                    'checksum_sha256': None
+                }
+
+            else:
+                # Transfer single file
+                logger.info(f"📄 Source is a FILE")
+
+                # Calculate checksums before transfer
+                logger.info(f"🔐 Calculating checksums...")
+                checksums = self.calculate_checksums(source_normalized)
+                file_size = os.path.getsize(source_normalized)
+                logger.info(f"📊 File size: {file_size:,} bytes")
+
+                # Transfer file
+                logger.info(f"📤 Uploading file...")
+                sftp.put(source_normalized, destination_path)
+
+                # Verify file size
+                remote_stat = sftp.stat(destination_path)
+                if remote_stat.st_size != file_size:
+                    raise Exception(f"File size mismatch: local={file_size}, remote={remote_stat.st_size}")
+
+                logger.info(f"✅ Size verification: PASSED")
+
+                # Close connections
+                sftp.close()
+                ssh.close()
+
+                logger.info(f"✅ SFTP transfer successful!")
+
+                return {
+                    'file_size': file_size,
+                    **checksums
+                }
 
         except Exception as e:
-            logger.error(f"SFTP transfer failed: {e}")
+            logger.error(f"❌ SFTP transfer failed: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
     def _mkdir_p(self, sftp, remote_path):
@@ -358,11 +511,12 @@ class UNCHandler(BaseProtocolHandler):
     """UNC path handler (Windows network shares) - FIXED VERSION"""
 
     def normalize_unc_path(self, path: str, host: str = None) -> str:
-        """Normalize UNC path to Windows format
+        r"""Normalize UNC path to Windows format
 
         Examples:
-            //192.168.1.1/C$/folder → \\\\192.168.1.1\\C$\\folder
-            /C$/folder + host=192.168.1.1 → \\\\192.168.1.1\\C$\\folder
+            //192.168.1.1/C$/folder → \\192.168.1.1\C$\folder
+            /C$/folder + host=192.168.1.1 → \\192.168.1.1\C$\folder
+            C:\Users\file.txt + host=192.168.1.1 → \\192.168.1.1\C$\Users\file.txt
         """
         logger.info(f"Normalizing UNC path: {path} (host={host})")
 
@@ -376,8 +530,20 @@ class UNCHandler(BaseProtocolHandler):
 
         # If host provided and path doesn't start with \\, prepend it
         if host and not path.startswith('\\\\'):
-            # Fix: Calculate stripped path before f-string
-            stripped_path = path.lstrip('\\')
+            # Check if this is a local Windows path (e.g., C:\Users\...)
+            # and convert to UNC admin share format (e.g., C$\Users\...)
+            import re
+            drive_match = re.match(r'^([A-Za-z]):[\\/](.*)$', path)
+            if drive_match:
+                # Convert C:\path to C$\path
+                drive_letter = drive_match.group(1).upper()
+                rest_of_path = drive_match.group(2)
+                stripped_path = f"{drive_letter}$\\{rest_of_path}"
+                logger.info(f"  Converted local path to admin share: {drive_letter}: → {drive_letter}$")
+            else:
+                # Not a local path, just strip leading slashes
+                stripped_path = path.lstrip('\\')
+
             result = f"\\\\{host}\\{stripped_path}"
             logger.info(f"  Added host prefix: {result}")
             return result
@@ -388,6 +554,7 @@ class UNCHandler(BaseProtocolHandler):
     async def transfer(self, source_path: str, destination_path: str, config: Any) -> Dict[str, Any]:
         """Transfer file via UNC path"""
         import shutil
+        import subprocess
 
         logger.info(f"\n{'='*80}")
         logger.info(f"🔵 UNC TRANSFER STARTING")
@@ -395,7 +562,17 @@ class UNCHandler(BaseProtocolHandler):
 
         try:
             # Normalize paths to Windows UNC format
-            source_normalized = self.normalize_unc_path(source_path, config.host)
+            # For source: only add host prefix if it's not a local path that exists
+            import re
+            is_local_source = re.match(r'^[A-Za-z]:[\\/]', source_path) and os.path.exists(source_path)
+
+            if is_local_source:
+                source_normalized = self.normalize_unc_path(source_path, None)  # Don't add host to local paths
+                logger.info(f"✅ Source is local and accessible - not adding UNC prefix")
+            else:
+                source_normalized = self.normalize_unc_path(source_path, config.host)
+
+            # For destination: always normalize with host
             dest_normalized = self.normalize_unc_path(destination_path, config.host)
 
             logger.info(f"📂 Source (raw): {source_path}")
@@ -403,9 +580,90 @@ class UNCHandler(BaseProtocolHandler):
             logger.info(f"📂 Dest (raw): {destination_path}")
             logger.info(f"📂 Dest (normalized): {dest_normalized}")
 
+            # Extract hosts from UNC paths for authentication
+            source_host = None
+            dest_host = None
+
+            # Extract source host if it's a UNC path
+            if source_normalized.startswith('\\\\'):
+                parts = source_normalized[2:].split('\\', 1)
+                if parts:
+                    source_host = parts[0]
+                    logger.info(f"🔍 Source host extracted: {source_host}")
+
+            # Extract destination host if it's a UNC path
+            if dest_normalized.startswith('\\\\'):
+                parts = dest_normalized[2:].split('\\', 1)
+                if parts:
+                    dest_host = parts[0]
+                    logger.info(f"🔍 Dest host extracted: {dest_host}")
+
+            # Authenticate to both source and destination if credentials provided
+            if config.username and config.password:
+                hosts_to_auth = set()
+
+                # Add source host if it's remote
+                if source_host:
+                    hosts_to_auth.add(source_host)
+
+                # Add destination host if it's remote
+                if dest_host:
+                    hosts_to_auth.add(dest_host)
+                elif config.host:  # Fallback to config.host for destination
+                    hosts_to_auth.add(config.host)
+
+                # Authenticate to each unique host
+                for host in hosts_to_auth:
+                    unc_share = f"\\\\{host}"
+                    logger.info(f"🔐 Authenticating to {unc_share} as {config.username}...")
+
+                    try:
+                        # Use net use to authenticate
+                        auth_cmd = f'net use "{unc_share}" /user:{config.username} {config.password}'
+                        result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+
+                        if result.returncode == 0:
+                            logger.info(f"✅ Authentication successful to {host}")
+                        elif "already in use" in result.stdout.lower() or "multiple connections" in result.stdout.lower():
+                            logger.info(f"ℹ️  Connection already exists to {host}")
+                        elif "already in use" in result.stderr.lower() or "multiple connections" in result.stderr.lower():
+                            logger.info(f"ℹ️  Connection already exists to {host}")
+                        else:
+                            # Log both stdout and stderr for debugging
+                            output = result.stdout.strip() or result.stderr.strip() or "(no output)"
+                            logger.warning(f"⚠️  Authentication warning for {host}: {output}")
+                            logger.warning(f"   Return code: {result.returncode}")
+
+                    except Exception as auth_error:
+                        logger.error(f"❌ Authentication failed to {host}: {auth_error}")
+                        raise Exception(f"Failed to authenticate to {unc_share}: {auth_error}")
+            else:
+                logger.info(f"ℹ️  No credentials provided, using current Windows session")
+
             # Check if source exists
-            if not os.path.exists(source_normalized):
+            logger.info(f"🔍 Checking if source exists: {source_normalized}")
+
+            # Try with and without trailing backslash
+            source_check = source_normalized.rstrip('\\')
+            if not os.path.exists(source_check):
+                logger.error(f"❌ Source not found: {source_check}")
+                logger.error(f"   Attempted authentication to: {', '.join(hosts_to_auth) if config.username else 'No credentials'}")
+
+                # Try to list parent directory for debugging
+                parent_dir = os.path.dirname(source_check)
+                if os.path.exists(parent_dir):
+                    try:
+                        contents = os.listdir(parent_dir)
+                        logger.info(f"   Parent directory exists and contains: {contents[:5]}..." if len(contents) > 5 else f"   Parent directory exists and contains: {contents}")
+                    except Exception as e:
+                        logger.error(f"   Cannot list parent directory: {e}")
+                else:
+                    logger.error(f"   Parent directory also not accessible: {parent_dir}")
+
                 raise FileNotFoundError(f"Source file/directory not found: {source_normalized}")
+
+            source_normalized = source_check
+            logger.info(f"✅ Source exists: {source_normalized}")
 
             # Get file info
             is_dir = os.path.isdir(source_normalized)
@@ -434,51 +692,101 @@ class UNCHandler(BaseProtocolHandler):
             else:
                 checksums = {'checksum_md5': None, 'checksum_sha256': None}
 
-            # Ensure destination directory exists
-            if is_dir:
-                dest_base = dest_normalized
-            else:
+            # Ensure destination directory exists (for files only)
+            # For directories, copytree will create the destination itself
+            if not is_dir:
                 dest_base = os.path.dirname(dest_normalized)
-
-            if dest_base:
-                try:
-                    os.makedirs(dest_base, exist_ok=True)
-                    logger.info(f"📁 Created dest directory: {dest_base}")
-                except Exception as e:
-                    logger.warning(f"⚠️  Could not create dest dir (may already exist): {e}")
+                if dest_base:
+                    try:
+                        os.makedirs(dest_base, exist_ok=True)
+                        logger.info(f"📁 Created parent directory: {dest_base}")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Could not create parent dir (may already exist): {e}")
 
             # Copy file or directory
             logger.info(f"📤 Copying {'directory' if is_dir else 'file'}...")
             if is_dir:
-                # For directories, use copytree
+                # For directories, remove destination if it exists, then use copytree
                 if os.path.exists(dest_normalized):
-                    shutil.rmtree(dest_normalized)
-                shutil.copytree(source_normalized, dest_normalized)
+                    logger.info(f"🗑️  Removing existing destination: {dest_normalized}")
+                    try:
+                        shutil.rmtree(dest_normalized)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to remove existing destination: {e}")
+                        raise Exception(f"Cannot remove existing destination: {e}")
+
+                # Copy directory and catch errors
+                # copytree will create the destination directory
+                try:
+                    logger.info(f"📂 Copying from: {source_normalized}")
+                    logger.info(f"📂 Copying to: {dest_normalized}")
+                    shutil.copytree(source_normalized, dest_normalized,
+                                   ignore_dangling_symlinks=True)
+                    logger.info(f"✅ Directory copied successfully")
+                except shutil.Error as e:
+                    # shutil.Error contains a list of errors that occurred during copy
+                    logger.error(f"❌ Directory copy completed with errors:")
+                    try:
+                        for src, dst, error in e.args[0]:
+                            logger.error(f"   Failed to copy {src} to {dst}: {error}")
+                        raise Exception(f"Directory copy failed with {len(e.args[0])} errors")
+                    except (IndexError, TypeError):
+                        logger.error(f"   Error details: {e}")
+                        raise Exception(f"Directory copy failed: {e}")
+                except Exception as e:
+                    logger.error(f"❌ Directory copy failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
             else:
                 # For files, use copy2
-                shutil.copy2(source_normalized, dest_normalized)
+                try:
+                    shutil.copy2(source_normalized, dest_normalized)
+                    logger.info(f"✅ File copied successfully")
+                except Exception as e:
+                    logger.error(f"❌ File copy failed: {e}")
+                    raise
 
             # Verify
-            if os.path.exists(dest_normalized):
-                if is_dir:
-                    dest_size = sum(os.path.getsize(os.path.join(dirpath, filename))
-                                   for dirpath, dirnames, filenames in os.walk(dest_normalized)
-                                   for filename in filenames)
-                else:
-                    dest_size = os.path.getsize(dest_normalized)
+            if not os.path.exists(dest_normalized):
+                raise Exception(f"Destination file/directory not found after copy: {dest_normalized}")
 
+            # Calculate destination size
+            if is_dir:
+                logger.info(f"🔍 Calculating destination size by walking: {dest_normalized}")
+                file_count = 0
+                dest_size = 0
+                for dirpath, dirnames, filenames in os.walk(dest_normalized):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        try:
+                            size = os.path.getsize(filepath)
+                            dest_size += size
+                            file_count += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️  Could not get size of {filepath}: {e}")
+                logger.info(f"📊 Found {file_count} files in destination")
+                logger.info(f"📊 Dest size: {dest_size:,} bytes")
+            else:
+                dest_size = os.path.getsize(dest_normalized)
                 logger.info(f"📊 Dest size: {dest_size:,} bytes")
 
-                if dest_size == file_size:
-                    logger.info(f"✅ Size verification: PASSED")
-                else:
-                    logger.warning(f"⚠️  Size verification: MISMATCH (source={file_size}, dest={dest_size})")
+            # CRITICAL: Verify size matches
+            if dest_size != file_size:
+                error_msg = f"Size verification FAILED! Source: {file_size:,} bytes, Destination: {dest_size:,} bytes"
+                logger.error(f"❌ {error_msg}")
+                raise Exception(error_msg)
 
-                logger.info(f"{'='*80}")
-                logger.info(f"✅ UNC TRANSFER SUCCESSFUL!")
-                logger.info(f"{'='*80}\n")
-            else:
-                raise Exception("Destination file/directory not found after copy")
+            # CRITICAL: For directories, verify at least some files were copied (if source wasn't empty)
+            if is_dir and file_size > 0 and dest_size == 0:
+                error_msg = "Transfer FAILED! Source had files but destination is empty"
+                logger.error(f"❌ {error_msg}")
+                raise Exception(error_msg)
+
+            logger.info(f"✅ Size verification: PASSED ({dest_size:,} bytes)")
+            logger.info(f"{'='*80}")
+            logger.info(f"✅ UNC TRANSFER SUCCESSFUL!")
+            logger.info(f"{'='*80}\n")
 
             return {
                 'file_size': file_size,

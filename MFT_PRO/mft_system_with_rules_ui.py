@@ -2304,7 +2304,7 @@ def get_group_members(group_id):
 
 
 @app.route('/api/v1/groups/<group_id>/members', methods=['POST'])
-def add_user_to_group(group_id):
+def add_user_to_group(group_id, user_id):
     """Add user to group"""
     try:
         data = request.get_json()
@@ -2782,41 +2782,39 @@ def create_rule():
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Generate unique rule ID
-        rule_id = str(uuid.uuid4())
+        # Create transfer config
+        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
 
-        # Get protocol as string (not enum)
-        protocol = data.get('protocol', 'unc').lower()
-
-        # Create transfer rule
-        rule = TransferRule(
-            rule_id=rule_id,
-            name=data.get('name'),
-            source_path=data.get('source_path'),
-            destination_path=data.get('destination_path'),
+        config = TransferConfig(
             protocol=protocol,
             host=data.get('host'),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
+            encryption_enabled=compliance_manager.is_encryption_required(),
+            retry_count=3,
+            retry_delay=5,
+            timeout=300
+        )
+
+        # Create transfer rule
+        rule = TransferRule(
+            name=data.get('name'),
+            source_path=data.get('source_path'),
+            destination_path=data.get('destination_path'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
+            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 5),
+            delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron'),
-            # CSV Processing options
-            search_subfolders=data.get('search_subfolders', False),
-            csv_filename_pattern=data.get('csv_filename_pattern'),
-            rename_to=data.get('rename_to'),
-            validate_csv_content=data.get('validate_csv_content', False),
-            skip_empty_files=data.get('skip_empty_files', False)
+            schedule_cron=data.get('schedule_cron')
         )
 
         # Add rule to monitor manager
-        monitor_manager.add_rule(rule)
+        rule_id = monitor_manager.add_rule(rule)
 
         # Log audit event
         audit_manager.log_event(
@@ -2889,42 +2887,46 @@ def update_rule(rule_id):
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Get protocol as string (not enum)
-        protocol = data.get('protocol', 'unc').lower()
+        # Create transfer config
+        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
 
-        # Create updated transfer rule
-        rule = TransferRule(
-            rule_id=rule_id,
-            name=data.get('name'),
-            source_path=data.get('source_path'),
-            destination_path=data.get('destination_path'),
+        config = TransferConfig(
             protocol=protocol,
             host=data.get('host'),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
+            encryption_enabled=compliance_manager.is_encryption_required(),
+            retry_count=3,
+            retry_delay=5,
+            timeout=300
+        )
+
+        # Create updated transfer rule
+        rule = TransferRule(
+            name=data.get('name'),
+            source_path=data.get('source_path'),
+            destination_path=data.get('destination_path'),
             source_pattern=data.get('source_pattern', '*.*'),
             schedule_type=schedule_type_map.get(data.get('schedule_type', 'event_driven'), ScheduleType.EVENT_DRIVEN),
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
+            transfer_config=config,
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 5),
+            delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron'),
-            # CSV Processing options
-            search_subfolders=data.get('search_subfolders', False),
-            csv_filename_pattern=data.get('csv_filename_pattern'),
-            rename_to=data.get('rename_to'),
-            validate_csv_content=data.get('validate_csv_content', False),
-            skip_empty_files=data.get('skip_empty_files', False)
+            schedule_cron=data.get('schedule_cron')
         )
+
+        # Override the rule_id to keep the same ID
+        rule.rule_id = rule_id
 
         # Add updated rule to monitor manager
         monitor_manager.rules[rule_id] = rule
+        monitor_manager.save_rules()
 
-        # Restart monitoring for this rule if it's enabled and event-driven
-        if rule.enabled and rule.schedule_type == ScheduleType.EVENT_DRIVEN:
-            monitor_manager._start_monitoring(rule)
+        # Restart monitoring for this rule
+        monitor_manager.start_rule(rule_id)
 
         # Log audit event
         audit_manager.log_event(
@@ -3002,29 +3004,6 @@ def disable_rule(rule_id):
 
     except Exception as e:
         logger.error(f"Failed to disable rule: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/v1/rules/<rule_id>/skipped', methods=['GET'])
-def get_skipped_files(rule_id):
-    """Get skipped files report for a rule"""
-    try:
-        if rule_id not in monitor_manager.rules:
-            return jsonify({'success': False, 'error': 'Rule not found'}), 404
-
-        rule = monitor_manager.rules[rule_id]
-        skipped_files = rule.skipped_files
-
-        return jsonify({
-            'success': True,
-            'rule_id': rule_id,
-            'rule_name': rule.name,
-            'skipped_count': len(skipped_files),
-            'skipped_files': skipped_files
-        })
-
-    except Exception as e:
-        logger.error(f"Failed to get skipped files: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

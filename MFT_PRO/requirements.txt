@@ -1,29 +1,54 @@
-# MFT Application Dependencies
+# MFT Professional System - Core Requirements
+# Install with: pip install -r requirements.txt
 
-# Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
+# Web Framework
+Flask>=2.3.0
+Flask-CORS>=4.0.0
+Werkzeug>=2.3.0
 
 # File Transfer Protocols
-paramiko==3.3.1          # SFTP
-pysmb==1.2.9.1           # SMB/CIFS
-tftpy==0.8.2             # TFTP
-pyas2lib==1.4.1          # AS2
-requests==2.31.0         # HTTP/HTTPS
+paramiko>=3.3.0          # SFTP
+pysmb>=1.2.9             # SMB/CIFS
+requests>=2.31.0         # HTTP/HTTPS
 
 # LDAP/Active Directory
-ldap3==2.9.1
+ldap3>=2.9.0
 
-# Database
-# sqlite3 is built into Python
+# PDF Generation
+reportlab>=4.0.0
+
+# Excel/CSV Export (optional)
+openpyxl>=3.1.0
+
+# File Monitoring
+watchdog>=3.0.0
+
+# Cryptography & Security
+cryptography>=41.0.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.0
+pytz>=2023.3
 
 # Scheduling
-croniter==2.0.1
+croniter>=2.0.0
+
+# System Monitoring
+psutil>=5.9.0
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
 
 # Utilities
-python-dotenv==1.0.0
-pyyaml==6.0.1
+python-multipart>=0.0.6
 
-# Optional but recommended
-python-multipart==0.0.6  # For file uploads
+# Database
+# sqlite3 is built into Python, no separate install needed
+
+# Optional Desktop Mode Dependencies
+# Install with: pip install -r requirements_desktop.txt
+# Or uncomment below:
+# pywebview>=4.0.0
+# pystray>=0.19.0
+# pillow>=10.0.0
