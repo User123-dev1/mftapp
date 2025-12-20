@@ -4,13 +4,14 @@ Complete integration with Active Directory and Compliance frameworks
 ENHANCED VERSION - Working search and permission editing
 """
 
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
 from flask_cors import CORS
 import asyncio
 import uuid
 from datetime import datetime
 import threading
 import logging
+import os
 
 # Import MFT application
 from mft_application import MFTApplication, TransferConfig, TransferProtocol
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
+app.secret_key = os.urandom(24)  # Required for session management
 CORS(app)
 
 # Initialize MFT application
@@ -64,6 +66,264 @@ ad_connection_status = {
     'last_test': None,
     'error_message': None
 }
+
+# ============================================================================
+# LOGIN SCREEN TEMPLATE
+# ============================================================================
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MFT System - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            width: 100%;
+            max-width: 450px;
+        }
+
+        .login-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .login-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .login-header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .login-body {
+            padding: 40px 30px;
+        }
+
+        .login-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .login-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .login-tab:hover {
+            border-color: #667eea;
+        }
+
+        .login-tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+
+        .login-form {
+            display: none;
+        }
+
+        .login-form.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>🚀 MFT System</h1>
+            <p>Professional File Transfer System</p>
+        </div>
+        <div class="login-body">
+            <div class="login-tabs">
+                <div class="login-tab active" onclick="switchTab('local')">Local User</div>
+                <div class="login-tab" onclick="switchTab('domain')">Domain User</div>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+
+            <!-- Local User Login -->
+            <form class="login-form active" id="localForm" onsubmit="login(event, 'local')">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="localUsername" placeholder="Enter username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="localPassword" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="login-btn">Login as Local User</button>
+            </form>
+
+            <!-- Domain User Login -->
+            <form class="login-form" id="domainForm" onsubmit="login(event, 'domain')">
+                <div class="form-group">
+                    <label>Domain</label>
+                    <input type="text" id="domain" placeholder="DOMAIN" required>
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="domainUsername" placeholder="Enter domain username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="domainPassword" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="login-btn">Login as Domain User</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(type) {
+            // Update tabs
+            document.querySelectorAll('.login-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update forms
+            document.querySelectorAll('.login-form').forEach(form => form.classList.remove('active'));
+            if (type === 'local') {
+                document.getElementById('localForm').classList.add('active');
+            } else {
+                document.getElementById('domainForm').classList.add('active');
+            }
+
+            // Hide error
+            document.getElementById('errorMessage').classList.remove('show');
+        }
+
+        async function login(event, type) {
+            event.preventDefault();
+
+            let username, password, domain = null;
+
+            if (type === 'local') {
+                username = document.getElementById('localUsername').value;
+                password = document.getElementById('localPassword').value;
+            } else {
+                domain = document.getElementById('domain').value;
+                username = document.getElementById('domainUsername').value;
+                password = document.getElementById('domainPassword').value;
+            }
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        type: type,
+                        username: username,
+                        password: password,
+                        domain: domain
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    showError(data.error || 'Login failed');
+                }
+            } catch (error) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>
+"""
 
 # ============================================================================
 # ENHANCED HTML TEMPLATE WITH SEARCH AND FIXED PERMISSIONS
@@ -2006,10 +2266,78 @@ HTML_TEMPLATE = """
 # ============================================================================
 # API ENDPOINTS - KEEP ALL FROM ORIGINAL FILE
 # ============================================================================
+# Authentication Routes
+# ============================================================================
 
 @app.route('/')
 def index():
-    """Main page"""
+    """Landing page - shows login or dashboard based on session"""
+    if 'user' in session:
+        return redirect(url_for('dashboard'))
+    return render_template_string(LOGIN_TEMPLATE)
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """Handle login for local or domain users"""
+    try:
+        data = request.get_json()
+        login_type = data.get('type')  # 'local' or 'domain'
+        username = data.get('username')
+        password = data.get('password')
+        domain = data.get('domain')
+
+        # For now, accept any login (TODO: Implement actual authentication)
+        # In production, you would:
+        # - For local: Check against local user database
+        # - For domain: Authenticate against AD using ad_manager
+
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'}), 400
+
+        # Create session
+        session['user'] = username
+        session['login_type'] = login_type
+        if domain:
+            session['domain'] = domain
+            session['user'] = f"{domain}\\{username}"
+
+        # Log the login
+        audit_manager.log_event(
+            AuditEventType.SYSTEM_STARTED,
+            f"User logged in: {session['user']}",
+            username=session['user'],
+            result="success"
+        )
+
+        return jsonify({'success': True, 'message': 'Login successful'})
+
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/logout')
+def logout():
+    """Logout user"""
+    username = session.get('user', 'unknown')
+    session.clear()
+
+    audit_manager.log_event(
+        AuditEventType.SYSTEM_STARTED,
+        f"User logged out: {username}",
+        username=username,
+        result="success"
+    )
+
+    return redirect(url_for('index'))
+
+
+@app.route('/dashboard')
+def dashboard():
+    """Main dashboard page - requires login"""
+    if 'user' not in session:
+        return redirect(url_for('index'))
     return render_template_string(HTML_TEMPLATE)
 
 # Active Directory Configuration
