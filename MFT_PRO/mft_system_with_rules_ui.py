@@ -2806,7 +2806,13 @@ def create_rule():
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 5),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron')
+            schedule_cron=data.get('schedule_cron'),
+            # CSV Processing options
+            search_subfolders=data.get('search_subfolders', False),
+            csv_filename_pattern=data.get('csv_filename_pattern'),
+            rename_to=data.get('rename_to'),
+            validate_csv_content=data.get('validate_csv_content', False),
+            skip_empty_files=data.get('skip_empty_files', False)
         )
 
         # Add rule to monitor manager
@@ -2904,7 +2910,13 @@ def update_rule(rule_id):
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 5),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron')
+            schedule_cron=data.get('schedule_cron'),
+            # CSV Processing options
+            search_subfolders=data.get('search_subfolders', False),
+            csv_filename_pattern=data.get('csv_filename_pattern'),
+            rename_to=data.get('rename_to'),
+            validate_csv_content=data.get('validate_csv_content', False),
+            skip_empty_files=data.get('skip_empty_files', False)
         )
 
         # Add updated rule to monitor manager
