@@ -5014,7 +5014,7 @@ def get_transfers():
                     'destination_path': getattr(task, 'destination_path', 'N/A'),
                     'protocol': getattr(task.protocol, 'value', 'unc') if hasattr(task, 'protocol') else 'unc',
                     'status': getattr(task.status, 'value', 'unknown') if hasattr(task, 'status') else 'unknown',
-                    'timestamp': getattr(task, 'created_at', datetime.now()).isoformat() if hasattr(task, 'created_at') else datetime.now().isoformat(),
+                    'timestamp': (getattr(task, 'created_at', datetime.now()).isoformat() + 'Z') if hasattr(task, 'created_at') else (datetime.now().isoformat() + 'Z'),
                     'progress': getattr(task, 'progress', 0),
                     'error': getattr(task, 'error', None)
                 }
