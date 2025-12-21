@@ -1,0 +1,2 @@
+Test file for rule-based transfer
+This should trigger automatic transfer
