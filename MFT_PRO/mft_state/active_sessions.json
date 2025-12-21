@@ -1,12 +1,12 @@
 {
-  "aL94lUQ7Kutw-LhmR7KjIXHEb21J2CpeKLJaG2aQm5k": {
-    "session_id": "aL94lUQ7Kutw-LhmR7KjIXHEb21J2CpeKLJaG2aQm5k",
-    "user_id": "administrator",
-    "username": "Administrator",
-    "is_domain_user": true,
+  "nrO9ZRaPwGNYoada0nQGSaBbIwnEZA2cWChsMiLUzJA": {
+    "session_id": "nrO9ZRaPwGNYoada0nQGSaBbIwnEZA2cWChsMiLUzJA",
+    "user_id": "sysadmin-001",
+    "username": "sysadmin",
+    "is_domain_user": false,
     "is_admin": true,
-    "login_time": "2025-12-06T16:21:03.633593",
-    "last_activity": "2025-12-06T16:21:04.835917",
+    "login_time": "2025-12-21T12:19:07.566399",
+    "last_activity": "2025-12-21T12:19:08.894424",
     "ip_address": "127.0.0.1"
   }
 }
