@@ -5487,6 +5487,29 @@ def execute_rule(rule_id):
                 'rule_type': 'event_driven'
             })
 
+        elif rule.schedule_type == ScheduleType.RECURRING:
+            # For recurring rules, execute the scheduled rule logic
+            logger.info(f"🚀 Manually executing RECURRING rule: {rule.name}")
+
+            # Run in a separate thread
+            import threading
+
+            def run_recurring():
+                try:
+                    monitor_manager._execute_scheduled_rule(rule)
+                    logger.info(f"RECURRING rule execution completed: {rule.name}")
+                except Exception as e:
+                    logger.error(f"RECURRING rule execution failed: {e}")
+
+            recurring_thread = threading.Thread(target=run_recurring, daemon=True)
+            recurring_thread.start()
+
+            return jsonify({
+                'success': True,
+                'message': f'RECURRING rule "{rule.name}" execution started',
+                'rule_type': 'recurring'
+            })
+
         else:
             return jsonify({
                 'success': False,
