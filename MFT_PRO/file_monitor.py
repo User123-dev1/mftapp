@@ -188,6 +188,18 @@ class FileMonitorHandler(FileSystemEventHandler):
                 logger.debug(f"File {filename} doesn't match pattern {self.rule.source_pattern}")
                 return False
 
+            # Check CSV filename pattern (if configured and file is CSV)
+            if self.rule.csv_filename_pattern:
+                import fnmatch
+                if file_path.lower().endswith('.csv'):
+                    if not fnmatch.fnmatch(filename, self.rule.csv_filename_pattern):
+                        logger.debug(f"CSV file {filename} doesn't match CSV pattern {self.rule.csv_filename_pattern}")
+                        return False
+                else:
+                    # If csv_filename_pattern is set, only transfer CSV files
+                    logger.debug(f"File {filename} is not a CSV file, skipping (CSV pattern is set)")
+                    return False
+
             # Check file size
             file_size = os.path.getsize(file_path)
             if self.rule.min_file_size > 0 and file_size < self.rule.min_file_size:
