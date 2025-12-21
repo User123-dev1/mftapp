@@ -492,6 +492,10 @@ class FileMonitorManager:
         if rule.enabled and rule.schedule_type == ScheduleType.EVENT_DRIVEN:
             # Start monitoring for event-driven rules
             self._start_monitoring(rule)
+        elif rule.enabled and rule.schedule_type in [ScheduleType.RECURRING, ScheduleType.CRON]:
+            # Set status to scheduled for RECURRING and CRON rules
+            rule.status = "scheduled"
+            logger.info(f"📅 Rule scheduled: {rule.name}")
 
     def remove_rule(self, rule_id: str):
         """Remove a transfer rule"""
@@ -1042,7 +1046,7 @@ class FileMonitorManager:
                     loop.close()
 
             logger.info(f"   📊 Transferred {transferred_count} of {len(matching_files)} files")
-            rule.status = "idle"
+            rule.status = "scheduled"  # Return to scheduled status (not idle)
             rule.last_transfer_time = datetime.now()
 
         except Exception as e:

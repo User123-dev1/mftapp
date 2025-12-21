@@ -601,7 +601,7 @@ HTML_TEMPLATE = """
             display: block;
             margin-bottom: 8px;
             font-weight: 600;
-            color: #F7F7F7;
+            color: #333;
         }
         
         .form-group input,
