@@ -255,7 +255,7 @@ LOGIN_TEMPLATE = """
         .form-group label {
             display: block;
             margin-bottom: 8px;
-            color: #333;
+            color: #F7F7F7;
             font-weight: 600;
             font-size: 14px;
         }
@@ -456,6 +456,11 @@ HTML_TEMPLATE = """
     <title>MFT System - Professional File Transfer</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <style>
+    .form-group label {
+    color: #2c3e50; /* Dark grey-blue */
+    font-weight: 500;
+}
+
     .header-icon {
             width: 48px;
             height: 48px;
