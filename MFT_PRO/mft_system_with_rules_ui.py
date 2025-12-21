@@ -1897,7 +1897,50 @@ HTML_TEMPLATE = """
                     <input type="number" id="rule-delay" value="300" min="0">
                     <div class="help-text">Wait before deleting source file (for MOVE_WITH_DELAY)</div>
                 </div>
-                
+
+                <!-- CSV Processing Options -->
+                <div class="section-title" style="margin-top: 30px;">📊 CSV Processing Options (Optional)</div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="rule-search-subfolders" style="width: auto; margin-right: 8px;">
+                            Search Subfolders Recursively
+                        </label>
+                        <div class="help-text">Search through all subfolders for CSV files</div>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="rule-validate-csv" style="width: auto; margin-right: 8px;">
+                            Validate CSV Content
+                        </label>
+                        <div class="help-text">Check for empty files and header-only CSV files</div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>CSV Filename Pattern (optional):</label>
+                        <input type="text" id="rule-csv-pattern" placeholder="e.g., Assay*.csv">
+                        <div class="help-text">Specific CSV filename to search for in subfolders</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Rename Files To (optional):</label>
+                        <input type="text" id="rule-rename-to" placeholder="e.g., Assay Results">
+                        <div class="help-text">Files will be renamed with auto-increment (e.g., "Assay Results_01")</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="rule-skip-empty" style="width: auto; margin-right: 8px;">
+                        Skip Empty Files
+                    </label>
+                    <div class="help-text">Don't transfer files with no content or only headers</div>
+                </div>
+
+                <div class="section-title" style="margin-top: 30px;">🔐 Credentials (Optional)</div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label>Username (optional):</label>
@@ -3725,6 +3768,13 @@ HTML_TEMPLATE = """
                     document.getElementById('rule-action').value = rule.action_type || 'copy';
                     document.getElementById('rule-file-age').value = rule.file_age_seconds || 5;
 
+                    // Populate CSV Processing Options
+                    document.getElementById('rule-search-subfolders').checked = rule.search_subfolders || false;
+                    document.getElementById('rule-validate-csv').checked = rule.validate_csv_content || false;
+                    document.getElementById('rule-csv-pattern').value = rule.csv_filename_pattern || '';
+                    document.getElementById('rule-rename-to').value = rule.rename_to || '';
+                    document.getElementById('rule-skip-empty').checked = rule.skip_empty_files || false;
+
                     // Update modal title
                     document.getElementById('modal-title').textContent = 'Edit Transfer Rule';
 
@@ -3840,7 +3890,13 @@ HTML_TEMPLATE = """
                 schedule_interval_minutes: parseInt(document.getElementById('rule-interval').value) || null,
                 schedule_cron: document.getElementById('rule-cron').value || null,
                 username: document.getElementById('rule-username').value || null,
-                password: document.getElementById('rule-password').value || null
+                password: document.getElementById('rule-password').value || null,
+                // CSV Processing Options
+                search_subfolders: document.getElementById('rule-search-subfolders').checked,
+                validate_csv_content: document.getElementById('rule-validate-csv').checked,
+                csv_filename_pattern: document.getElementById('rule-csv-pattern').value || null,
+                rename_to: document.getElementById('rule-rename-to').value || null,
+                skip_empty_files: document.getElementById('rule-skip-empty').checked
             };
             
             const url = ruleId ? `/api/v1/rules/${ruleId}` : '/api/v1/rules';
@@ -5189,7 +5245,13 @@ def create_rule():
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron')
+            schedule_cron=data.get('schedule_cron'),
+            # CSV Processing options
+            search_subfolders=data.get('search_subfolders', False),
+            csv_filename_pattern=data.get('csv_filename_pattern'),
+            rename_to=data.get('rename_to'),
+            validate_csv_content=data.get('validate_csv_content', False),
+            skip_empty_files=data.get('skip_empty_files', False)
         )
 
         # Add rule to monitor manager
@@ -5311,7 +5373,13 @@ def update_rule(rule_id):
             file_age_seconds=data.get('file_age_seconds', 5),
             delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
-            schedule_cron=data.get('schedule_cron')
+            schedule_cron=data.get('schedule_cron'),
+            # CSV Processing options
+            search_subfolders=data.get('search_subfolders', False),
+            csv_filename_pattern=data.get('csv_filename_pattern'),
+            rename_to=data.get('rename_to'),
+            validate_csv_content=data.get('validate_csv_content', False),
+            skip_empty_files=data.get('skip_empty_files', False)
         )
 
         # Add updated rule to monitor manager
