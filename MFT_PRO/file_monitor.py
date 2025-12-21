@@ -467,6 +467,11 @@ class FileMonitorManager:
         self.observers: Dict[str, Observer] = {}
         self.active = False
 
+        # Scheduler for RECURRING and CRON rules
+        self.scheduler_running = False
+        self.scheduler_thread = None
+        self.scheduler_interval = 60  # Check every 60 seconds
+
     def add_rule(self, rule: TransferRule):
         """Add a new transfer rule"""
         logger.info(f"➕ Adding rule: {rule.name} (ID: {rule.rule_id})")
@@ -757,6 +762,220 @@ class FileMonitorManager:
             stats['rules'].append(rule_stats)
 
         return stats
+
+    def start_scheduler(self):
+        """Start the background scheduler for RECURRING and CRON rules"""
+        if self.scheduler_running:
+            logger.info("⏰ Scheduler already running")
+            return
+
+        self.scheduler_running = True
+        self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
+        self.scheduler_thread.start()
+        logger.info("⏰ Scheduler started - checking RECURRING and CRON rules every 60 seconds")
+
+    def stop_scheduler(self):
+        """Stop the background scheduler"""
+        self.scheduler_running = False
+        if self.scheduler_thread:
+            self.scheduler_thread.join(timeout=5)
+        logger.info("⏰ Scheduler stopped")
+
+    def _scheduler_loop(self):
+        """Background thread that checks and executes scheduled rules"""
+        import time
+        from datetime import datetime
+
+        while self.scheduler_running:
+            try:
+                # Check all RECURRING and CRON rules
+                for rule_id, rule in list(self.rules.items()):
+                    if not rule.enabled:
+                        continue
+
+                    # Check RECURRING rules
+                    if rule.schedule_type == ScheduleType.RECURRING:
+                        if self._should_run_recurring_rule(rule):
+                            logger.info(f"⏰ Executing RECURRING rule: {rule.name}")
+                            self._execute_scheduled_rule(rule)
+
+                    # Check CRON rules
+                    elif rule.schedule_type == ScheduleType.CRON:
+                        if self._should_run_cron_rule(rule):
+                            logger.info(f"⏰ Executing CRON rule: {rule.name}")
+                            self._execute_scheduled_rule(rule)
+
+            except Exception as e:
+                logger.error(f"❌ Scheduler error: {e}")
+
+            # Sleep for the configured interval
+            time.sleep(self.scheduler_interval)
+
+    def _should_run_recurring_rule(self, rule: TransferRule) -> bool:
+        """Check if a RECURRING rule should run now"""
+        from datetime import datetime, timedelta
+
+        if not rule.schedule_interval_minutes:
+            return False
+
+        # If never run, run now
+        if not rule.last_run:
+            return True
+
+        # Check if enough time has passed since last run
+        elapsed_minutes = (datetime.now() - rule.last_run).total_seconds() / 60
+        return elapsed_minutes >= rule.schedule_interval_minutes
+
+    def _should_run_cron_rule(self, rule: TransferRule) -> bool:
+        """Check if a CRON rule should run now based on cron expression"""
+        from datetime import datetime
+
+        if not rule.schedule_cron:
+            return False
+
+        # If never run, check if current time matches cron
+        # Simple cron parsing: "minute hour day month weekday"
+        now = datetime.now()
+
+        # If last run was in the last minute, don't run again
+        if rule.last_run:
+            elapsed_seconds = (now - rule.last_run).total_seconds()
+            if elapsed_seconds < 60:
+                return False
+
+        # Parse cron expression
+        try:
+            parts = rule.schedule_cron.strip().split()
+            if len(parts) != 5:
+                logger.warning(f"Invalid cron expression: {rule.schedule_cron}")
+                return False
+
+            minute, hour, day, month, weekday = parts
+
+            # Check minute
+            if minute != '*':
+                if '/' in minute:
+                    interval = int(minute.split('/')[1])
+                    if now.minute % interval != 0:
+                        return False
+                elif now.minute != int(minute):
+                    return False
+
+            # Check hour
+            if hour != '*':
+                if '/' in hour:
+                    interval = int(hour.split('/')[1])
+                    if now.hour % interval != 0:
+                        return False
+                elif now.hour != int(hour):
+                    return False
+
+            # Check day
+            if day != '*' and now.day != int(day):
+                return False
+
+            # Check month
+            if month != '*' and now.month != int(month):
+                return False
+
+            # Check weekday (0=Monday, 6=Sunday)
+            if weekday != '*' and now.weekday() != int(weekday):
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error parsing cron expression '{rule.schedule_cron}': {e}")
+            return False
+
+    def _execute_scheduled_rule(self, rule: TransferRule):
+        """Execute a scheduled rule (transfer matching files)"""
+        from datetime import datetime
+        import glob
+        import asyncio
+
+        try:
+            # Update last run time
+            rule.last_run = datetime.now()
+            rule.status = "transferring"
+
+            # Find matching files in source path
+            source_pattern = os.path.join(rule.source_path, rule.source_pattern)
+            matching_files = glob.glob(source_pattern)
+
+            logger.info(f"   Found {len(matching_files)} matching files")
+
+            # Transfer each file
+            for file_path in matching_files:
+                if not os.path.isfile(file_path):
+                    continue
+
+                # Build destination path
+                filename = os.path.basename(file_path)
+                dest_path = os.path.join(rule.destination_path, filename)
+
+                logger.info(f"   Transferring: {filename}")
+
+                # Create transfer config
+                from mft_application import TransferConfig, TransferProtocol
+
+                protocol_map = {
+                    'unc': TransferProtocol.UNC,
+                    'smb': TransferProtocol.SMB,
+                    'sftp': TransferProtocol.SFTP
+                }
+
+                protocol = protocol_map.get(rule.protocol.lower(), TransferProtocol.UNC)
+
+                config = TransferConfig(
+                    protocol=protocol,
+                    host=rule.host,
+                    port=rule.port,
+                    username=rule.username,
+                    password=rule.password,
+                    retry_count=3,
+                    retry_delay=5,
+                    timeout=300
+                )
+
+                # Execute transfer
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    task_id = loop.run_until_complete(
+                        self.mft_app.transfer_file(file_path, dest_path, config)
+                    )
+                    logger.info(f"   ✅ Transfer completed: {task_id}")
+
+                    # Update statistics
+                    rule.files_transferred += 1
+                    rule.bytes_transferred += os.path.getsize(file_path)
+
+                    # Handle post-transfer actions
+                    if rule.action_type == ActionType.MOVE:
+                        os.remove(file_path)
+                        logger.info(f"   🗑️ Deleted source file: {filename}")
+                    elif rule.action_type == ActionType.MOVE_WITH_DELAY:
+                        # Schedule deletion after delay
+                        def delayed_delete():
+                            import time
+                            time.sleep(rule.delete_delay_seconds)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                logger.info(f"   🗑️ Deleted source file (delayed): {filename}")
+
+                        delete_thread = threading.Thread(target=delayed_delete, daemon=True)
+                        delete_thread.start()
+
+                finally:
+                    loop.close()
+
+            rule.status = "idle"
+            rule.last_transfer_time = datetime.now()
+
+        except Exception as e:
+            logger.error(f"❌ Error executing scheduled rule: {e}")
+            rule.status = "error"
 
 
 # Example usage
