@@ -901,7 +901,7 @@ class FileMonitorManager:
             return False
 
     def _execute_scheduled_rule(self, rule: TransferRule):
-        """Execute a scheduled rule (transfer matching files)"""
+        """Execute a scheduled rule (transfer matching files with CSV processing)"""
         from datetime import datetime
         import glob
         import asyncio
@@ -911,19 +911,74 @@ class FileMonitorManager:
             rule.last_run = datetime.now()
             rule.status = "transferring"
 
-            # Find matching files in source path
-            source_pattern = os.path.join(rule.source_path, rule.source_pattern)
-            matching_files = glob.glob(source_pattern)
+            # Find matching files in source path (with recursive search if enabled)
+            matching_files = []
+            source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
+
+            if rule.search_subfolders:
+                # Recursive search through all subdirectories
+                for root, dirs, files in os.walk(source_path):
+                    for filename in files:
+                        file_path = os.path.join(root, filename)
+
+                        # Check if file matches the source pattern
+                        if fnmatch.fnmatch(filename, rule.source_pattern):
+                            # Apply CSV filename pattern filtering if configured
+                            if rule.csv_filename_pattern:
+                                if file_path.lower().endswith('.csv'):
+                                    if fnmatch.fnmatch(filename, rule.csv_filename_pattern):
+                                        matching_files.append(file_path)
+                                # Skip non-CSV files when CSV pattern is set
+                            else:
+                                matching_files.append(file_path)
+            else:
+                # Non-recursive search (only files in source directory)
+                source_pattern = os.path.join(source_path, rule.source_pattern)
+                for file_path in glob.glob(source_pattern):
+                    if os.path.isfile(file_path):
+                        filename = os.path.basename(file_path)
+
+                        # Apply CSV filename pattern filtering if configured
+                        if rule.csv_filename_pattern:
+                            if file_path.lower().endswith('.csv'):
+                                if fnmatch.fnmatch(filename, rule.csv_filename_pattern):
+                                    matching_files.append(file_path)
+                            # Skip non-CSV files when CSV pattern is set
+                        else:
+                            matching_files.append(file_path)
 
             logger.info(f"   Found {len(matching_files)} matching files")
 
             # Transfer each file
+            transferred_count = 0
             for file_path in matching_files:
                 if not os.path.isfile(file_path):
                     continue
 
-                # Build destination path
+                # Validate CSV content if enabled
+                if rule.validate_csv_content and file_path.lower().endswith('.csv'):
+                    is_valid, reason = validate_csv_file(file_path)
+                    if not is_valid:
+                        logger.warning(f"⚠️ Skipping invalid CSV: {os.path.basename(file_path)} - {reason}")
+                        rule.skipped_files.append({
+                            'file': file_path,
+                            'reason': reason,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        if rule.skip_empty_files:
+                            continue
+
+                # Build destination path with renaming if configured
                 filename = os.path.basename(file_path)
+
+                if rule.rename_to:
+                    # Extract file extension
+                    _, ext = os.path.splitext(filename)
+                    # Create new filename with auto-increment counter
+                    filename = f"{rule.rename_to}_{rule.rename_counter:02d}{ext}"
+                    rule.rename_counter += 1
+                    logger.info(f"   🔄 Renaming: {os.path.basename(file_path)} → {filename}")
+
                 dest_path = os.path.join(rule.destination_path, filename)
 
                 logger.info(f"   Transferring: {filename}")
@@ -962,6 +1017,7 @@ class FileMonitorManager:
                     # Update statistics
                     rule.files_transferred += 1
                     rule.bytes_transferred += os.path.getsize(file_path)
+                    transferred_count += 1
 
                     # Handle post-transfer actions
                     if rule.action_type == ActionType.MOVE:
@@ -979,14 +1035,20 @@ class FileMonitorManager:
                         delete_thread = threading.Thread(target=delayed_delete, daemon=True)
                         delete_thread.start()
 
+                except Exception as transfer_error:
+                    logger.error(f"   ❌ Transfer failed for {filename}: {transfer_error}")
+
                 finally:
                     loop.close()
 
+            logger.info(f"   📊 Transferred {transferred_count} of {len(matching_files)} files")
             rule.status = "idle"
             rule.last_transfer_time = datetime.now()
 
         except Exception as e:
             logger.error(f"❌ Error executing scheduled rule: {e}")
+            import traceback
+            traceback.print_exc()
             rule.status = "error"
 
 
