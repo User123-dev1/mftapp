@@ -295,6 +295,23 @@ class FileMonitorHandler(FileSystemEventHandler):
             # Build destination path
             dest_path = os.path.join(self.rule.destination_path, filename)
 
+            # Check if destination file already exists (to prevent duplicate transfers)
+            dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+            if self.rule.action_type == ActionType.COPY and os.path.exists(dest_check_path):
+                # For COPY action, skip if file already exists at destination
+                try:
+                    src_size = os.path.getsize(file_path)
+                    dest_size = os.path.getsize(dest_check_path)
+                    if src_size == dest_size:
+                        logger.info(f"⏭️ Skipping (already exists at destination): {filename}")
+                        if file_path in self.transferring_files:
+                            self.transferring_files.remove(file_path)
+                        return
+                    else:
+                        logger.info(f"⚠️ File exists but size differs - will re-transfer: {filename}")
+                except Exception as check_error:
+                    logger.warning(f"⚠️ Could not verify destination file: {check_error}")
+
             logger.info(f"\n{'='*80}")
             logger.info(f"🚀 AUTO-TRANSFER TRIGGERED")
             logger.info(f"{'='*80}")
@@ -984,6 +1001,21 @@ class FileMonitorManager:
                     logger.info(f"   🔄 Renaming: {os.path.basename(file_path)} → {filename}")
 
                 dest_path = os.path.join(rule.destination_path, filename)
+
+                # Check if destination file already exists (to prevent duplicate transfers)
+                dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+                if rule.action_type == ActionType.COPY and os.path.exists(dest_check_path):
+                    # For COPY action, skip if file already exists at destination
+                    try:
+                        src_size = os.path.getsize(file_path)
+                        dest_size = os.path.getsize(dest_check_path)
+                        if src_size == dest_size:
+                            logger.info(f"   ⏭️ Skipping (already exists at destination): {filename}")
+                            continue
+                        else:
+                            logger.info(f"   ⚠️ File exists but size differs - will re-transfer: {filename}")
+                    except Exception as check_error:
+                        logger.warning(f"   ⚠️ Could not verify destination file: {check_error}")
 
                 logger.info(f"   Transferring: {filename}")
 
