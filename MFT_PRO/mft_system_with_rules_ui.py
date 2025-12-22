@@ -1396,7 +1396,12 @@ HTML_TEMPLATE = """
         
         <!-- History Tab -->
         <div id="history-tab" class="tab-content">
-            <h2>Transfer History</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Transfer History</h2>
+                <button class="btn btn-danger" onclick="clearTransferHistory()" style="padding: 8px 16px;">
+                    🗑️ Clear History
+                </button>
+            </div>
             <table id="history-table">
                 <thead>
                     <tr>
@@ -2753,6 +2758,25 @@ HTML_TEMPLATE = """
             historyPageSize = parseInt(document.getElementById('history-page-size').value);
             historyCurrentPage = 1;
             displayHistory(currentDisplayedHistory);
+        }
+
+        function clearTransferHistory() {
+            if (confirm('Are you sure you want to clear all transfer history? This action cannot be undone.')) {
+                fetch('/api/v1/history/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            currentDisplayedHistory = [];
+                            displayHistory([]);
+                            showMessage('history-message', '✅ Transfer history cleared successfully!', 'success');
+                        } else {
+                            showMessage('history-message', '❌ Failed to clear history: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(err => {
+                        showMessage('history-message', '❌ Error clearing history: ' + err.message, 'error');
+                    });
+            }
         }
 
         function displayHistory(transfers) {
@@ -5043,6 +5067,33 @@ def get_transfers():
             'error': str(e),
             'transfers': []  # ✅ Return empty array
         }), 500
+
+
+@app.route('/api/v1/history/clear', methods=['POST'])
+def clear_transfer_history():
+    """Clear all transfer history"""
+    try:
+        # Clear the transfer tasks list
+        mft_app.transfer_tasks.clear()
+
+        logger.info("🗑️ Transfer history cleared")
+
+        audit_manager.log_event(
+            event_type=EventType.CONFIG_CHANGE,
+            username=session.get('username', 'system'),
+            action='clear_transfer_history',
+            result=EventResult.SUCCESS,
+            details={'message': 'Transfer history cleared'}
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Transfer history cleared successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to clear transfer history: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
     # RULES ENDPOINTS
 
