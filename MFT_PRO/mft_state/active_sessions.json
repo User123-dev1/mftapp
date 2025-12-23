@@ -1,12 +1,12 @@
 {
-  "F18DLSJsOwPgfxRmVEbjcGQR2wrwD5W550NyogKDGKg": {
-    "session_id": "F18DLSJsOwPgfxRmVEbjcGQR2wrwD5W550NyogKDGKg",
-    "user_id": "sysadmin-001",
-    "username": "sysadmin",
-    "is_domain_user": false,
+  "1xkzYMEZV-aYcqY68AyC44SEF19mYZLzMwFwn_N0uII": {
+    "session_id": "1xkzYMEZV-aYcqY68AyC44SEF19mYZLzMwFwn_N0uII",
+    "user_id": "administrator",
+    "username": "Administrator",
+    "is_domain_user": true,
     "is_admin": true,
-    "login_time": "2025-12-21T12:24:48.652286",
-    "last_activity": "2025-12-21T12:24:50.045340",
+    "login_time": "2025-12-22T20:33:58.988537",
+    "last_activity": "2025-12-22T20:34:00.466447",
     "ip_address": "127.0.0.1"
   }
 }
