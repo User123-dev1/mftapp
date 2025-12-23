@@ -4,14 +4,34 @@ Complete integration with Active Directory and Compliance frameworks
 ENHANCED VERSION - Working search and permission editing
 """
 
-from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
+# Fix Windows console encoding for emoji/unicode support
+import sys
+import io
+if sys.platform == 'win32':
+    # Reconfigure stdout/stderr to use UTF-8 encoding
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    else:
+        # Fallback for older Python versions
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+from flask import Flask, render_template_string, request, jsonify, send_file, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
+from functools import wraps
 import asyncio
 import uuid
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 import threading
 import logging
-import os
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # Import MFT application
 from mft_application import MFTApplication, TransferConfig, TransferProtocol
@@ -19,11 +39,20 @@ from mft_application import MFTApplication, TransferConfig, TransferProtocol
 # Import file monitor
 from file_monitor import FileMonitorManager, TransferRule, ScheduleType, TriggerType, ActionType
 
+# Import server health monitor
+from server_monitor import ServerHealthMonitor
+
 # Import compliance and AD systems
 from compliance_system import (
     ComplianceManager, AuditManager, ActiveDirectoryManager,
     ComplianceFramework, AuditEventType, EncryptionAlgorithm
 )
+
+# Import state manager for multi-instance support
+from state_manager import StateManager
+
+# Import authentication manager
+from auth_manager import AuthenticationManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +60,14 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  # Required for session management
+app.secret_key = 'mft-system-secret-key-change-this-in-production-' + os.urandom(24).hex()
 CORS(app)
+
+# Initialize State Manager for multi-instance support
+state_manager = StateManager()
+
+# Initialize Authentication Manager
+auth_manager = AuthenticationManager()
 
 # Initialize MFT application
 mft_app = MFTApplication()
@@ -49,8 +84,78 @@ audit_manager = AuditManager()
 # Initialize Active Directory Manager
 ad_manager = ActiveDirectoryManager()
 
+# Initialize Server Health Monitor
+server_monitor = ServerHealthMonitor(audit_manager=audit_manager, check_interval=30)
+
+# ============================================================================
+# LOAD SAVED STATE (Multi-Instance Support)
+# ============================================================================
+
+logger.info("\n" + "="*80)
+logger.info("🔄 LOADING SAVED STATE FOR MULTI-INSTANCE SUPPORT")
+logger.info("="*80)
+
+# Load AD configuration
+saved_ad_config = state_manager.load_ad_config()
+if saved_ad_config:
+    logger.info(f"📋 Restoring AD connection: {saved_ad_config.get('server')}")
+    # AD config will be restored when frontend fetches it
+
+# Load transfer rules
+saved_rules = state_manager.load_rules()
+if saved_rules:
+    logger.info(f"📋 Restoring {len(saved_rules)} transfer rules")
+    for rule_id, rule_data in saved_rules.items():
+        try:
+            # Reconstruct TransferRule from saved data
+            from file_monitor import ScheduleType, TriggerType, ActionType
+
+            rule = TransferRule(
+                rule_id=rule_data.get('rule_id', rule_id),
+                name=rule_data.get('name'),
+                source_path=rule_data.get('source_path'),
+                source_pattern=rule_data.get('source_pattern', '*'),
+                destination_path=rule_data.get('destination_path'),
+                protocol=rule_data.get('protocol', 'unc'),
+                host=rule_data.get('host'),
+                port=rule_data.get('port'),
+                username=rule_data.get('username'),
+                password=rule_data.get('password'),
+                schedule_type=ScheduleType(rule_data.get('schedule_type', 'event_driven')),
+                trigger_type=TriggerType(rule_data.get('trigger_type', 'on_create')),
+                action_type=ActionType(rule_data.get('action_type', 'copy')),
+                enabled=rule_data.get('enabled', False),
+                schedule_cron=rule_data.get('schedule_cron'),
+                schedule_interval_minutes=rule_data.get('schedule_interval_minutes'),
+                files_transferred=rule_data.get('files_transferred', 0),
+                bytes_transferred=rule_data.get('bytes_transferred', 0),
+            )
+            monitor_manager.add_rule(rule)
+            logger.info(f"   ✅ Restored rule: {rule.name}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed to restore rule {rule_id}: {e}")
+
+# Load compliance configuration
+saved_compliance = state_manager.load_compliance_config()
+if saved_compliance:
+    logger.info(f"📋 Restoring compliance configuration")
+    # Compliance config will be applied when needed
+
+logger.info("="*80)
+logger.info("✅ STATE RESTORATION COMPLETE")
+logger.info("="*80 + "\n")
+
 # Start monitoring on startup
 monitor_manager.start_all()
+
+# Start scheduler for RECURRING and CRON rules
+monitor_manager.start_scheduler()
+
+# Start server health monitoring
+server_monitor.start_monitoring()
+
+# Sync servers from rules
+server_monitor.sync_servers_from_rules(monitor_manager.rules)
 
 # Log system startup
 audit_manager.log_event(
@@ -68,7 +173,32 @@ ad_connection_status = {
 }
 
 # ============================================================================
-# LOGIN SCREEN TEMPLATE
+# AUTHENTICATION DECORATOR
+# ============================================================================
+
+def login_required(f):
+    """Decorator to require authentication for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session_id = session.get('session_id')
+        if not session_id:
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+            return redirect(url_for('login_page'))
+
+        # Validate session
+        user_session = auth_manager.validate_session(session_id)
+        if not user_session:
+            session.clear()
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'Session expired'}), 401
+            return redirect(url_for('login_page'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================================
+# LOGIN PAGE HTML
 # ============================================================================
 
 LOGIN_TEMPLATE = """
@@ -85,76 +215,37 @@ LOGIN_TEMPLATE = """
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1D1D77;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 20px;
         }
 
         .login-container {
             background: white;
-            border-radius: 20px;
+            border-radius: 15px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
+            padding: 40px;
             width: 100%;
             max-width: 450px;
         }
 
         .login-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 30px;
             text-align: center;
+            margin-bottom: 30px;
         }
 
         .login-header h1 {
-            font-size: 28px;
+            color: #667eea;
+            font-size: 32px;
             margin-bottom: 10px;
         }
 
         .login-header p {
-            opacity: 0.9;
+            color: #666;
             font-size: 14px;
-        }
-
-        .login-body {
-            padding: 40px 30px;
-        }
-
-        .login-tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-        }
-
-        .login-tab {
-            flex: 1;
-            padding: 12px;
-            text-align: center;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: 600;
-        }
-
-        .login-tab:hover {
-            border-color: #667eea;
-        }
-
-        .login-tab.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: #667eea;
-        }
-
-        .login-form {
-            display: none;
-        }
-
-        .login-form.active {
-            display: block;
         }
 
         .form-group {
@@ -164,8 +255,9 @@ LOGIN_TEMPLATE = """
         .form-group label {
             display: block;
             margin-bottom: 8px;
+            color: #F7F7F7;
             font-weight: 600;
-            color: #333;
+            font-size: 14px;
         }
 
         .form-group input {
@@ -199,127 +291,155 @@ LOGIN_TEMPLATE = """
             transform: translateY(-2px);
         }
 
-        .error-message {
-            background: #fee;
-            color: #c33;
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .message {
             padding: 12px;
             border-radius: 8px;
             margin-bottom: 20px;
-            display: none;
+            font-size: 14px;
         }
 
-        .error-message.show {
-            display: block;
+        .message.error {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .message.success {
+            background: #efe;
+            color: #3c3;
+            border: 1px solid #cfc;
+        }
+
+        .message.info {
+            background: #eef;
+            color: #33c;
+            border: 1px solid #ccf;
+        }
+
+        .account-type {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .account-type label {
+            display: inline-flex;
+            align-items: center;
+            margin: 0 15px;
+            cursor: pointer;
+        }
+
+        .account-type input[type="radio"] {
+            margin-right: 8px;
+        }
+
+        .divider {
+            text-align: center;
+            margin: 20px 0;
+            color: #999;
+            font-size: 12px;
+        }
+
+        .system-info {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .system-info strong {
+            color: #667eea;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
         <div class="login-header">
-            <h1>🚀 MFT System</h1>
-            <p>Professional File Transfer System</p>
+            <h1>🔐 MFT System</h1>
+            <p>Managed File Transfer Platform</p>
         </div>
-        <div class="login-body">
-            <div class="login-tabs">
-                <div class="login-tab active" onclick="switchTab('local')">Local User</div>
-                <div class="login-tab" onclick="switchTab('domain')">Domain User</div>
+
+        <div id="message"></div>
+
+        <div class="account-type">
+            <label>
+                <input type="radio" name="account_type" value="local" checked>
+                Local Account
+            </label>
+            <label>
+                <input type="radio" name="account_type" value="domain">
+                Domain Account
+            </label>
+        </div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus>
             </div>
 
-            <div class="error-message" id="errorMessage"></div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
 
-            <!-- Local User Login -->
-            <form class="login-form active" id="localForm" onsubmit="login(event, 'local')">
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="localUsername" placeholder="Enter username" required>
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="localPassword" placeholder="Enter password" required>
-                </div>
-                <button type="submit" class="login-btn">Login as Local User</button>
-            </form>
+            <button type="submit" class="login-btn">Login</button>
+        </form>
 
-            <!-- Domain User Login -->
-            <form class="login-form" id="domainForm" onsubmit="login(event, 'domain')">
-                <div class="form-group">
-                    <label>Domain</label>
-                    <input type="text" id="domain" placeholder="DOMAIN" required>
-                </div>
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="domainUsername" placeholder="Enter domain username" required>
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="domainPassword" placeholder="Enter password" required>
-                </div>
-                <button type="submit" class="login-btn">Login as Domain User</button>
-            </form>
+        <div class="system-info">
+            <strong>Default System Admin:</strong><br>
+            Username: <code>sysadmin</code><br>
+            Password: <code>Admin@123</code><br>
+            <small style="color: #c33;">⚠️ Change password after first login</small>
         </div>
     </div>
 
     <script>
-        function switchTab(type) {
-            // Update tabs
-            document.querySelectorAll('.login-tab').forEach(tab => tab.classList.remove('active'));
-            event.target.classList.add('active');
+        const form = document.getElementById('login-form');
+        const messageDiv = document.getElementById('message');
 
-            // Update forms
-            document.querySelectorAll('.login-form').forEach(form => form.classList.remove('active'));
-            if (type === 'local') {
-                document.getElementById('localForm').classList.add('active');
-            } else {
-                document.getElementById('domainForm').classList.add('active');
-            }
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
 
-            // Hide error
-            document.getElementById('errorMessage').classList.remove('show');
-        }
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const accountType = document.querySelector('input[name="account_type"]:checked').value;
 
-        async function login(event, type) {
-            event.preventDefault();
-
-            let username, password, domain = null;
-
-            if (type === 'local') {
-                username = document.getElementById('localUsername').value;
-                password = document.getElementById('localPassword').value;
-            } else {
-                domain = document.getElementById('domain').value;
-                username = document.getElementById('domainUsername').value;
-                password = document.getElementById('domainPassword').value;
-            }
+            messageDiv.innerHTML = '<div class="message info">Authenticating...</div>';
 
             try {
-                const response = await fetch('/api/login', {
+                const response = await fetch('/api/v1/auth/login', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
                     body: JSON.stringify({
-                        type: type,
                         username: username,
                         password: password,
-                        domain: domain
+                        account_type: accountType
                     })
                 });
 
                 const data = await response.json();
 
                 if (data.success) {
-                    window.location.href = '/dashboard';
+                    messageDiv.innerHTML = '<div class="message success">Login successful! Redirecting...</div>';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
                 } else {
-                    showError(data.error || 'Login failed');
+                    messageDiv.innerHTML = `<div class="message error">${data.error || 'Login failed'}</div>`;
                 }
-            } catch (error) {
-                showError('Connection error: ' + error.message);
+            } catch (err) {
+                messageDiv.innerHTML = `<div class="message error">Connection error: ${err.message}</div>`;
             }
-        }
-
-        function showError(message) {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
-            errorDiv.classList.add('show');
-        }
+        });
     </script>
 </body>
 </html>
@@ -334,7 +454,26 @@ HTML_TEMPLATE = """
 <html>
 <head>
     <title>MFT System - Professional File Transfer</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <style>
+    .form-group label {
+    color: #2c3e50; /* Dark grey-blue */
+    font-weight: 500;
+}
+
+    .header-icon {
+            width: 48px;
+            height: 48px;
+            vertical-align: middle;
+            margin-right: 15px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+        
+        .header-title {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
         * {
             margin: 0;
             padding: 0;
@@ -343,7 +482,7 @@ HTML_TEMPLATE = """
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #081235;
             min-height: 100vh;
             padding: 20px;
         }
@@ -351,14 +490,14 @@ HTML_TEMPLATE = """
         .container {
             max-width: 1600px;
             margin: 0 auto;
-            background: white;
+            background: #BABABA;
             border-radius: 15px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             overflow: hidden;
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: ;
             color: white;
             padding: 30px;
             text-align: center;
@@ -380,9 +519,9 @@ HTML_TEMPLATE = """
             border-bottom: 2px solid #ddd;
             overflow-x: auto;
         }
-        
+
         .tab {
-            flex: 1;
+            flex: 0 0 auto;
             padding: 15px 20px;
             text-align: center;
             cursor: pointer;
@@ -391,22 +530,68 @@ HTML_TEMPLATE = """
             transition: all 0.3s;
             border-bottom: 3px solid transparent;
             white-space: nowrap;
-            min-width: 120px;
         }
-        
+
         .tab:hover {
             background: #e8e8e8;
         }
-        
+
         .tab.active {
             color: #667eea;
             border-bottom-color: #667eea;
             background: white;
         }
-        
+
+        /* Dropdown menu styles */
+        .dropdown {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: white;
+            min-width: 220px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 9999;
+            border-radius: 4px;
+            margin-top: 0;
+            left: 0;
+            top: 100%;
+        }
+
+        .dropdown-content a {
+            color: #333;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid #eee;
+        }
+
+        .dropdown-content a:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-content a:hover {
+            background-color: #f1f1f1;
+            color: #667eea;
+        }
+
+        .dropdown.open .dropdown-content {
+            display: block;
+        }
+
+        .dropdown .tab {
+            user-select: none;
+        }
+
         .tab-content {
             display: none;
             padding: 30px;
+            color: white;
         }
         
         .tab-content.active {
@@ -530,13 +715,13 @@ HTML_TEMPLATE = """
         }
         
         th {
-            background: #f5f5f5;
+            background: #BABABA;
             font-weight: 600;
             color: #333;
         }
         
         tr:hover {
-            background: #f9f9f9;
+            background: #9C2B75;
         }
         
         .status-badge {
@@ -569,10 +754,80 @@ HTML_TEMPLATE = """
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 30px;
             margin-bottom: 30px;
         }
+
+        /* Circular Gauge Styles */
+        .gauge-container {
+            background: white;
+            padding: 30px 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .gauge-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .circular-gauge {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            margin: 0 auto 15px;
+        }
+
+        .gauge-circle {
+            transform: rotate(-90deg);
+        }
+
+        .gauge-bg {
+            fill: none;
+            stroke: #f0f0f0;
+            stroke-width: 12;
+        }
+
+        .gauge-progress {
+            fill: none;
+            stroke-width: 12;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 1.5s ease-in-out;
+        }
+
+        .gauge-value {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .gauge-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+            font-weight: 500;
+        }
+
+        .gauge-subtitle {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        /* Color themes for different gauges */
+        .gauge-blue .gauge-progress { stroke: url(#gradient-blue); }
+        .gauge-green .gauge-progress { stroke: url(#gradient-green); }
+        .gauge-orange .gauge-progress { stroke: url(#gradient-orange); }
+        .gauge-purple .gauge-progress { stroke: url(#gradient-purple); }
+        .gauge-red .gauge-progress { stroke: url(#gradient-red); }
+        .gauge-cyan .gauge-progress { stroke: url(#gradient-cyan); }
         
         .stat-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -712,7 +967,7 @@ HTML_TEMPLATE = """
         .info-box strong {
             display: block;
             margin-bottom: 5px;
-            color: #1976D2;
+            color: #1D2A77;
         }
         
         /* ✅ SEARCH BAR STYLES */
@@ -761,11 +1016,55 @@ HTML_TEMPLATE = """
             background: #f0f7ff !important;
             border-left: 4px solid #667eea;
         }
-        
+
         .group-row:hover {
             background: #e3f2fd !important;
         }
-        
+
+        /* PAGINATION STYLES */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .pagination-controls select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .pagination-controls select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        #users-page-display {
+            font-weight: 600;
+            color: #333;
+            min-width: 100px;
+            text-align: center;
+        }
+
         /* MODAL STYLES */
         .modal {
             display: none;
@@ -824,48 +1123,224 @@ HTML_TEMPLATE = """
             border-radius: 5px;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 MFT Professional File Transfer System</h1>
+    <div class="header">
+            <div class="header-title">
+                <img src="/favicon.ico" alt="MFT" class="header-icon">
+                <h1>MFT Professional File Transfer System</h1>
+            </div>
             <p>Managed File Transfer with Advanced Monitoring, Compliance & Active Directory Integration</p>
         </div>
         
         <div class="tabs">
             <div class="tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
-            <div class="tab" onclick="showTab('transfer')">📤 New Transfer</div>
+            <div class="tab" onclick="showTab('transfer')">📤 Transfer</div>
             <div class="tab" onclick="showTab('history')">📋 History</div>
-            <div class="tab" onclick="showTab('rules')">⚙️ Transfer Rules</div>
-            <div class="tab" onclick="showTab('users')">👥 Users</div>
-            <div class="tab" onclick="showTab('ad')">🔐 Active Directory</div>
-            <div class="tab" onclick="showTab('compliance')">✅ Compliance</div>
-            <div class="tab" onclick="showTab('audit')">📝 Audit Log</div>
+            <div class="tab" onclick="showTab('rules')">⚙️ Rules</div>
+
+            <!-- Settings Dropdown -->
+            <div class="dropdown" id="settings-dropdown">
+                <div class="tab" onclick="toggleDropdown(event, 'settings-dropdown')">⚙️ Settings ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showTab('users'); closeAllDropdowns()">👥 AD Users & Groups</a>
+                    <a onclick="showTab('local-users'); closeAllDropdowns()" id="local-users-menu-item" style="display: none;">👤 Local Users</a>
+                    <a onclick="showTab('ad'); closeAllDropdowns()">🔐 Active Directory</a>
+                    <a onclick="showTab('compliance'); closeAllDropdowns()">✅ Compliance</a>
+                </div>
+            </div>
+
+            <!-- Logs Dropdown -->
+            <div class="dropdown" id="logs-dropdown">
+                <div class="tab" onclick="toggleDropdown(event, 'logs-dropdown')">📝 Logs ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showTab('audit'); closeAllDropdowns()">📝 Audit Log</a>
+                    <a onclick="showTab('activity'); closeAllDropdowns()">📡 Activity Log</a>
+                </div>
+            </div>
+
+            <!-- Admin Dropdown (admin only) -->
+            <div class="dropdown" id="admin-dropdown" style="display: none;">
+                <div class="tab" onclick="toggleDropdown(event, 'admin-dropdown')">🔧 Admin ▾</div>
+                <div class="dropdown-content">
+                    <a onclick="showShutdownModal(); closeAllDropdowns()">⛔ Shutdown Server</a>
+                </div>
+            </div>
+
+            <div class="tab" onclick="logout()" style="margin-left: auto; background: #e74c3c;">🚪 Logout</div>
         </div>
         
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content active">
             <h2>System Dashboard</h2>
+
+            <!-- SVG Gradient Definitions -->
+            <svg width="0" height="0" style="position: absolute;">
+                <defs>
+                    <linearGradient id="gradient-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-green" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#11998e;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#38ef7d;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-orange" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#ee0979;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#ff6a00;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#4776e6;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#8e54e9;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#06beb6;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#48b1bf;stop-opacity:1" />
+                    </linearGradient>
+                    <linearGradient id="gradient-red" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#eb3349;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#f45c43;stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+            </svg>
+
+            <!-- Statistics Grid with Circular Gauges -->
             <div class="stats-grid">
-                <div class="stat-card">
-                    <h3 id="total-transfers">0</h3>
-                    <p>Total Transfers</p>
+                <div class="gauge-container gauge-blue">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-data-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-bytes-transferred">0 B</div>
+                    </div>
+                    <div class="gauge-label">Data Transferred</div>
+                    <div class="gauge-subtitle">Total volume</div>
                 </div>
-                <div class="stat-card">
-                    <h3 id="active-rules">0</h3>
-                    <p>Active Rules</p>
+
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-files-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-files-transferred">0</div>
+                    </div>
+                    <div class="gauge-label">Files Transferred</div>
+                    <div class="gauge-subtitle">Total count</div>
                 </div>
-                <div class="stat-card">
-                    <h3 id="total-users">0</h3>
-                    <p>AD Users</p>
+
+                <div class="gauge-container gauge-purple">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-rules-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="active-rules">0</div>
+                    </div>
+                    <div class="gauge-label">Active Rules</div>
+                    <div class="gauge-subtitle">Monitoring</div>
                 </div>
-                <div class="stat-card">
-                    <h3 id="compliance-frameworks">0</h3>
-                    <p>Compliance Frameworks</p>
+
+                <div class="gauge-container gauge-cyan">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-transfers-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Total Transfers</div>
+                    <div class="gauge-subtitle">All time</div>
+                </div>
+
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-success-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="success-rate">0%</div>
+                    </div>
+                    <div class="gauge-label">Success Rate</div>
+                    <div class="gauge-subtitle">Completed successfully</div>
+                </div>
+
+                <div class="gauge-container gauge-orange">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-active-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="active-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Active Transfers</div>
+                    <div class="gauge-subtitle">In progress</div>
+                </div>
+
+                <div class="gauge-container gauge-green">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-completed-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="completed-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Completed</div>
+                    <div class="gauge-subtitle">Successful</div>
+                </div>
+
+                <div class="gauge-container gauge-red">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-failed-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="failed-transfers">0</div>
+                    </div>
+                    <div class="gauge-label">Failed</div>
+                    <div class="gauge-subtitle">Errors</div>
+                </div>
+
+                <div class="gauge-container gauge-purple">
+                    <div class="circular-gauge">
+                        <svg class="gauge-circle" width="160" height="160">
+                            <circle class="gauge-bg" cx="80" cy="80" r="70"></circle>
+                            <circle class="gauge-progress" cx="80" cy="80" r="70"
+                                    stroke-dasharray="440" stroke-dashoffset="440"
+                                    id="gauge-users-circle"></circle>
+                        </svg>
+                        <div class="gauge-value" id="total-users">0</div>
+                    </div>
+                    <div class="gauge-label">AD Users</div>
+                    <div class="gauge-subtitle">Directory</div>
                 </div>
             </div>
-            
-            <div class="info-box">
+
+            <!-- Performance Chart -->
+            <div style="background: white; padding: 20px; border-radius: 10px; margin-top: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h3 style="margin-bottom: 15px;">📈 Transfer Performance (Last 24 Hours)</h3>
+                <canvas id="performanceChart" height="80"></canvas>
+            </div>
+
+            <div class="info-box" style="margin-top: 20px;">
                 <strong>System Status</strong>
                 <p>All systems operational. Last AD sync: <span id="last-ad-sync">Never</span></p>
                 <p>Enabled compliance frameworks: <span id="enabled-frameworks">None</span></p>
@@ -926,7 +1401,12 @@ HTML_TEMPLATE = """
         
         <!-- History Tab -->
         <div id="history-tab" class="tab-content">
-            <h2>Transfer History</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>Transfer History</h2>
+                <button class="btn btn-danger" onclick="clearTransferHistory()" style="padding: 8px 16px;">
+                    🗑️ Clear History
+                </button>
+            </div>
             <table id="history-table">
                 <thead>
                     <tr>
@@ -936,10 +1416,30 @@ HTML_TEMPLATE = """
                         <th>Protocol</th>
                         <th>Status</th>
                         <th>Time</th>
+                        <th>Details</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="history-pagination-info">Showing 0 of 0 transfers</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="history-page-size" onchange="changeHistoryPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousHistoryPage()" id="history-prev-btn">← Previous</button>
+                    <span id="history-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextHistoryPage()" id="history-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- Transfer Rules Tab -->
@@ -950,7 +1450,10 @@ HTML_TEMPLATE = """
             <button class="btn btn-primary" onclick="showCreateRuleModal()" style="margin-bottom: 20px;">
                 ➕ Create New Rule
             </button>
-            
+            <button class="btn btn-secondary" onclick="seedRules()" style="margin-bottom: 20px; margin-left: 10px;">
+                🌱 Seed Test Data
+            </button>
+
             <table id="rules-table">
                 <thead>
                     <tr>
@@ -967,6 +1470,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="rules-pagination-info">Showing 0 of 0 rules</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="rules-page-size" onchange="changeRulesPageSize()">
+                        <option value="10" selected>10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousRulesPage()" id="rules-prev-btn">← Previous</button>
+                    <span id="rules-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextRulesPage()" id="rules-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- ✅ ENHANCED Users Tab with Search -->
@@ -984,6 +1506,7 @@ HTML_TEMPLATE = """
                     </select>
                     <button type="button" class="btn btn-primary" onclick="performSearch()">🔍 Search</button>
                     <button type="button" class="btn btn-secondary" onclick="clearSearch()">Clear</button>
+                    <button type="button" class="btn btn-success" onclick="exportUsersPDF()" style="margin-left: 10px;">📄 Export Users as PDF</button>
                 </div>
             </div>
             
@@ -1001,6 +1524,25 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="users-pagination-info">Showing 0 of 0 users</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="users-page-size" onchange="changeUsersPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousUsersPage()" id="users-prev-btn">← Previous</button>
+                    <span id="users-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextUsersPage()" id="users-next-btn">Next →</button>
+                </div>
+            </div>
         </div>
         
         <!-- Active Directory Tab -->
@@ -1073,12 +1615,14 @@ HTML_TEMPLATE = """
                 </div>
             </form>
             
-            <div class="info-box" style="margin-top: 30px;">
-                <strong>Connection Status</strong>
-                <p id="ad-connection-status">Not configured</p>
-                <p>Last sync: <span id="ad-last-sync">Never</span></p>
-                <p>Users synced: <span id="ad-users-synced">0</span></p>
-            </div>
+            
+<div class="info-box" style="margin-top: 30px; color: #1A1E70;">
+    <strong>Connection Status</strong>
+    <p id="ad-connection-status">Not configured</p>
+    <p>Last sync: <span id="ad-last-sync">Never</span></p>
+    <p>Users synced: <span id="ad-users-synced">0</span></p>
+</div>
+
         </div>
         
         <!-- Compliance Tab -->
@@ -1088,7 +1632,7 @@ HTML_TEMPLATE = """
             
             <div class="info-box">
                 <strong>About Compliance Frameworks</strong>
-                <p>Enable compliance frameworks to ensure file transfers meet regulatory requirements. Each framework enforces specific security and auditing standards.</p>
+                <p style="color: #040C53;">Enable compliance frameworks to ensure file transfers meet regulatory requirements. Each framework enforces specific security and auditing standards.</p>
             </div>
             
             <div class="compliance-grid" id="compliance-grid">
@@ -1142,9 +1686,119 @@ HTML_TEMPLATE = """
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="audit-pagination-info">Showing 0 of 0 events</span>
+                </div>
+                <div class="pagination-controls">
+                    <select id="audit-page-size" onchange="changeAuditPageSize()">
+                        <option value="10">10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50" selected>50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="999999">Show All</option>
+                    </select>
+                    <button class="btn btn-small btn-secondary" onclick="previousAuditPage()" id="audit-prev-btn">← Previous</button>
+                    <span id="audit-page-display">Page 1 of 1</span>
+                    <button class="btn btn-small btn-secondary" onclick="nextAuditPage()" id="audit-next-btn">Next →</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log Tab -->
+        <div id="activity-tab" class="tab-content">
+            <h2>Server Activity Log</h2>
+
+            <div class="info-box" style="margin-bottom: 20px;">
+                <h3 style="color: #5E0BBC;">📡 Server Health Monitoring</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 10px;">
+                    <div>
+                        <strong>Total Servers:</strong> <span id="activity-total-servers">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #27ae60;">Online:</strong> <span id="activity-online-count" style="color: #27ae60;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #e74c3c;">Offline:</strong> <span id="activity-offline-count" style="color: #e74c3c;">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="loadActivityLog()">🔄 Refresh</button>
+            <button class="btn btn-danger" onclick="clearActivityLog()" style="margin-left: 10px;">🗑️ Clear Log</button>
+
+            <h3 style="margin-top: 30px;">Recent Server Events</h3>
+            <table id="activity-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Event</th>
+                        <th>Server</th>
+                        <th>Message</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h3 style="margin-top: 30px;">Server Status</h3>
+            <table id="server-status-table">
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>Protocol</th>
+                        <th>Status</th>
+                        <th>Last Check</th>
+                        <th>Downtime</th>
+                        <th>Offline Since</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
         </div>
     </div>
-    
+
+    <!-- Local Users Tab (Admin Only) -->
+    <div id="local-users-tab" class="tab-content">
+        <h2>Local User Accounts</h2>
+        <div id="local-users-message" class="message"></div>
+
+        <div class="info-box" style="margin-bottom: 20px;">
+            <h3>ℹ️ Local Users Information</h3>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li><strong>System Admin</strong> account cannot be disabled</li>
+                <li>Local accounts are <strong>automatically disabled</strong> when Active Directory is synced</li>
+                <li>When AD is active, users must login with domain credentials</li>
+                <li>Local accounts (except system admin) are <strong>re-enabled</strong> if AD disconnects</li>
+            </ul>
+        </div>
+
+        <button class="btn btn-success" onclick="showCreateUserModal()" style="margin-bottom: 20px;">
+            ➕ Create Local User
+        </button>
+        <button class="btn btn-secondary" onclick="loadLocalUsers()">
+            🔄 Refresh
+        </button>
+
+        <table id="local-users-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Last Login</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
     <!-- CREATE/EDIT RULE MODAL -->
     <div id="rule-modal" class="modal">
         <div class="modal-content">
@@ -1307,7 +1961,7 @@ HTML_TEMPLATE = """
                         <input type="password" id="rule-password">
                     </div>
                 </div>
-
+                
                 <div style="margin-top: 20px;">
                     <button type="submit" class="btn btn-primary">💾 Save Rule</button>
                     <button type="button" class="btn btn-secondary" onclick="closeRuleModal()">Cancel</button>
@@ -1351,8 +2005,20 @@ HTML_TEMPLATE = """
                         <label>Can Create Rules</label>
                     </div>
                     <div class="permission-item">
+                        <input type="checkbox" id="perm-edit-rules">
+                        <label>Can Edit Rules</label>
+                    </div>
+                    <div class="permission-item">
                         <input type="checkbox" id="perm-manage-users">
                         <label>Can Manage Users</label>
+                    </div>
+                    <div class="permission-item">
+                        <input type="checkbox" id="perm-edit-permissions">
+                        <label>Can Edit Permissions</label>
+                    </div>
+                    <div class="permission-item">
+                        <input type="checkbox" id="perm-export-users">
+                        <label>Can Export Users</label>
                     </div>
                     <div class="permission-item">
                         <input type="checkbox" id="perm-view-audit">
@@ -1408,26 +2074,164 @@ HTML_TEMPLATE = """
             </form>
         </div>
     </div>
-    
+
+    <!-- CREATE LOCAL USER MODAL -->
+    <div id="create-user-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create Local User</h2>
+                <span class="close" onclick="closeCreateUserModal()">&times;</span>
+            </div>
+
+            <form id="create-user-form">
+                <div class="form-group">
+                    <label>Username: *</label>
+                    <input type="text" id="new-username" placeholder="Enter username" required>
+                    <div class="help-text">Lowercase, no spaces</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Password: *</label>
+                    <input type="password" id="new-password" placeholder="Enter password" required>
+                    <div class="help-text">Minimum 8 characters</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Full Name: *</label>
+                    <input type="text" id="new-fullname" placeholder="Enter full name" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Email:</label>
+                    <input type="email" id="new-email" placeholder="user@company.com">
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="new-is-admin">
+                        Administrator
+                    </label>
+                    <div class="help-text">Grant admin privileges</div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-success">➕ Create User</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateUserModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SHUTDOWN CONFIRMATION MODAL -->
+    <div id="shutdown-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⛔ Shutdown Server</h2>
+                <span class="close" onclick="closeShutdownModal()">&times;</span>
+            </div>
+
+            <div class="info-box" style="margin-bottom: 20px; background: #fff3cd; border-left: 4px solid #ffc107;">
+                <h3>⚠️ Warning</h3>
+                <p>Shutting down the server will:</p>
+                <ul style="margin-top: 10px; padding-left: 20px;">
+                    <li>Stop all active file transfers</li>
+                    <li>Disconnect all users</li>
+                    <li>Disable monitoring until restart</li>
+                </ul>
+                <p style="margin-top: 10px;"><strong>This action requires administrator authentication.</strong></p>
+            </div>
+
+            <form id="shutdown-form">
+                <div class="form-group">
+                    <label>Admin Password: *</label>
+                    <input type="password" id="shutdown-password" placeholder="Enter admin password" required>
+                    <div class="help-text">Enter your admin password to confirm</div>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="shutdown-confirm" required>
+                        I understand this will stop the MFT server
+                    </label>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn" style="background: #e74c3c;">⛔ Shutdown Server</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeShutdownModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // ✅ Global variables for user/group data
         let allUsers = [];
         let currentSearchType = 'users';
-        
+        let usersCurrentPage = 1;
+        let usersPageSize = 25;
+        let currentDisplayedUsers = [];
+
+        // Pagination variables for other tables
+        let historyCurrentPage = 1;
+        let historyPageSize = 25;
+        let currentDisplayedHistory = [];
+
+        let rulesCurrentPage = 1;
+        let rulesPageSize = 10;
+        let currentDisplayedRules = [];
+
+        let auditCurrentPage = 1;
+        let auditPageSize = 50;
+        let currentDisplayedAudit = [];
+
+        // Dropdown toggle functionality
+        function toggleDropdown(event, dropdownId) {
+            event.stopPropagation();
+            const dropdown = document.getElementById(dropdownId);
+            const isOpen = dropdown.classList.contains('open');
+
+            // Close all dropdowns first
+            closeAllDropdowns();
+
+            // Toggle the clicked dropdown
+            if (!isOpen) {
+                dropdown.classList.add('open');
+            }
+        }
+
+        function closeAllDropdowns() {
+            document.querySelectorAll('.dropdown').forEach(dropdown => {
+                dropdown.classList.remove('open');
+            });
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.dropdown')) {
+                closeAllDropdowns();
+            }
+        });
+
         // Tab switching
         function showTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
-            event.target.classList.add('active');
+
+            // Only try to set active on event.target if event exists
+            if (typeof event !== 'undefined' && event.target && event.target.classList.contains('tab')) {
+                event.target.classList.add('active');
+            }
+
             document.getElementById(tabName + '-tab').classList.add('active');
-            
+
             if (tabName === 'rules') {
                 loadRules();
             } else if (tabName === 'history') {
                 loadHistory();
             } else if (tabName === 'users') {
                 loadUsers();
+            } else if (tabName === 'local-users') {
+                loadLocalUsers();
             } else if (tabName === 'dashboard') {
                 loadDashboard();
             } else if (tabName === 'ad') {
@@ -1436,43 +2240,436 @@ HTML_TEMPLATE = """
                 loadCompliance();
             } else if (tabName === 'audit') {
                 loadAuditLog();
+            } else if (tabName === 'activity') {
+                loadActivityLog();
             }
         }
-        
+
+        // Logout function
+        async function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                try {
+                    await fetch('/api/v1/auth/logout', { method: 'POST' });
+                    window.location.href = '/login';
+                } catch (err) {
+                    console.error('Logout error:', err);
+                    window.location.href = '/login';
+                }
+            }
+        }
+
+        // Check session and show admin menus
+        async function checkSession() {
+            try {
+                const response = await fetch('/api/v1/auth/session');
+                const data = await response.json();
+
+                if (data.success && data.session.is_admin) {
+                    // Show local users menu item for admins
+                    const localUsersMenuItem = document.getElementById('local-users-menu-item');
+                    if (localUsersMenuItem) {
+                        localUsersMenuItem.style.display = 'block';
+                    }
+
+                    // Show admin dropdown for admins
+                    const adminDropdown = document.getElementById('admin-dropdown');
+                    if (adminDropdown) {
+                        adminDropdown.style.display = 'inline-block';
+                    }
+                }
+            } catch (err) {
+                console.error('Session check error:', err);
+            }
+        }
+
+        // Load local users
+        async function loadLocalUsers() {
+            try {
+                const response = await fetch('/api/v1/auth/users/local');
+                const data = await response.json();
+
+                const tbody = document.querySelector('#local-users-table tbody');
+                tbody.innerHTML = '';
+
+                if (data.success && data.users && data.users.length > 0) {
+                    data.users.forEach(user => {
+                        const row = tbody.insertRow();
+
+                        const statusBadge = user.is_active ?
+                            '<span class="status-badge status-enabled">Active</span>' :
+                            '<span class="status-badge status-disabled">Disabled</span>';
+
+                        const userType = user.is_system_admin ?
+                            '<span class="status-badge" style="background: #e74c3c; color: white;">System Admin</span>' :
+                            user.is_admin ?
+                                '<span class="status-badge" style="background: #f39c12;">Admin</span>' :
+                                '<span class="status-badge" style="background: #95a5a6;">User</span>';
+
+                        row.innerHTML = `
+                            <td><strong>${user.username}</strong></td>
+                            <td>${user.full_name || ''}</td>
+                            <td>${user.email || ''}</td>
+                            <td>${userType}</td>
+                            <td>${statusBadge}</td>
+                            <td>${user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</td>
+                            <td>${user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</td>
+                            <td>
+                                <button class="btn btn-small btn-primary" onclick="editLocalUserPermissions('${user.user_id}')">
+                                    🔐 Edit Permissions
+                                </button>
+                            </td>
+                        `;
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #999;">No local users found</td></tr>';
+                }
+            } catch (err) {
+                console.error('Failed to load local users:', err);
+                showLocalUsersMessage('Failed to load local users: ' + err.message, 'error');
+            }
+        }
+
+        // Show create user modal
+        function showCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'block';
+            // Clear form
+            document.getElementById('create-user-form').reset();
+        }
+
+        // Close create user modal
+        function closeCreateUserModal() {
+            document.getElementById('create-user-modal').style.display = 'none';
+        }
+
+        // Show message in local users tab
+        function showLocalUsersMessage(msg, type) {
+            const messageDiv = document.getElementById('local-users-message');
+            messageDiv.innerHTML = `<div class="message ${type}">${msg}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Create local user form submission
+        document.getElementById('create-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('new-username').value;
+            const password = document.getElementById('new-password').value;
+            const fullName = document.getElementById('new-fullname').value;
+            const email = document.getElementById('new-email').value;
+            const isAdmin = document.getElementById('new-is-admin').checked;
+
+            if (password.length < 8) {
+                showLocalUsersMessage('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/auth/users/local', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        full_name: fullName,
+                        email: email,
+                        is_admin: isAdmin
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showLocalUsersMessage(`User "${username}" created successfully!`, 'success');
+                    closeCreateUserModal();
+                    loadLocalUsers();
+                } else {
+                    showLocalUsersMessage('Failed to create user: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showLocalUsersMessage('Error creating user: ' + err.message, 'error');
+            }
+        });
+
+        // Edit local user permissions
+        async function editLocalUserPermissions(userId) {
+            try {
+                const response = await fetch(`/api/v1/auth/users/local/${userId}`);
+                const data = await response.json();
+
+                if (data.success && data.user) {
+                    const user = data.user;
+
+                    // Set user ID and username
+                    document.getElementById('perm-user-id').value = user.user_id;
+                    document.getElementById('perm-username').textContent = user.username;
+
+                    // Set a flag to indicate this is a local user
+                    document.getElementById('permissions-form').dataset.userType = 'local';
+
+                    // Populate permission checkboxes
+                    document.getElementById('perm-upload').checked = user.can_upload || false;
+                    document.getElementById('perm-download').checked = user.can_download || false;
+                    document.getElementById('perm-delete').checked = user.can_delete || false;
+                    document.getElementById('perm-create-rules').checked = user.can_create_rules || false;
+                    document.getElementById('perm-edit-rules').checked = user.can_edit_rules || false;
+                    document.getElementById('perm-manage-users').checked = user.can_manage_users || false;
+                    document.getElementById('perm-edit-permissions').checked = user.can_edit_permissions || false;
+                    document.getElementById('perm-export-users').checked = user.can_export_users || false;
+                    document.getElementById('perm-view-audit').checked = user.can_view_audit_logs || false;
+                    document.getElementById('perm-admin').checked = user.is_admin || false;
+
+                    // Show modal
+                    document.getElementById('permissions-modal').style.display = 'block';
+                } else {
+                    showLocalUsersMessage('Failed to load user: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (err) {
+                showLocalUsersMessage('Error loading user: ' + err.message, 'error');
+            }
+        }
+
+        // Shutdown modal functions
+        function showShutdownModal() {
+            document.getElementById('shutdown-modal').style.display = 'block';
+            // Clear form
+            document.getElementById('shutdown-form').reset();
+        }
+
+        function closeShutdownModal() {
+            document.getElementById('shutdown-modal').style.display = 'none';
+        }
+
+        // Shutdown form submission
+        document.getElementById('shutdown-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const password = document.getElementById('shutdown-password').value;
+            const confirmed = document.getElementById('shutdown-confirm').checked;
+
+            if (!confirmed) {
+                alert('Please confirm you understand the consequences of shutting down the server');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/admin/shutdown', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    closeShutdownModal();
+                    alert('✅ Server is shutting down. The application will close in a few seconds.');
+                    // Redirect to a shutdown page or login page
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                } else {
+                    alert('❌ Shutdown failed: ' + (data.error || 'Invalid password'));
+                }
+            } catch (err) {
+                alert('❌ Error during shutdown: ' + err.message);
+            }
+        });
+
         // Load dashboard statistics
+        let performanceChart = null;
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Update circular gauge animation
+        function updateGauge(circleId, valueId, value, maxValue, displayValue) {
+            const circle = document.getElementById(circleId);
+            const valueElement = document.getElementById(valueId);
+
+            if (!circle || !valueElement) return;
+
+            // Calculate percentage (0-100)
+            let percentage = 0;
+            if (maxValue > 0) {
+                percentage = Math.min(100, (value / maxValue) * 100);
+            } else if (value > 0) {
+                // For gauges without a max value, use the value as percentage directly
+                percentage = Math.min(100, value);
+            }
+
+            // SVG circle circumference: 2πr = 2 * 3.14159 * 70 = 440
+            const circumference = 440;
+            const offset = circumference - (circumference * percentage / 100);
+
+            // Animate the gauge
+            circle.style.strokeDashoffset = offset;
+
+            // Update the center value
+            valueElement.textContent = displayValue;
+        }
+
         function loadDashboard() {
-            fetch('/api/v1/rules/statistics')
+            // Load enhanced dashboard statistics
+            fetch('/api/v1/dashboard/stats')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('total-transfers').textContent = data.total_files_transferred || 0;
-                    document.getElementById('active-rules').textContent = data.active_rules || 0;
+                    // Calculate max values for gauges (for scaling)
+                    const maxTransfers = Math.max(1, data.total_transfers || 1);
+                    const maxFiles = Math.max(100, data.total_files_transferred || 100);
+
+                    // Update Data Transferred gauge
+                    const bytesValue = data.total_bytes_transferred || 0;
+                    const bytesGB = bytesValue / (1024 * 1024 * 1024);
+                    updateGauge('gauge-data-circle', 'total-bytes-transferred',
+                        bytesGB, Math.max(10, bytesGB * 1.2), formatBytes(bytesValue));
+
+                    // Update Files Transferred gauge
+                    updateGauge('gauge-files-circle', 'total-files-transferred',
+                        data.total_files_transferred || 0, maxFiles,
+                        (data.total_files_transferred || 0).toString());
+
+                    // Update Active Rules gauge (scale to max 20 rules)
+                    updateGauge('gauge-rules-circle', 'active-rules',
+                        data.active_rules || 0, Math.max(10, data.active_rules || 10),
+                        (data.active_rules || 0).toString());
+
+                    // Update Total Transfers gauge
+                    updateGauge('gauge-transfers-circle', 'total-transfers',
+                        data.total_transfers || 0, maxTransfers,
+                        (data.total_transfers || 0).toString());
+
+                    // Update Success Rate gauge (0-100%)
+                    updateGauge('gauge-success-circle', 'success-rate',
+                        data.success_rate || 0, 100, (data.success_rate || 0) + '%');
+
+                    // Update Active Transfers gauge
+                    updateGauge('gauge-active-circle', 'active-transfers',
+                        data.active_transfers || 0, Math.max(5, data.active_transfers || 5),
+                        (data.active_transfers || 0).toString());
+
+                    // Update Completed Transfers gauge
+                    updateGauge('gauge-completed-circle', 'completed-transfers',
+                        data.completed_transfers || 0, maxTransfers,
+                        (data.completed_transfers || 0).toString());
+
+                    // Update Failed Transfers gauge
+                    updateGauge('gauge-failed-circle', 'failed-transfers',
+                        data.failed_transfers || 0, Math.max(10, data.failed_transfers || 10),
+                        (data.failed_transfers || 0).toString());
+
+                    // Update performance chart
+                    updatePerformanceChart(data.performance_data);
                 })
                 .catch(err => console.error('Failed to load dashboard:', err));
-            
+
             fetch('/api/v1/users')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('total-users').textContent = data.length || 0;
+                    const userCount = data.length || 0;
+                    // Update AD Users gauge
+                    updateGauge('gauge-users-circle', 'total-users',
+                        userCount, Math.max(50, userCount || 50), userCount.toString());
                 })
                 .catch(err => console.error('Failed to load users:', err));
-            
+
             fetch('/api/v1/compliance/frameworks')
                 .then(r => r.json())
                 .then(data => {
                     const enabled = data.frameworks.filter(f => f.enabled);
-                    document.getElementById('compliance-frameworks').textContent = enabled.length;
-                    document.getElementById('enabled-frameworks').textContent = 
+                    document.getElementById('enabled-frameworks').textContent =
                         enabled.map(f => f.name).join(', ') || 'None';
                 })
                 .catch(err => console.error('Failed to load compliance:', err));
-            
+
             fetch('/api/v1/ad/status')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('last-ad-sync').textContent = 
+                    document.getElementById('last-ad-sync').textContent =
                         data.last_sync ? new Date(data.last_sync).toLocaleString() : 'Never';
                 })
                 .catch(err => console.error('Failed to load AD status:', err));
+        }
+
+        function updatePerformanceChart(performanceData) {
+            const ctx = document.getElementById('performanceChart');
+
+            if (!performanceData || !performanceData.labels) {
+                console.warn('No performance data available');
+                return;
+            }
+
+            // Destroy existing chart if it exists
+            if (performanceChart) {
+                performanceChart.destroy();
+            }
+
+            // Create new chart
+            performanceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: performanceData.labels,
+                    datasets: [
+                        {
+                            label: 'Completed',
+                            data: performanceData.completed,
+                            borderColor: '#38ef7d',
+                            backgroundColor: 'rgba(56, 239, 125, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Failed',
+                            data: performanceData.failed,
+                            borderColor: '#ff6a00',
+                            backgroundColor: 'rgba(255, 106, 0, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
         }
         
         // ========================================
@@ -1490,27 +2687,46 @@ HTML_TEMPLATE = """
         }
         
         function displayUsers(users) {
+            currentDisplayedUsers = users;
             const tbody = document.querySelector('#users-table tbody');
             tbody.innerHTML = '';
-            
+
             if (!users || users.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users found</td></tr>';
+                updateUsersPaginationControls(0, 0, 0);
                 return;
             }
-            
-            users.forEach(u => {
+
+            // Calculate pagination
+            const totalUsers = users.length;
+            const totalPages = Math.ceil(totalUsers / usersPageSize);
+
+            // Ensure current page is valid
+            if (usersCurrentPage > totalPages) {
+                usersCurrentPage = Math.max(1, totalPages);
+            }
+
+            // Calculate start and end indices
+            const startIndex = (usersCurrentPage - 1) * usersPageSize;
+            const endIndex = Math.min(startIndex + usersPageSize, totalUsers);
+
+            // Get users for current page
+            const pageUsers = users.slice(startIndex, endIndex);
+
+            // Display users
+            pageUsers.forEach(u => {
                 const permissions = [];
                 if (u.can_upload) permissions.push('Upload');
                 if (u.can_download) permissions.push('Download');
                 if (u.can_delete) permissions.push('Delete');
                 if (u.can_create_rules) permissions.push('Rules');
                 if (u.is_admin) permissions.push('Admin');
-                
+
                 // ✅ Display groups as badges
                 const groupsHTML = u.groups && u.groups.length > 0
                     ? u.groups.map(g => `<span class="group-badge">${g}</span>`).join(' ')
                     : '<span style="color: #999;">No groups</span>';
-                
+
                 const row = tbody.insertRow();
                 row.innerHTML = `
                     <td>${u.username || 'N/A'}</td>
@@ -1524,30 +2740,318 @@ HTML_TEMPLATE = """
                     </td>
                 `;
             });
+
+            // Update pagination controls
+            updateUsersPaginationControls(startIndex + 1, endIndex, totalUsers);
         }
-        
+
+        // Update pagination controls
+        function updateUsersPaginationControls(start, end, total) {
+            const totalPages = Math.ceil(total / usersPageSize);
+
+            // Update info text
+            document.getElementById('users-pagination-info').textContent =
+                total > 0 ? `Showing ${start} to ${end} of ${total} users` : 'Showing 0 of 0 users';
+
+            // Update page display
+            document.getElementById('users-page-display').textContent =
+                totalPages > 0 ? `Page ${usersCurrentPage} of ${totalPages}` : 'Page 1 of 1';
+
+            // Enable/disable buttons
+            document.getElementById('users-prev-btn').disabled = usersCurrentPage <= 1;
+            document.getElementById('users-next-btn').disabled = usersCurrentPage >= totalPages || totalPages === 0;
+        }
+
+        // Pagination navigation functions
+        function nextUsersPage() {
+            const totalPages = Math.ceil(currentDisplayedUsers.length / usersPageSize);
+            if (usersCurrentPage < totalPages) {
+                usersCurrentPage++;
+                displayUsers(currentDisplayedUsers);
+            }
+        }
+
+        function previousUsersPage() {
+            if (usersCurrentPage > 1) {
+                usersCurrentPage--;
+                displayUsers(currentDisplayedUsers);
+            }
+        }
+
+        function changeUsersPageSize() {
+            usersPageSize = parseInt(document.getElementById('users-page-size').value);
+            usersCurrentPage = 1; // Reset to first page
+            displayUsers(currentDisplayedUsers);
+        }
+
+        // ========================================
+        // HISTORY PAGINATION FUNCTIONS
+        // ========================================
+        function nextHistoryPage() {
+            const totalPages = Math.ceil(currentDisplayedHistory.length / historyPageSize);
+            if (historyCurrentPage < totalPages) {
+                historyCurrentPage++;
+                displayHistory(currentDisplayedHistory);
+            }
+        }
+
+        function previousHistoryPage() {
+            if (historyCurrentPage > 1) {
+                historyCurrentPage--;
+                displayHistory(currentDisplayedHistory);
+            }
+        }
+
+        function changeHistoryPageSize() {
+            historyPageSize = parseInt(document.getElementById('history-page-size').value);
+            historyCurrentPage = 1;
+            displayHistory(currentDisplayedHistory);
+        }
+
+        function clearTransferHistory() {
+            if (confirm('Are you sure you want to clear all transfer history? This action cannot be undone.')) {
+                fetch('/api/v1/history/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            currentDisplayedHistory = [];
+                            displayHistory([]);
+                            showMessage('history-message', '✅ Transfer history cleared successfully!', 'success');
+                        } else {
+                            showMessage('history-message', '❌ Failed to clear history: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(err => {
+                        showMessage('history-message', '❌ Error clearing history: ' + err.message, 'error');
+                    });
+            }
+        }
+
+        function displayHistory(transfers) {
+            currentDisplayedHistory = transfers;
+            const tbody = document.querySelector('#history-table tbody');
+            tbody.innerHTML = '';
+
+            if (!transfers || transfers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No transfers yet.</td></tr>';
+                updatePaginationControls('history', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = transfers.length;
+            const totalPages = Math.ceil(totalItems / historyPageSize);
+            if (historyCurrentPage > totalPages) historyCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (historyCurrentPage - 1) * historyPageSize;
+            const endIndex = Math.min(startIndex + historyPageSize, totalItems);
+            const pageItems = transfers.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(t => {
+                let details = '';
+                if (t.status === 'failed' && t.error) {
+                    details = `<span style="color: #e74c3c; font-weight: bold;" title="${t.error}">❌ ${t.error}</span>`;
+                } else if (t.status === 'completed') {
+                    details = '<span style="color: #27ae60;">✅ Success</span>';
+                } else if (t.status === 'in_progress') {
+                    details = '<span style="color: #3498db;">🔄 In Progress</span>';
+                } else {
+                    details = '<span style="color: #95a5a6;">⏳ Pending</span>';
+                }
+
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${t.task_id.substring(0, 8)}...</td>
+                    <td>${t.source_path}</td>
+                    <td>${t.destination_path}</td>
+                    <td>${t.protocol}</td>
+                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>
+                    <td>${new Date(t.timestamp).toLocaleString()}</td>
+                    <td>${details}</td>
+                `;
+            });
+
+            updatePaginationControls('history', startIndex + 1, endIndex, totalItems);
+        }
+
+        // ========================================
+        // RULES PAGINATION FUNCTIONS
+        // ========================================
+        function nextRulesPage() {
+            const totalPages = Math.ceil(currentDisplayedRules.length / rulesPageSize);
+            if (rulesCurrentPage < totalPages) {
+                rulesCurrentPage++;
+                displayRules(currentDisplayedRules);
+            }
+        }
+
+        function previousRulesPage() {
+            if (rulesCurrentPage > 1) {
+                rulesCurrentPage--;
+                displayRules(currentDisplayedRules);
+            }
+        }
+
+        function changeRulesPageSize() {
+            rulesPageSize = parseInt(document.getElementById('rules-page-size').value);
+            rulesCurrentPage = 1;
+            displayRules(currentDisplayedRules);
+        }
+
+        function displayRules(rules) {
+            currentDisplayedRules = rules;
+            const tbody = document.querySelector('#rules-table tbody');
+            tbody.innerHTML = '';
+
+            if (!rules || rules.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No rules created yet.</td></tr>';
+                updatePaginationControls('rules', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = rules.length;
+            const totalPages = Math.ceil(totalItems / rulesPageSize);
+            if (rulesCurrentPage > totalPages) rulesCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (rulesCurrentPage - 1) * rulesPageSize;
+            const endIndex = Math.min(startIndex + rulesPageSize, totalItems);
+            const pageItems = rules.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(rule => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td><strong>${rule.name}</strong></td>
+                    <td>${rule.source_path}<br><small>${rule.source_pattern}</small></td>
+                    <td>${rule.destination_path}</td>
+                    <td><span class="status-badge">${rule.schedule_type}</span></td>
+                    <td><span class="status-badge">${rule.action_type}</span></td>
+                    <td>${rule.files_transferred || 0}</td>
+                    <td><span class="status-badge status-${rule.status}">${rule.status}</span></td>
+                    <td>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${rule.enabled ? 'checked' : ''}
+                                   onchange="toggleRule('${rule.rule_id}', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </td>
+                    <td>
+                        ${rule.schedule_type === 'cron' ?
+                            `<button class="btn btn-small btn-success" onclick="executeRule('${rule.rule_id}')" style="margin-right: 5px;" title="Run full folder backup now">▶️ Run Now</button>` :
+                            ''}
+                        <button class="btn btn-small btn-primary" onclick="editRule('${rule.rule_id}')" style="margin-right: 5px;">Edit</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>
+                    </td>
+                `;
+            });
+
+            updatePaginationControls('rules', startIndex + 1, endIndex, totalItems);
+        }
+
+        // ========================================
+        // AUDIT LOG PAGINATION FUNCTIONS
+        // ========================================
+        function nextAuditPage() {
+            const totalPages = Math.ceil(currentDisplayedAudit.length / auditPageSize);
+            if (auditCurrentPage < totalPages) {
+                auditCurrentPage++;
+                displayAuditLog(currentDisplayedAudit);
+            }
+        }
+
+        function previousAuditPage() {
+            if (auditCurrentPage > 1) {
+                auditCurrentPage--;
+                displayAuditLog(currentDisplayedAudit);
+            }
+        }
+
+        function changeAuditPageSize() {
+            auditPageSize = parseInt(document.getElementById('audit-page-size').value);
+            auditCurrentPage = 1;
+            displayAuditLog(currentDisplayedAudit);
+        }
+
+        function displayAuditLog(events) {
+            currentDisplayedAudit = events;
+            const tbody = document.querySelector('#audit-table tbody');
+            tbody.innerHTML = '';
+
+            if (!events || events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No audit events found.</td></tr>';
+                updatePaginationControls('audit', 0, 0, 0);
+                return;
+            }
+
+            // Calculate pagination
+            const totalItems = events.length;
+            const totalPages = Math.ceil(totalItems / auditPageSize);
+            if (auditCurrentPage > totalPages) auditCurrentPage = Math.max(1, totalPages);
+
+            const startIndex = (auditCurrentPage - 1) * auditPageSize;
+            const endIndex = Math.min(startIndex + auditPageSize, totalItems);
+            const pageItems = events.slice(startIndex, endIndex);
+
+            // Display items
+            pageItems.forEach(event => {
+                const row = tbody.insertRow();
+                const resultClass = event.result === 'success' ? 'status-completed' :
+                                   event.result === 'failure' ? 'status-failed' : 'status-pending';
+
+                row.innerHTML = `
+                    <td>${new Date(event.timestamp).toLocaleString()}</td>
+                    <td>${event.event_type}</td>
+                    <td>${event.username || 'System'}</td>
+                    <td>${event.action}</td>
+                    <td><span class="status-badge ${resultClass}">${event.result}</span></td>
+                    <td>${event.details || '-'}</td>
+                `;
+            });
+
+            updatePaginationControls('audit', startIndex + 1, endIndex, totalItems);
+        }
+
+        // Generic pagination control updater
+        function updatePaginationControls(type, start, end, total) {
+            const totalPages = Math.ceil(total / (type === 'history' ? historyPageSize : type === 'rules' ? rulesPageSize : auditPageSize));
+            const currentPage = type === 'history' ? historyCurrentPage : type === 'rules' ? rulesCurrentPage : auditCurrentPage;
+            const itemName = type === 'history' ? 'transfers' : type === 'rules' ? 'rules' : 'events';
+
+            document.getElementById(`${type}-pagination-info`).textContent =
+                total > 0 ? `Showing ${start} to ${end} of ${total} ${itemName}` : `Showing 0 of 0 ${itemName}`;
+
+            document.getElementById(`${type}-page-display`).textContent =
+                totalPages > 0 ? `Page ${currentPage} of ${totalPages}` : 'Page 1 of 1';
+
+            document.getElementById(`${type}-prev-btn`).disabled = currentPage <= 1;
+            document.getElementById(`${type}-next-btn`).disabled = currentPage >= totalPages || totalPages === 0;
+        }
+
         // ✅ SEARCH FUNCTION
         function performSearch() {
             const searchInput = document.getElementById('user-search-input').value.trim().toLowerCase();
             const searchType = document.getElementById('search-type').value;
-            
+
             if (!searchInput) {
                 showMessage('users-message', 'Please enter a search term', 'error');
                 return;
             }
-            
+
             currentSearchType = searchType;
-            
+            usersCurrentPage = 1; // Reset to first page when searching
+
             if (searchType === 'users') {
                 // Search in users
-                const filtered = allUsers.filter(u => 
+                const filtered = allUsers.filter(u =>
                     (u.username && u.username.toLowerCase().includes(searchInput)) ||
                     (u.display_name && u.display_name.toLowerCase().includes(searchInput)) ||
                     (u.email && u.email.toLowerCase().includes(searchInput)) ||
                     (u.department && u.department.toLowerCase().includes(searchInput)) ||
                     (u.groups && u.groups.some(g => g.toLowerCase().includes(searchInput)))
                 );
-                
+
                 displayUsers(filtered);
                 showMessage('users-message', `Found ${filtered.length} user(s)`, 'success');
             } else {
@@ -1603,10 +3107,45 @@ HTML_TEMPLATE = """
         function clearSearch() {
             document.getElementById('user-search-input').value = '';
             document.getElementById('search-type').value = 'users';
+            usersCurrentPage = 1; // Reset to first page when clearing search
             loadUsers();
             showMessage('users-message', 'Search cleared - showing all users', 'success');
         }
-        
+
+        // ✅ EXPORT USERS AS PDF
+        async function exportUsersPDF() {
+            try {
+                showMessage('users-message', 'Generating PDF export...', 'info');
+
+                const response = await fetch('/api/v1/users/export/pdf', {
+                    method: 'GET'
+                });
+
+                if (response.ok) {
+                    // Get the PDF blob
+                    const blob = await response.blob();
+
+                    // Create download link
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `MFT_Users_Export_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+
+                    showMessage('users-message', 'PDF export downloaded successfully', 'success');
+                } else {
+                    const data = await response.json();
+                    showMessage('users-message', 'Export failed: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (err) {
+                showMessage('users-message', 'Export failed: ' + err.message, 'error');
+                console.error('Export error:', err);
+            }
+        }
+
         // ✅ ASSIGN USER TO GROUP
         function showAssignToGroupModal(groupId, groupName) {
             document.getElementById('assign-group-id').value = groupId;
@@ -1716,21 +3255,28 @@ HTML_TEMPLATE = """
             }
         }
         
-        // ✅ FIXED EDIT USER PERMISSION
+        // ✅ FIXED EDIT USER PERMISSION (for AD users)
         function editUserPermission(userId) {
             fetch(`/api/v1/users/${userId}`)
                 .then(r => r.json())
                 .then(user => {
                     document.getElementById('perm-user-id').value = user.user_id;
                     document.getElementById('perm-username').textContent = user.username;
+
+                    // Set a flag to indicate this is an AD user
+                    document.getElementById('permissions-form').dataset.userType = 'ad';
+
                     document.getElementById('perm-upload').checked = user.can_upload || false;
                     document.getElementById('perm-download').checked = user.can_download || false;
                     document.getElementById('perm-delete').checked = user.can_delete || false;
                     document.getElementById('perm-create-rules').checked = user.can_create_rules || false;
+                    document.getElementById('perm-edit-rules').checked = user.can_edit_rules || false;
                     document.getElementById('perm-manage-users').checked = user.can_manage_users || false;
+                    document.getElementById('perm-edit-permissions').checked = user.can_edit_permissions || false;
+                    document.getElementById('perm-export-users').checked = user.can_export_users || false;
                     document.getElementById('perm-view-audit').checked = user.can_view_audit_logs || false;
                     document.getElementById('perm-admin').checked = user.is_admin || false;
-                    
+
                     document.getElementById('permissions-modal').style.display = 'block';
                 })
                 .catch(err => {
@@ -1744,31 +3290,51 @@ HTML_TEMPLATE = """
         
         document.getElementById('permissions-form').addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const userId = document.getElementById('perm-user-id').value;
+            const userType = document.getElementById('permissions-form').dataset.userType || 'ad';
+
             const permissions = {
                 can_upload: document.getElementById('perm-upload').checked,
                 can_download: document.getElementById('perm-download').checked,
                 can_delete: document.getElementById('perm-delete').checked,
                 can_create_rules: document.getElementById('perm-create-rules').checked,
+                can_edit_rules: document.getElementById('perm-edit-rules').checked,
                 can_manage_users: document.getElementById('perm-manage-users').checked,
+                can_edit_permissions: document.getElementById('perm-edit-permissions').checked,
+                can_export_users: document.getElementById('perm-export-users').checked,
                 can_view_audit_logs: document.getElementById('perm-view-audit').checked,
                 is_admin: document.getElementById('perm-admin').checked
             };
-            
-            fetch(`/api/v1/users/${userId}/permissions`, {
+
+            // Determine API endpoint based on user type
+            const apiUrl = userType === 'local'
+                ? `/api/v1/auth/users/local/${userId}/permissions`
+                : `/api/v1/users/${userId}/permissions`;
+
+            fetch(apiUrl, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(permissions)
             })
             .then(r => r.json())
             .then(data => {
-                showMessage('users-message', 'Permissions updated successfully!', 'success');
-                closePermissionsModal();
-                loadUsers();
+                if (userType === 'local') {
+                    showLocalUsersMessage('Permissions updated successfully!', 'success');
+                    closePermissionsModal();
+                    loadLocalUsers();
+                } else {
+                    showMessage('users-message', 'Permissions updated successfully!', 'success');
+                    closePermissionsModal();
+                    loadUsers();
+                }
             })
             .catch(err => {
-                alert('Failed to update permissions: ' + err.message);
+                if (userType === 'local') {
+                    showLocalUsersMessage('Failed to update permissions: ' + err.message, 'error');
+                } else {
+                    alert('Failed to update permissions: ' + err.message);
+                }
             });
         });
         
@@ -1829,7 +3395,13 @@ HTML_TEMPLATE = """
         });
         
         function testADConnection() {
-            fetch('/api/v1/ad/test', { method: 'POST' })
+            fetch('/api/v1/ad/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
@@ -1922,36 +3494,123 @@ HTML_TEMPLATE = """
         function loadAuditLog() {
             const eventType = document.getElementById('audit-filter-type').value;
             const result = document.getElementById('audit-filter-result').value;
-            
-            let url = '/api/v1/audit/events?limit=100';
+
+            let url = '/api/v1/audit/events?limit=1000'; // Increased limit for pagination
             if (eventType) url += `&event_type=${eventType}`;
             if (result) url += `&result=${result}`;
-            
+
             fetch(url)
                 .then(r => r.json())
                 .then(data => {
-                    const tbody = document.querySelector('#audit-table tbody');
-                    tbody.innerHTML = '';
-                    
-                    data.events.forEach(event => {
-                        const row = tbody.insertRow();
-                        row.innerHTML = `
-                            <td>${new Date(event.timestamp).toLocaleString()}</td>
-                            <td><span class="status-badge">${event.event_type}</span></td>
-                            <td>${event.username || 'System'}</td>
-                            <td>${event.action}</td>
-                            <td><span class="status-badge status-${event.result}">${event.result}</span></td>
-                            <td>${JSON.stringify(event.details).substring(0, 50)}...</td>
-                        `;
-                    });
+                    auditCurrentPage = 1; // Reset to first page
+                    displayAuditLog(data.events || []);
                 })
-                .catch(err => console.error('Failed to load audit log:', err));
+                .catch(err => {
+                    console.error('Failed to load audit log:', err);
+                    displayAuditLog([]);
+                });
         }
         
         function exportAuditLog() {
             window.location.href = '/api/v1/audit/export';
         }
-        
+
+        // ========================================
+        // ACTIVITY LOG FUNCTIONS
+        // ========================================
+
+        function loadActivityLog() {
+            // Load server status
+            fetch('/api/v1/servers/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update summary stats
+                        document.getElementById('activity-total-servers').textContent = data.total_servers;
+                        document.getElementById('activity-online-count').textContent = data.online_count;
+                        document.getElementById('activity-offline-count').textContent = data.offline_count;
+
+                        // Update server status table
+                        const statusTbody = document.querySelector('#server-status-table tbody');
+                        statusTbody.innerHTML = '';
+
+                        Object.entries(data.servers).forEach(([server_key, server]) => {
+                            const row = statusTbody.insertRow();
+                            const statusBadge = server.is_online
+                                ? '<span style="color: #27ae60; font-weight: bold;">● ONLINE</span>'
+                                : '<span style="color: #e74c3c; font-weight: bold;">● OFFLINE</span>';
+
+                            row.innerHTML = `
+                                <td>${server.host}:${server.port}</td>
+                                <td>${server.protocol.toUpperCase()}</td>
+                                <td>${statusBadge}</td>
+                                <td>${new Date(server.last_check).toLocaleString()}</td>
+                                <td>${server.total_downtime || 'None'}</td>
+                                <td>${server.offline_since ? new Date(server.offline_since).toLocaleString() : '-'}</td>
+                            `;
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to load server status:', err));
+
+            // Load activity log
+            fetch('/api/v1/servers/activity?limit=100')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const activityTbody = document.querySelector('#activity-table tbody');
+                        activityTbody.innerHTML = '';
+
+                        if (data.activity.length === 0) {
+                            activityTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No activity yet</td></tr>';
+                            return;
+                        }
+
+                        data.activity.forEach(activity => {
+                            const row = activityTbody.insertRow();
+                            const eventBadge = activity.event_type === 'server_online'
+                                ? '<span style="background: #27ae60; color: white; padding: 3px 8px; border-radius: 3px;">✅ ONLINE</span>'
+                                : '<span style="background: #e74c3c; color: white; padding: 3px 8px; border-radius: 3px;">❌ OFFLINE</span>';
+
+                            let details = '';
+                            if (activity.details && activity.details.downtime_formatted) {
+                                details = `Downtime: ${activity.details.downtime_formatted}`;
+                            } else if (activity.details && activity.details.protocol) {
+                                details = `Protocol: ${activity.details.protocol}`;
+                            }
+
+                            row.innerHTML = `
+                                <td>${new Date(activity.timestamp).toLocaleString()}</td>
+                                <td>${eventBadge}</td>
+                                <td>${activity.server}</td>
+                                <td>${activity.message}</td>
+                                <td>${details}</td>
+                            `;
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to load activity log:', err));
+        }
+
+        function clearActivityLog() {
+            if (confirm('Are you sure you want to clear the activity log? This action cannot be undone.')) {
+                fetch('/api/v1/servers/activity/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Activity log cleared successfully!');
+                            loadActivityLog(); // Reload the log
+                        } else {
+                            alert('Failed to clear activity log: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error clearing activity log: ' + err.message);
+                        console.error('Failed to clear activity log:', err);
+                    });
+            }
+        }
+
         // ========================================
         // TRANSFER FUNCTIONS
         // ========================================
@@ -1994,134 +3653,73 @@ HTML_TEMPLATE = """
             });
         });
         
-        function loadHistory() {  
-    console.log('🔵 Loading transfer history...');  
-    
-    fetch('/api/v1/transfers')  
-        .then(r => {  
-            console.log('📡 History response status:', r.status);  
-            if (!r.ok) {  
-                throw new Error(`HTTP error! status: ${r.status}`);  
-            }  
-            return r.json();  
-        })  
-        .then(data => {  
-            console.log('✅ Transfer history data received:', data);  
-            
-            const tbody = document.querySelector('#history-table tbody');  
-            
-            // Check if we have transfers  
-            if (!data || !data.transfers) {  
-                console.warn('⚠️ No transfers array in response');  
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: orange;">Invalid data format received</td></tr>';  
-                return;  
-            }  
-            
-            if (data.transfers.length === 0) {  
-                console.log('ℹ️ No transfers yet');  
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No transfers yet. Create a transfer to see history.</td></tr>';  
-                return;  
-            }  
-            
-            // Clear table  
-            tbody.innerHTML = '';  
-            
-            // Add each transfer  
-            data.transfers.forEach((t, index) => {  
-                console.log(`  📤 Transfer ${index + 1}:`, t.task_id.substring(0, 8));  
-                
-                const row = tbody.insertRow();  
-                row.innerHTML = `  
-                    <td>${t.task_id.substring(0, 8)}...</td>  
-                    <td>${t.source_path}</td>  
-                    <td>${t.destination_path}</td>  
-                    <td>${t.protocol}</td>  
-                    <td><span class="status-badge status-${t.status}">${t.status}</span></td>  
-                    <td>${new Date(t.timestamp).toLocaleString()}</td>  
-                `;  
-            });  
-            
-            console.log(`✅ Displayed ${data.transfers.length} transfers`);  
-        })  
-        .catch(err => {  
-            console.error('❌ Failed to load history:', err);  
-            const tbody = document.querySelector('#history-table tbody');  
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: red;">  
-                Error loading transfers: ${err.message}<br>  
-                <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>  
-            </td></tr>`;  
-        });  
-}  
+        function loadHistory() {
+            console.log('🔵 Loading transfer history...');
+
+            fetch('/api/v1/transfers')
+                .then(r => {
+                    console.log('📡 History response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('✅ Transfer history data received:', data);
+
+                    if (!data || !data.transfers) {
+                        console.warn('⚠️ No transfers array in response');
+                        displayHistory([]);
+                        return;
+                    }
+
+                    historyCurrentPage = 1; // Reset to first page
+                    displayHistory(data.transfers);
+                    console.log(`✅ Loaded ${data.transfers.length} transfers`);
+                })
+                .catch(err => {
+                    console.error('❌ Failed to load history:', err);
+                    const tbody = document.querySelector('#history-table tbody');
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: red;">
+                        Error loading transfers: ${err.message}<br>
+                        <button class="btn btn-small btn-primary" onclick="loadHistory()" style="margin-top: 10px;">🔄 Retry</button>
+                    </td></tr>`;
+                });
+        }  
         
-        function loadRules() {  
-    console.log('🔵 Loading rules...');  
-    
-    fetch('/api/v1/rules')  
-        .then(r => {  
-            console.log('📡 Rules response status:', r.status);  
-            if (!r.ok) {  
-                throw new Error(`HTTP error! status: ${r.status}`);  
-            }  
-            return r.json();  
-        })  
-        .then(data => {  
-            console.log('✅ Rules data received:', data);  
-            
-            const tbody = document.querySelector('#rules-table tbody');  
-            
-            // Check if we have rules  
-            if (!data || !data.rules) {  
-                console.warn('⚠️ No rules array in response');  
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: orange;">Invalid data format received</td></tr>';  
-                return;  
-            }  
-            
-            if (data.rules.length === 0) {  
-                console.log('ℹ️ No rules created yet');  
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No rules created yet. Click "Create New Rule" to get started.</td></tr>';  
-                return;  
-            }  
-            
-            // Clear table  
-            tbody.innerHTML = '';  
-            
-            // Add each rule  
-            data.rules.forEach((rule, index) => {  
-                console.log(`  📋 Rule ${index + 1}:`, rule.name);  
-                
-                const row = tbody.insertRow();  
-                row.innerHTML = `  
-                    <td><strong>${rule.name}</strong></td>  
-                    <td>${rule.source_path}<br><small>${rule.source_pattern}</small></td>  
-                    <td>${rule.destination_path}</td>  
-                    <td><span class="status-badge">${rule.schedule_type}</span></td>  
-                    <td><span class="status-badge">${rule.action_type}</span></td>  
-                    <td>${rule.files_transferred || 0}</td>  
-                    <td><span class="status-badge status-${rule.status}">${rule.status}</span></td>  
-                    <td>  
-                        <label class="toggle-switch">  
-                            <input type="checkbox" ${rule.enabled ? 'checked' : ''}   
-                                   onchange="toggleRule('${rule.rule_id}', this.checked)">  
-                            <span class="toggle-slider"></span>  
-                        </label>  
-                    </td>  
-                    <td>  
-                        <button class="btn btn-small btn-danger" onclick="deleteRule('${rule.rule_id}')">Delete</button>  
-                    </td>  
-                `;  
-            });  
-            
-            console.log(`✅ Displayed ${data.rules.length} rules`);  
-        })  
-        .catch(err => {  
-            console.error('❌ Failed to load rules:', err);  
-            const tbody = document.querySelector('#rules-table tbody');  
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: red;">  
-                Error loading rules: ${err.message}<br>  
-                <button class="btn btn-small btn-primary" onclick="loadRules()" style="margin-top: 10px;">🔄 Retry</button>  
-            </td></tr>`;  
-        });  
-}  
+        function loadRules() {
+            console.log('🔵 Loading rules...');
+
+            fetch('/api/v1/rules')
+                .then(r => {
+                    console.log('📡 Rules response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('✅ Rules data received:', data);
+
+                    if (!data || !data.rules) {
+                        console.warn('⚠️ No rules array in response');
+                        displayRules([]);
+                        return;
+                    }
+
+                    rulesCurrentPage = 1; // Reset to first page
+                    displayRules(data.rules);
+                    console.log(`✅ Loaded ${data.rules.length} rules`);
+                })
+                .catch(err => {
+                    console.error('❌ Failed to load rules:', err);
+                    const tbody = document.querySelector('#rules-table tbody');
+                    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: red;">
+                        Error loading rules: ${err.message}<br>
+                        <button class="btn btn-small btn-primary" onclick="loadRules()" style="margin-top: 10px;">🔄 Retry</button>
+                    </td></tr>`;
+                });
+        }  
         
         function toggleRule(ruleId, enabled) {
             const endpoint = enabled ? 'enable' : 'disable';
@@ -2150,7 +3748,87 @@ HTML_TEMPLATE = """
                     });
             }
         }
-        
+
+        function executeRule(ruleId) {
+            if (confirm('Execute this CRON backup rule now? This will transfer the entire folder and all subfolders to the destination.')) {
+                showMessage('rules-message', 'Starting backup execution...', 'info');
+
+                fetch(`/api/v1/rules/${ruleId}/execute`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            showMessage('rules-message', data.message + ' - Check console for progress.', 'success');
+                            // Refresh rules table to show updated status
+                            setTimeout(() => loadRules(), 2000);
+                        } else {
+                            showMessage('rules-message', 'Failed to execute rule: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(err => {
+                        showMessage('rules-message', 'Failed to execute rule: ' + err.message, 'error');
+                    });
+            }
+        }
+
+        function editRule(ruleId) {
+            // Fetch rule details
+            fetch(`/api/v1/rules`)
+                .then(r => r.json())
+                .then(data => {
+                    const rule = data.rules.find(r => r.rule_id === ruleId);
+                    if (!rule) {
+                        showMessage('rules-message', 'Rule not found!', 'error');
+                        return;
+                    }
+
+                    // Populate form with rule data
+                    document.getElementById('rule-id').value = rule.rule_id;
+                    document.getElementById('rule-name').value = rule.name;
+                    document.getElementById('rule-source').value = rule.source_path;
+                    document.getElementById('rule-dest').value = rule.destination_path;
+                    document.getElementById('rule-pattern').value = rule.source_pattern || '*.*';
+                    document.getElementById('rule-protocol').value = rule.protocol || 'sftp';
+                    document.getElementById('rule-host').value = rule.host || '';
+                    document.getElementById('rule-port').value = rule.port || 22;
+                    document.getElementById('rule-username').value = rule.username || '';
+                    document.getElementById('rule-password').value = rule.password || '';
+                    document.getElementById('rule-schedule').value = rule.schedule_type || 'event_driven';
+                    document.getElementById('rule-trigger').value = rule.trigger_type || 'file_created';
+                    document.getElementById('rule-action').value = rule.action_type || 'copy';
+                    document.getElementById('rule-file-age').value = rule.file_age_seconds || 5;
+
+                    // Populate CSV Processing Options
+                    document.getElementById('rule-search-subfolders').checked = rule.search_subfolders || false;
+                    document.getElementById('rule-validate-csv').checked = rule.validate_csv_content || false;
+                    document.getElementById('rule-csv-pattern').value = rule.csv_filename_pattern || '';
+                    document.getElementById('rule-rename-to').value = rule.rename_to || '';
+                    document.getElementById('rule-skip-empty').checked = rule.skip_empty_files || false;
+
+                    // Update modal title
+                    document.getElementById('modal-title').textContent = 'Edit Transfer Rule';
+
+                    // Show modal
+                    document.getElementById('rule-modal').style.display = 'block';
+                })
+                .catch(err => {
+                    showMessage('rules-message', 'Failed to load rule: ' + err.message, 'error');
+                });
+        }
+
+        function seedRules() {
+            if (confirm('This will clear existing rules and create 3 test rules. Continue?')) {
+                fetch('/api/v1/rules/seed', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        showMessage('rules-message', `✅ ${data.message}`, 'success');
+                        loadRules();
+                    })
+                    .catch(err => {
+                        showMessage('rules-message', '❌ Failed to seed rules: ' + err.message, 'error');
+                    });
+            }
+        }
+
         // Show message helper
         function showMessage(elementId, message, type) {
             const msgEl = document.getElementById(elementId);
@@ -2223,7 +3901,7 @@ HTML_TEMPLATE = """
         // Rule form submission
         document.getElementById('rule-form').addEventListener('submit', function(e) {
             e.preventDefault();
-
+            
             const ruleId = document.getElementById('rule-id').value;
             const data = {
                 name: document.getElementById('rule-name').value,
@@ -2307,87 +3985,296 @@ HTML_TEMPLATE = """
                 loadRules();
             }
         }, 10000);
+
+        // Initialize on page load
+        checkSession();
+        loadDashboard();
     </script>
 </body>
 </html>
 """
 
 # ============================================================================
-# API ENDPOINTS - KEEP ALL FROM ORIGINAL FILE
-# ============================================================================
-# Authentication Routes
+# AUTHENTICATION ENDPOINTS
 # ============================================================================
 
-@app.route('/')
-def index():
-    """Landing page - shows login or dashboard based on session"""
-    if 'user' in session:
-        return redirect(url_for('dashboard'))
+@app.route('/login')
+def login_page():
+    """Login page"""
     return render_template_string(LOGIN_TEMPLATE)
 
-
-@app.route('/api/login', methods=['POST'])
+@app.route('/api/v1/auth/login', methods=['POST'])
 def login():
-    """Handle login for local or domain users"""
+    """Authenticate user"""
     try:
         data = request.get_json()
-        login_type = data.get('type')  # 'local' or 'domain'
         username = data.get('username')
         password = data.get('password')
-        domain = data.get('domain')
-
-        # For now, accept any login (TODO: Implement actual authentication)
-        # In production, you would:
-        # - For local: Check against local user database
-        # - For domain: Authenticate against AD using ad_manager
+        account_type = data.get('account_type', 'local')
 
         if not username or not password:
-            return jsonify({'success': False, 'error': 'Username and password required'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'Username and password required'
+            }), 400
 
-        # Create session
-        session['user'] = username
-        session['login_type'] = login_type
-        if domain:
-            session['domain'] = domain
-            session['user'] = f"{domain}\\{username}"
+        ip_address = request.remote_addr
 
-        # Log the login
-        audit_manager.log_event(
-            AuditEventType.SYSTEM_STARTED,
-            f"User logged in: {session['user']}",
-            username=session['user'],
-            result="success"
-        )
+        if account_type == 'local':
+            # Authenticate local user
+            result = auth_manager.authenticate_local(username, password, ip_address)
+        else:
+            # Authenticate domain user
+            result = auth_manager.authenticate_domain(username, password, ad_manager, ip_address)
 
-        return jsonify({'success': True, 'message': 'Login successful'})
+        if result['success']:
+            # Store session ID in Flask session
+            session['session_id'] = result['session_id']
+            session['username'] = result['user']['username']
+            session['is_admin'] = result['user'].get('is_admin', False)
+            session['is_domain_user'] = result['is_domain_user']
+
+            # Log audit event
+            audit_manager.log_event(
+                AuditEventType.USER_LOGIN,
+                f"User logged in: {username} ({account_type})",
+                username=username,
+                result="success",
+                details={'account_type': account_type, 'ip_address': ip_address}
+            )
+
+            return jsonify(result)
+        else:
+            # Log failed login
+            audit_manager.log_event(
+                AuditEventType.USER_LOGIN,
+                f"Failed login attempt: {username}",
+                username=username,
+                result="failure",
+                details={'account_type': account_type, 'error': result.get('error')}
+            )
+
+            return jsonify(result), 401
 
     except Exception as e:
         logger.error(f"Login error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({
+            'success': False,
+            'error': 'Login failed'
+        }), 500
 
-
-@app.route('/logout')
+@app.route('/api/v1/auth/logout', methods=['POST'])
+@login_required
 def logout():
     """Logout user"""
-    username = session.get('user', 'unknown')
-    session.clear()
+    try:
+        session_id = session.get('session_id')
+        username = session.get('username')
 
-    audit_manager.log_event(
-        AuditEventType.SYSTEM_STARTED,
-        f"User logged out: {username}",
-        username=username,
-        result="success"
-    )
+        if session_id:
+            auth_manager.logout(session_id)
 
-    return redirect(url_for('index'))
+        # Log audit event
+        audit_manager.log_event(
+            AuditEventType.USER_LOGOUT,
+            f"User logged out: {username}",
+            username=username,
+            result="success"
+        )
 
+        session.clear()
 
-@app.route('/dashboard')
-def dashboard():
-    """Main dashboard page - requires login"""
-    if 'user' not in session:
-        return redirect(url_for('index'))
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logger.error(f"Logout error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Logout failed'
+        }), 500
+
+@app.route('/api/v1/auth/session', methods=['GET'])
+@login_required
+def get_session():
+    """Get current session info"""
+    try:
+        return jsonify({
+            'success': True,
+            'session': {
+                'username': session.get('username'),
+                'is_admin': session.get('is_admin'),
+                'is_domain_user': session.get('is_domain_user')
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get session error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local', methods=['GET'])
+@login_required
+def get_local_users():
+    """Get all local users (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        users = auth_manager.get_local_users()
+
+        return jsonify({
+            'success': True,
+            'users': users
+        })
+
+    except Exception as e:
+        logger.error(f"Get local users error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local', methods=['POST'])
+@login_required
+def create_local_user():
+    """Create new local user (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+
+        result = auth_manager.create_local_user(
+            username=data.get('username'),
+            password=data.get('password'),
+            full_name=data.get('full_name'),
+            email=data.get('email'),
+            is_admin=data.get('is_admin', False)
+        )
+
+        if result['success']:
+            audit_manager.log_event(
+                AuditEventType.USER_CREATED,
+                f"Local user created: {data.get('username')}",
+                username=session.get('username'),
+                result="success"
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Create user error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local/<user_id>', methods=['GET'])
+@login_required
+def get_local_user(user_id):
+    """Get specific local user (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        user = auth_manager.get_local_user(user_id)
+
+        if user:
+            return jsonify({
+                'success': True,
+                'user': user.to_dict()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Get local user error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/v1/auth/users/local/<user_id>/permissions', methods=['PUT'])
+@login_required
+def update_local_user_permissions(user_id):
+    """Update local user permissions (admin only)"""
+    try:
+        if not session.get('is_admin'):
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+
+        result = auth_manager.update_local_user_permissions(
+            user_id,
+            can_upload=data.get('can_upload'),
+            can_download=data.get('can_download'),
+            can_delete=data.get('can_delete'),
+            can_create_rules=data.get('can_create_rules'),
+            can_edit_rules=data.get('can_edit_rules'),
+            can_manage_users=data.get('can_manage_users'),
+            can_edit_permissions=data.get('can_edit_permissions'),
+            can_export_users=data.get('can_export_users'),
+            can_view_audit_logs=data.get('can_view_audit_logs'),
+            is_admin=data.get('is_admin')
+        )
+
+        if result['success']:
+            user = auth_manager.get_local_user(user_id)
+            audit_manager.log_event(
+                AuditEventType.PERMISSION_GRANTED,
+                f"Permissions updated for local user {user.username}",
+                username=session.get('username'),
+                result="success",
+                details=data
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Update local user permissions error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ============================================================================
+# API ENDPOINTS - KEEP ALL FROM ORIGINAL FILE
+# ============================================================================
+
+@app.route('/')
+@login_required
+def index():
+    """Main page"""
     return render_template_string(HTML_TEMPLATE)
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon"""
+    try:
+        return send_from_directory(
+            os.path.join(os.path.dirname(__file__)),
+            'mft_icon.ico',
+            mimetype='image/x-icon'
+        )
+    except Exception as e:
+        logger.error(f"Failed to serve favicon: {e}")
+        return '', 404
 
 # Active Directory Configuration
 ad_config_data = {}
@@ -2468,6 +4355,11 @@ def test_ad_connection():
             result="success"
         )
 
+        # Save AD config for multi-instance support
+        ad_config = request.get_json()
+        if ad_config:
+            state_manager.save_ad_config(ad_config)
+
         return jsonify({
             'success': True,
             'message': 'Connection successful',
@@ -2513,10 +4405,15 @@ def sync_ad_users():
                 details=result
             )
 
+            # Disable local accounts (except system admin) when AD is synced
+            disable_result = auth_manager.disable_local_accounts(exclude_system_admin=True)
+            logger.info(f"🔒 Disabled {disable_result.get('disabled_count', 0)} local accounts (AD active)")
+
             return jsonify({
                 'success': True,
                 'users_synced': result['users_synced'],
-                'timestamp': result['timestamp']
+                'timestamp': result['timestamp'],
+                'local_accounts_disabled': disable_result.get('disabled_count', 0)
             })
         else:
             ad_connection_status['connected'] = False
@@ -2603,7 +4500,10 @@ def update_user_permissions(user_id):
             can_download=data.get('can_download'),
             can_delete=data.get('can_delete'),
             can_create_rules=data.get('can_create_rules'),
+            can_edit_rules=data.get('can_edit_rules'),
             can_manage_users=data.get('can_manage_users'),
+            can_edit_permissions=data.get('can_edit_permissions'),
+            can_export_users=data.get('can_export_users'),
             can_view_audit_logs=data.get('can_view_audit_logs'),
             is_admin=data.get('is_admin')
         )
@@ -2624,6 +4524,163 @@ def update_user_permissions(user_id):
         })
     except Exception as e:
         logger.error(f"Failed to update permissions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/users/export/pdf', methods=['GET'])
+def export_users_pdf():
+    """Export all users with permissions as PDF"""
+    try:
+        # Create a PDF in memory
+        buffer = io.BytesIO()
+
+        # Create the PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#2c3e50'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+
+        # Add title
+        title = Paragraph("MFT System - User Permissions Report", title_style)
+        elements.append(title)
+
+        # Add timestamp
+        timestamp = Paragraph(
+            f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            styles['Normal']
+        )
+        elements.append(timestamp)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Get all users
+        users = list(ad_manager.users.values())
+
+        # Add user count
+        summary = Paragraph(f"<b>Total Users:</b> {len(users)}", styles['Normal'])
+        elements.append(summary)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Create table data
+        table_data = [
+            ['Username', 'Display Name', 'Email', 'Department', 'Permissions']
+        ]
+
+        for user in users:
+            # Build permissions string
+            permissions = []
+            if user.can_upload:
+                permissions.append('Upload')
+            if user.can_download:
+                permissions.append('Download')
+            if user.can_delete:
+                permissions.append('Delete')
+            if user.can_create_rules:
+                permissions.append('Create Rules')
+            if user.can_edit_rules:
+                permissions.append('Edit Rules')
+            if user.can_manage_users:
+                permissions.append('Manage Users')
+            if user.can_edit_permissions:
+                permissions.append('Edit Permissions')
+            if user.can_export_users:
+                permissions.append('Export Users')
+            if user.can_view_audit_logs:
+                permissions.append('View Audit Logs')
+            if user.is_admin:
+                permissions.append('ADMIN')
+
+            perms_str = ', '.join(permissions) if permissions else 'None'
+
+            # Use Paragraph for permissions to enable text wrapping
+            perms_paragraph = Paragraph(perms_str, styles['Normal'])
+
+            table_data.append([
+                user.username or '',
+                user.display_name or '',
+                user.email or '',
+                user.department or '',
+                perms_paragraph  # Use Paragraph instead of plain string
+            ])
+
+        # Create table with adjusted column widths (permissions column is wider)
+        table = Table(table_data, colWidths=[1*inch, 1.2*inch, 1.5*inch, 0.8*inch, 2.5*inch])
+
+        # Style the table
+        table.setStyle(TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+
+            # Data rows
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 1), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 4),
+
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ecf0f1')]),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+
+            # Enable word wrap for all cells
+            ('WORDWRAP', (0, 0), (-1, -1), True),
+        ]))
+
+        elements.append(table)
+
+        # Add footer
+        elements.append(Spacer(1, 0.3*inch))
+        footer = Paragraph(
+            "<i>This report contains sensitive information. Handle with care.</i>",
+            styles['Normal']
+        )
+        elements.append(footer)
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        buffer.seek(0)
+
+        # Log the export
+        audit_manager.log_event(
+            AuditEventType.DATA_EXPORTED,
+            f"User permissions exported to PDF ({len(users)} users)",
+            username="admin",
+            result="success"
+        )
+
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'MFT_Users_Export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to export users to PDF: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2997,53 +5054,67 @@ def get_transfers():
     try:
         transfers_list = []
 
-        # Ensure mft_app.transfers exists and is a dict
-        if not hasattr(mft_app, 'transfers') or not isinstance(mft_app.transfers, dict):
-            logger.warning("No transfers found in mft_app")
+        # Debug logging
+        logger.info(f"📋 GET /api/v1/transfers called")
+        logger.info(f"   Has 'monitor' attr: {hasattr(mft_app, 'monitor')}")
+
+        # Ensure mft_app.monitor exists
+        if not hasattr(mft_app, 'monitor'):
+            logger.warning("❌ No monitor found in mft_app")
             return jsonify({
                 'success': True,
-                'transfers': []  # Return empty array, not error
+                'transfers': []
             })
 
-        for task_id, transfer in mft_app.transfers.items():
+        monitor = mft_app.monitor
+
+        # Collect all transfers from active, completed, and failed
+        all_transfers = []
+
+        # Add active transfers
+        if hasattr(monitor, 'active_transfers') and isinstance(monitor.active_transfers, dict):
+            for task_id, task in monitor.active_transfers.items():
+                all_transfers.append(task)
+            logger.info(f"   Active transfers: {len(monitor.active_transfers)}")
+
+        # Add completed transfers
+        if hasattr(monitor, 'completed_transfers') and isinstance(monitor.completed_transfers, list):
+            all_transfers.extend(monitor.completed_transfers)
+            logger.info(f"   Completed transfers: {len(monitor.completed_transfers)}")
+
+        # Add failed transfers
+        if hasattr(monitor, 'failed_transfers') and isinstance(monitor.failed_transfers, list):
+            all_transfers.extend(monitor.failed_transfers)
+            logger.info(f"   Failed transfers: {len(monitor.failed_transfers)}")
+
+        logger.info(f"   Total transfers: {len(all_transfers)}")
+
+        # Convert each transfer task to dict
+        for task in all_transfers:
             try:
-                # Safely get timestamp
-                timestamp = transfer.get('timestamp')
-                if hasattr(timestamp, 'isoformat'):
-                    timestamp_str = timestamp.isoformat()
-                elif isinstance(timestamp, str):
-                    timestamp_str = timestamp
-                else:
-                    timestamp_str = datetime.now().isoformat()
+                # Manually construct dict from task attributes
+                transfer_dict = {
+                    'task_id': getattr(task, 'task_id', 'unknown'),
+                    'source_path': getattr(task, 'source_path', 'N/A'),
+                    'destination_path': getattr(task, 'destination_path', 'N/A'),
+                    'protocol': getattr(task.protocol, 'value', 'unc') if hasattr(task, 'protocol') else 'unc',
+                    'status': getattr(task.status, 'value', 'unknown') if hasattr(task, 'status') else 'unknown',
+                    'timestamp': (getattr(task, 'created_at', datetime.now()).isoformat() + 'Z') if hasattr(task, 'created_at') else (datetime.now().isoformat() + 'Z'),
+                    'progress': getattr(task, 'progress', 0),
+                    'error': getattr(task, 'error', None)
+                }
 
-                    # Safely get protocol
-                protocol = transfer.get('protocol')
-                if hasattr(protocol, 'value'):
-                    protocol_str = protocol.value
-                elif isinstance(protocol, str):
-                    protocol_str = protocol
-                else:
-                    protocol_str = 'unc'
+                transfers_list.append(transfer_dict)
 
-                transfers_list.append({
-                    'task_id': task_id,
-                    'source_path': transfer.get('source_path', 'N/A'),
-                    'destination_path': transfer.get('destination_path', 'N/A'),
-                    'protocol': protocol_str,
-                    'status': transfer.get('status', 'unknown'),
-                    'timestamp': timestamp_str,
-                    'progress': transfer.get('progress', 0),
-                    'error': transfer.get('error')
-                })
             except Exception as item_error:
-                logger.error(f"Error processing transfer {task_id}: {item_error}")
+                logger.error(f"Error processing transfer: {item_error}")
                 continue
 
         logger.info(f"✅ Returning {len(transfers_list)} transfers")
 
         return jsonify({
             'success': True,
-            'transfers': transfers_list  # ✅ Always return array
+            'transfers': transfers_list
         })
 
     except Exception as e:
@@ -3058,6 +5129,33 @@ def get_transfers():
             'transfers': []  # ✅ Return empty array
         }), 500
 
+
+@app.route('/api/v1/history/clear', methods=['POST'])
+def clear_transfer_history():
+    """Clear all transfer history"""
+    try:
+        # Clear the transfer tasks list
+        mft_app.transfer_tasks.clear()
+
+        logger.info("🗑️ Transfer history cleared")
+
+        audit_manager.log_event(
+            event_type=EventType.CONFIG_CHANGE,
+            username=session.get('username', 'system'),
+            action='clear_transfer_history',
+            result=EventResult.SUCCESS,
+            details={'message': 'Transfer history cleared'}
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Transfer history cleared successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to clear transfer history: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
     # RULES ENDPOINTS
 
 
@@ -3067,13 +5165,21 @@ def get_rules():
     try:
         rules_list = []
 
+        # Debug logging
+        logger.info(f"📋 GET /api/v1/rules called")
+        logger.info(f"   monitor_manager type: {type(monitor_manager)}")
+        logger.info(f"   Has 'rules' attr: {hasattr(monitor_manager, 'rules')}")
+
         # Ensure monitor_manager.rules exists
         if not hasattr(monitor_manager, 'rules') or not isinstance(monitor_manager.rules, dict):
-            logger.warning("No rules found in monitor_manager")
+            logger.warning("❌ No rules found in monitor_manager")
             return jsonify({
                 'success': True,
                 'rules': []  # Return empty array
             })
+
+        logger.info(f"   Rules dict size: {len(monitor_manager.rules)}")
+        logger.info(f"   Rules keys: {list(monitor_manager.rules.keys())}")
 
         for rule_id, rule in monitor_manager.rules.items():
             try:
@@ -3159,20 +5265,32 @@ def create_rule():
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Generate unique rule ID
+        # Create transfer config
+        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
+
+        config = TransferConfig(
+            protocol=protocol,
+            host=data.get('host'),
+            port=data.get('port', 445),
+            username=data.get('username'),
+            password=data.get('password'),
+            encryption_enabled=compliance_manager.is_encryption_required(),
+            retry_count=3,
+            retry_delay=5,
+            timeout=300
+        )
+
+        # Generate a unique rule_id
         rule_id = str(uuid.uuid4())
 
-        # Get protocol as string (not enum)
-        protocol = data.get('protocol', 'unc').lower()
-
-        # Create transfer rule with proper parameters (no transfer_config object)
+        # Create transfer rule with correct fields
         rule = TransferRule(
             rule_id=rule_id,
             name=data.get('name'),
             source_path=data.get('source_path'),
             destination_path=data.get('destination_path'),
-            protocol=protocol,
-            host=data.get('host'),
+            protocol=data.get('protocol', 'unc'),
+            host=data.get('host', ''),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
@@ -3181,7 +5299,7 @@ def create_rule():
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 5),
+            delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron'),
             # CSV Processing options
@@ -3193,7 +5311,13 @@ def create_rule():
         )
 
         # Add rule to monitor manager
+        logger.info(f"➕ Adding rule to monitor_manager: {rule.name} (ID: {rule_id})")
+        logger.info(f"   Before add - Rules count: {len(monitor_manager.rules)}")
+
         monitor_manager.add_rule(rule)
+
+        logger.info(f"   After add - Rules count: {len(monitor_manager.rules)}")
+        logger.info(f"   Rule stored: {rule_id in monitor_manager.rules}")
 
         # Log audit event
         audit_manager.log_event(
@@ -3203,6 +5327,12 @@ def create_rule():
             result="success",
             details={'rule_id': rule_id, 'name': data.get('name')}
         )
+
+        # Sync servers for health monitoring
+        server_monitor.sync_servers_from_rules(monitor_manager.rules)
+
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
 
         return jsonify({
             'success': True,
@@ -3266,17 +5396,29 @@ def update_rule(rule_id):
             'move_with_delay': ActionType.MOVE_WITH_DELAY
         }
 
-        # Get protocol as string (not enum)
-        protocol = data.get('protocol', 'unc').lower()
+        # Create transfer config
+        protocol = protocol_map.get(data.get('protocol', 'unc').lower(), TransferProtocol.UNC)
 
-        # Create updated transfer rule with proper parameters (no transfer_config object)
+        config = TransferConfig(
+            protocol=protocol,
+            host=data.get('host'),
+            port=data.get('port', 445),
+            username=data.get('username'),
+            password=data.get('password'),
+            encryption_enabled=compliance_manager.is_encryption_required(),
+            retry_count=3,
+            retry_delay=5,
+            timeout=300
+        )
+
+        # Create updated transfer rule with correct fields
         rule = TransferRule(
             rule_id=rule_id,  # Keep the same rule ID
             name=data.get('name'),
             source_path=data.get('source_path'),
             destination_path=data.get('destination_path'),
-            protocol=protocol,
-            host=data.get('host'),
+            protocol=data.get('protocol', 'unc'),
+            host=data.get('host', ''),
             port=data.get('port', 445),
             username=data.get('username'),
             password=data.get('password'),
@@ -3285,7 +5427,7 @@ def update_rule(rule_id):
             trigger_type=trigger_type_map.get(data.get('trigger_type', 'file_created'), TriggerType.FILE_CREATED),
             action_type=action_type_map.get(data.get('action_type', 'copy'), ActionType.COPY),
             file_age_seconds=data.get('file_age_seconds', 5),
-            delete_delay_seconds=data.get('delete_delay_seconds', 5),
+            delete_delay_seconds=data.get('delete_delay_seconds', 300),
             schedule_interval_minutes=data.get('schedule_interval_minutes'),
             schedule_cron=data.get('schedule_cron'),
             # CSV Processing options
@@ -3297,11 +5439,10 @@ def update_rule(rule_id):
         )
 
         # Add updated rule to monitor manager
-        monitor_manager.rules[rule_id] = rule
-        monitor_manager.save_rules()
+        monitor_manager.add_rule(rule)
 
-        # Restart monitoring for this rule
-        monitor_manager.start_rule(rule_id)
+        # Sync servers for health monitoring
+        server_monitor.sync_servers_from_rules(monitor_manager.rules)
 
         # Log audit event
         audit_manager.log_event(
@@ -3311,6 +5452,9 @@ def update_rule(rule_id):
             result="success",
             details={'rule_id': rule_id, 'name': data.get('name')}
         )
+
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
 
         return jsonify({
             'success': True,
@@ -3346,6 +5490,9 @@ def enable_rule(rule_id):
             result="success"
         )
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'message': 'Rule enabled successfully'
@@ -3371,6 +5518,9 @@ def disable_rule(rule_id):
             username="admin",
             result="success"
         )
+
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
 
         return jsonify({
             'success': True,
@@ -3398,6 +5548,9 @@ def delete_rule(rule_id):
             result="success"
         )
 
+        # Save state for multi-instance support
+        state_manager.save_rules(monitor_manager.rules)
+
         return jsonify({
             'success': True,
             'message': 'Rule deleted successfully'
@@ -3405,6 +5558,92 @@ def delete_rule(rule_id):
 
     except Exception as e:
         logger.error(f"Failed to delete rule: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/rules/<rule_id>/execute', methods=['POST'])
+def execute_rule(rule_id):
+    """Execute a rule manually (primarily for CRON backup rules)"""
+    try:
+        if rule_id not in monitor_manager.rules:
+            return jsonify({'success': False, 'error': 'Rule not found'}), 404
+
+        rule = monitor_manager.rules[rule_id]
+
+        # Check if rule is enabled
+        if not rule.enabled:
+            return jsonify({'success': False, 'error': 'Rule is disabled'}), 400
+
+        # Execute based on schedule type
+        if rule.schedule_type == ScheduleType.CRON:
+            # For CRON rules, execute full folder backup
+            logger.info(f"🚀 Executing CRON backup rule: {rule.name}")
+
+            # Run the folder backup in a separate thread
+            import threading
+
+            def run_backup():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(monitor_manager.transfer_folder_recursive(rule))
+                    logger.info(f"Backup completed: {result}")
+                finally:
+                    loop.close()
+
+            backup_thread = threading.Thread(target=run_backup, daemon=True)
+            backup_thread.start()
+
+            return jsonify({
+                'success': True,
+                'message': f'CRON backup rule "{rule.name}" execution started',
+                'rule_type': 'cron_backup'
+            })
+
+        elif rule.schedule_type == ScheduleType.EVENT_DRIVEN:
+            # For event-driven rules, process existing files
+            logger.info(f"🚀 Processing existing files for rule: {rule.name}")
+            monitor_manager.process_existing_files(rule_id)
+
+            return jsonify({
+                'success': True,
+                'message': f'Event-driven rule "{rule.name}" processing started',
+                'rule_type': 'event_driven'
+            })
+
+        elif rule.schedule_type == ScheduleType.RECURRING:
+            # For recurring rules, execute the scheduled rule logic
+            logger.info(f"🚀 Manually executing RECURRING rule: {rule.name}")
+
+            # Run in a separate thread
+            import threading
+
+            def run_recurring():
+                try:
+                    monitor_manager._execute_scheduled_rule(rule)
+                    logger.info(f"RECURRING rule execution completed: {rule.name}")
+                except Exception as e:
+                    logger.error(f"RECURRING rule execution failed: {e}")
+
+            recurring_thread = threading.Thread(target=run_recurring, daemon=True)
+            recurring_thread.start()
+
+            return jsonify({
+                'success': True,
+                'message': f'RECURRING rule "{rule.name}" execution started',
+                'rule_type': 'recurring'
+            })
+
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Manual execution not supported for {rule.schedule_type.value} rules'
+            }), 400
+
+    except Exception as e:
+        logger.error(f"Failed to execute rule: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3443,7 +5682,360 @@ def get_statistics():
             'error': str(e)
         }), 500
 
-    # ============================================================================
+
+@app.route('/api/v1/dashboard/stats', methods=['GET'])
+def get_dashboard_stats():
+    """Get comprehensive dashboard statistics"""
+    try:
+        # Get transfer statistics from monitor
+        monitor = mft_app.monitor
+
+        active_count = len(monitor.active_transfers) if hasattr(monitor, 'active_transfers') else 0
+        completed_count = len(monitor.completed_transfers) if hasattr(monitor, 'completed_transfers') else 0
+        failed_count = len(monitor.failed_transfers) if hasattr(monitor, 'failed_transfers') else 0
+        total_transfers = active_count + completed_count + failed_count
+
+        # Calculate success rate
+        success_rate = round((completed_count / total_transfers * 100) if total_transfers > 0 else 0, 1)
+
+        # Calculate total files and bytes from completed transfers
+        total_files = 0
+        total_bytes = 0
+
+        # Count from completed transfers
+        for task in monitor.completed_transfers:
+            # Each completed transfer counts as 1 file (or could be a directory)
+            total_files += 1
+            # Add bytes if available
+            if hasattr(task, 'file_size') and task.file_size:
+                total_bytes += task.file_size
+
+        # Also add from rules (for rule-based transfers)
+        total_files += sum(rule.files_transferred for rule in monitor_manager.rules.values())
+        total_bytes += sum(rule.bytes_transferred for rule in monitor_manager.rules.values())
+
+        # Get active rules count
+        active_rules = len([r for r in monitor_manager.rules.values() if r.enabled])
+
+        # Prepare hourly transfer data for last 24 hours
+        now = datetime.now()
+        hourly_data = {i: {'completed': 0, 'failed': 0} for i in range(24)}
+
+        # Process completed transfers
+        for task in monitor.completed_transfers:
+            if hasattr(task, 'completed_at') and task.completed_at:
+                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                # Only count if within last 24 hours and not in future
+                if 0 <= hours_ago < 24:
+                    hourly_data[hours_ago]['completed'] += 1
+
+        # Process failed transfers
+        for task in monitor.failed_transfers:
+            if hasattr(task, 'completed_at') and task.completed_at:
+                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                # Only count if within last 24 hours and not in future
+                if 0 <= hours_ago < 24:
+                    hourly_data[hours_ago]['failed'] += 1
+
+        # Format hourly data for chart
+        hours = [(now - timedelta(hours=i)).strftime('%H:00') for i in range(23, -1, -1)]
+        completed_series = [hourly_data[23-i]['completed'] for i in range(24)]
+        failed_series = [hourly_data[23-i]['failed'] for i in range(24)]
+
+        stats = {
+            'total_files_transferred': total_files,
+            'total_bytes_transferred': total_bytes,
+            'active_rules': active_rules,
+            'total_transfers': total_transfers,
+            'active_transfers': active_count,
+            'completed_transfers': completed_count,
+            'failed_transfers': failed_count,
+            'success_rate': success_rate,
+            'performance_data': {
+                'labels': hours,
+                'completed': completed_series,
+                'failed': failed_series
+            }
+        }
+
+        logger.info(f"📊 Dashboard stats: {total_transfers} transfers, {success_rate}% success rate")
+
+        return jsonify(stats)
+
+    except Exception as e:
+        logger.error(f"Failed to get dashboard stats: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'total_files_transferred': 0,
+            'total_bytes_transferred': 0,
+            'active_rules': 0,
+            'total_transfers': 0,
+            'active_transfers': 0,
+            'completed_transfers': 0,
+            'failed_transfers': 0,
+            'success_rate': 0,
+            'performance_data': {
+                'labels': [],
+                'completed': [],
+                'failed': []
+            }
+        }), 500
+
+
+@app.route('/api/v1/servers/status', methods=['GET'])
+def get_servers_status():
+    """Get status of all monitored servers"""
+    try:
+        statuses = server_monitor.get_all_statuses()
+
+        return jsonify({
+            'success': True,
+            'servers': statuses,
+            'total_servers': len(statuses),
+            'online_count': sum(1 for s in statuses.values() if s['is_online']),
+            'offline_count': sum(1 for s in statuses.values() if not s['is_online'])
+        })
+    except Exception as e:
+        logger.error(f"Failed to get server status: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'servers': {},
+            'total_servers': 0,
+            'online_count': 0,
+            'offline_count': 0
+        }), 500
+
+
+@app.route('/api/v1/servers/activity', methods=['GET'])
+def get_server_activity():
+    """Get server activity log"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        activity_log = server_monitor.get_activity_log(limit=limit)
+
+        return jsonify({
+            'success': True,
+            'activity': activity_log,
+            'total': len(activity_log)
+        })
+    except Exception as e:
+        logger.error(f"Failed to get server activity: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'activity': [],
+            'total': 0
+        }), 500
+
+
+@app.route('/api/v1/servers/activity/clear', methods=['POST'])
+def clear_server_activity():
+    """Clear server activity log"""
+    try:
+        server_monitor.clear_activity_log()
+        logger.info("Server activity log cleared")
+
+        return jsonify({
+            'success': True,
+            'message': 'Activity log cleared successfully'
+        })
+    except Exception as e:
+        logger.error(f"Failed to clear server activity: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/v1/rules/seed', methods=['POST'])
+def seed_rules():
+    """Seed database with example transfer rules for testing"""
+    try:
+        logger.info("🌱 Seeding transfer rules...")
+
+        # Clear existing rules
+        monitor_manager.rules.clear()
+        logger.info("   Cleared existing rules")
+
+        # Create sample rules
+        sample_rules = [
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Daily Reports Transfer',
+                'source_path': 'C:\\SourceFolder\\Reports',
+                'destination_path': '\\\\server\\share\\Reports',
+                'protocol': 'unc',
+                'host': 'fileserver.local',
+                'port': 445,
+                'source_pattern': '*.pdf',
+                'schedule_type': ScheduleType.EVENT_DRIVEN,
+                'trigger_type': TriggerType.FILE_CREATED,
+                'action_type': ActionType.COPY,
+                'enabled': True,
+                'files_transferred': 15,
+                'status': 'monitoring'
+            },
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Backup Archive Files',
+                'source_path': 'C:\\Data\\Archive',
+                'destination_path': '\\\\backup\\Archive',
+                'protocol': 'unc',
+                'host': 'backup.local',
+                'port': 445,
+                'source_pattern': '*.zip',
+                'schedule_type': ScheduleType.RECURRING,
+                'trigger_type': TriggerType.FILE_CREATED,
+                'action_type': ActionType.MOVE,
+                'enabled': True,
+                'files_transferred': 42,
+                'status': 'idle'
+            },
+            {
+                'rule_id': str(uuid.uuid4()),
+                'name': 'Log Files Cleanup',
+                'source_path': 'C:\\Logs',
+                'destination_path': '\\\\archive\\Logs',
+                'protocol': 'unc',
+                'host': 'archive.local',
+                'port': 445,
+                'source_pattern': '*.log',
+                'schedule_type': ScheduleType.CRON,
+                'trigger_type': TriggerType.FILE_MODIFIED,
+                'action_type': ActionType.MOVE_WITH_DELAY,
+                'enabled': False,
+                'files_transferred': 8,
+                'status': 'idle'
+            }
+        ]
+
+        # Add each sample rule
+        for rule_data in sample_rules:
+            rule = TransferRule(**rule_data)
+            monitor_manager.rules[rule.rule_id] = rule
+            logger.info(f"   ✅ Added: {rule.name}")
+
+        logger.info(f"🌱 Successfully seeded {len(sample_rules)} rules")
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully seeded {len(sample_rules)} rules',
+            'count': len(sample_rules)
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to seed rules: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/v1/admin/shutdown', methods=['POST'])
+@login_required
+def shutdown_server():
+    """Shutdown the MFT server (admin only with password verification)"""
+    try:
+        # Check if user is admin
+        session_id = session.get('session_id')
+        user_session = auth_manager.validate_session(session_id)
+
+        if not user_session or not user_session.is_admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin access required'
+            }), 403
+
+        data = request.get_json()
+        password = data.get('password')
+
+        if not password:
+            return jsonify({
+                'success': False,
+                'error': 'Password required'
+            }), 400
+
+        # Verify admin password
+        username = user_session.username
+        is_domain_user = user_session.is_domain_user
+
+        # Authenticate the admin user again
+        if is_domain_user:
+            # For domain users, we can't verify password again easily
+            # So we'll just check if they're admin
+            logger.warning(f"⚠️ Domain admin {username} initiated shutdown without password re-verification")
+        else:
+            # For local users, verify password
+            result = auth_manager.authenticate_local(username, password)
+            if not result['success']:
+                logger.warning(f"❌ Failed shutdown attempt by {username}: Invalid password")
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid password'
+                }), 401
+
+        # Log the shutdown event
+        audit_manager.log_event(
+            AuditEventType.CONFIG_CHANGED,
+            f"Server shutdown initiated by admin {username}",
+            username=username,
+            result="success",
+            details={'action': 'shutdown'}
+        )
+
+        logger.warning(f"🛑 SERVER SHUTDOWN INITIATED BY: {username}")
+        logger.warning("🛑 Shutting down in 2 seconds...")
+
+        # Shutdown the Flask server
+        def shutdown():
+            import time
+            time.sleep(2)
+
+            # Stop scheduler
+            logger.info("⏰ Stopping scheduler...")
+            monitor_manager.stop_scheduler()
+
+            # Stop monitoring
+            logger.info("🛑 Stopping file monitoring...")
+            monitor_manager.stop_all()
+
+            import os
+            import signal
+            os.kill(os.getpid(), signal.SIGINT)
+
+        # Start shutdown in background
+        import threading
+        shutdown_thread = threading.Thread(target=shutdown)
+        shutdown_thread.daemon = True
+        shutdown_thread.start()
+
+        return jsonify({
+            'success': True,
+            'message': 'Server is shutting down'
+        })
+
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+    @app.route('/static/mft_icon.ico')
+    def serve_icon():
+        """Serve the MFT icon"""
+        try:
+            return send_file(
+                '/mnt/user-data/uploads/1765044070466_mft_icon.ico',
+                mimetype='image/x-icon'
+            )
+        except Exception as e:
+            logger.error(f"Failed to serve icon: {e}")
+            return '', 404
+
+# ============================================================================
 # MAIN
 # ============================================================================
 

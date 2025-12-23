@@ -156,6 +156,86 @@ def find_csv_in_subfolders(parent_path: str, filename_pattern: str) -> Optional[
         return None
 
 
+def check_remote_file_exists(dest_path: str, source_size: int, username: str = None, password: str = None) -> bool:
+    """
+    Check if destination file already exists (with authentication for remote UNC paths).
+    Returns True if file exists and has same size as source.
+    """
+    import subprocess
+
+    try:
+        logger.info(f"🔍 Checking if destination file exists: {dest_path}")
+
+        # Normalize destination path
+        dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+        logger.info(f"   Normalized path: {dest_check_path}")
+
+        # Check if this is a remote UNC path (starts with \\)
+        if dest_check_path.startswith('\\\\'):
+            logger.info(f"   Detected remote UNC path")
+            # Extract host from UNC path (\\host\path)
+            unc_parts = dest_check_path[2:].split('\\', 1)
+            if len(unc_parts) >= 1:
+                dest_host = unc_parts[0]
+                logger.info(f"   Remote host: {dest_host}")
+
+                # Authenticate if credentials are provided
+                if username and password:
+                    unc_share = f"\\\\{dest_host}"
+                    logger.info(f"   🔐 Authenticating to {unc_share}...")
+
+                    try:
+                        # Use net use to authenticate
+                        auth_cmd = f'net use "{unc_share}" /user:{username} {password}'
+                        result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+
+                        if result.returncode != 0:
+                            # Check if connection already exists
+                            if "already in use" not in result.stdout.lower() and \
+                               "already in use" not in result.stderr.lower() and \
+                               "multiple connections" not in result.stdout.lower() and \
+                               "multiple connections" not in result.stderr.lower():
+                                logger.warning(f"   ⚠️ Authentication failed: {result.stderr.strip()}")
+                                logger.info(f"   Cannot verify destination, proceeding with transfer")
+                                return False  # Can't verify, proceed with transfer
+                            else:
+                                logger.info(f"   ℹ️ Connection already exists")
+                        else:
+                            logger.info(f"   ✅ Authentication successful")
+                    except Exception as auth_error:
+                        logger.warning(f"   ⚠️ Authentication error: {auth_error}")
+                        logger.info(f"   Cannot verify destination, proceeding with transfer")
+                        return False  # Can't verify, proceed with transfer
+                else:
+                    logger.info(f"   No credentials provided, attempting check without auth")
+
+        # Now check if file exists
+        logger.info(f"   Checking file existence...")
+        if os.path.exists(dest_check_path):
+            logger.info(f"   ✅ File exists at destination")
+            try:
+                dest_size = os.path.getsize(dest_check_path)
+                logger.info(f"   Source size: {source_size:,} bytes, Dest size: {dest_size:,} bytes")
+                if dest_size == source_size:
+                    logger.info(f"   ⏭️ SKIPPING - File already exists with same size")
+                    return True
+                else:
+                    logger.info(f"   ⚠️ File exists but size differs - will re-transfer")
+                    return False
+            except Exception as size_error:
+                logger.warning(f"   ⚠️ Could not verify destination file size: {size_error}")
+                return False
+        else:
+            logger.info(f"   File does not exist at destination - proceeding with transfer")
+            return False
+
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking remote file: {e}")
+        import traceback
+        traceback.print_exc()
+        return False  # On error, proceed with transfer
+
+
 class FileMonitorHandler(FileSystemEventHandler):
     """Handles file system events and triggers transfers"""
 
@@ -170,6 +250,13 @@ class FileMonitorHandler(FileSystemEventHandler):
         """Check if filename matches rule pattern"""
         import fnmatch
         return fnmatch.fnmatch(filename, self.rule.source_pattern)
+
+    def _check_remote_file_exists(self, dest_path: str, source_size: int) -> bool:
+        """
+        Check if destination file already exists (with authentication for remote UNC paths).
+        Returns True if file exists and has same size as source.
+        """
+        return check_remote_file_exists(dest_path, source_size, self.rule.username, self.rule.password)
 
     def _should_transfer(self, file_path: str) -> bool:
         """Check if file should be transferred"""
@@ -187,6 +274,18 @@ class FileMonitorHandler(FileSystemEventHandler):
             if not self._matches_pattern(filename):
                 logger.debug(f"File {filename} doesn't match pattern {self.rule.source_pattern}")
                 return False
+
+            # Check CSV filename pattern (if configured and file is CSV)
+            if self.rule.csv_filename_pattern:
+                import fnmatch
+                if file_path.lower().endswith('.csv'):
+                    if not fnmatch.fnmatch(filename, self.rule.csv_filename_pattern):
+                        logger.debug(f"CSV file {filename} doesn't match CSV pattern {self.rule.csv_filename_pattern}")
+                        return False
+                else:
+                    # If csv_filename_pattern is set, only transfer CSV files
+                    logger.debug(f"File {filename} is not a CSV file, skipping (CSV pattern is set)")
+                    return False
 
             # Check file size
             file_size = os.path.getsize(file_path)
@@ -282,6 +381,18 @@ class FileMonitorHandler(FileSystemEventHandler):
 
             # Build destination path
             dest_path = os.path.join(self.rule.destination_path, filename)
+
+            # Check if destination file already exists (to prevent duplicate transfers)
+            if self.rule.action_type == ActionType.COPY:
+                try:
+                    src_size = os.path.getsize(file_path)
+                    if self._check_remote_file_exists(dest_path, src_size):
+                        # File already exists with same size, skip transfer
+                        if file_path in self.transferring_files:
+                            self.transferring_files.remove(file_path)
+                        return
+                except Exception as check_error:
+                    logger.warning(f"⚠️ Could not check destination file: {check_error}")
 
             logger.info(f"\n{'='*80}")
             logger.info(f"🚀 AUTO-TRANSFER TRIGGERED")
@@ -480,6 +591,10 @@ class FileMonitorManager:
         if rule.enabled and rule.schedule_type == ScheduleType.EVENT_DRIVEN:
             # Start monitoring for event-driven rules
             self._start_monitoring(rule)
+        elif rule.enabled and rule.schedule_type in [ScheduleType.RECURRING, ScheduleType.CRON]:
+            # Set status to scheduled for RECURRING and CRON rules
+            rule.status = "scheduled"
+            logger.info(f"📅 Rule scheduled: {rule.name}")
 
     def remove_rule(self, rule_id: str):
         """Remove a transfer rule"""
@@ -889,7 +1004,7 @@ class FileMonitorManager:
             return False
 
     def _execute_scheduled_rule(self, rule: TransferRule):
-        """Execute a scheduled rule (transfer matching files)"""
+        """Execute a scheduled rule (transfer matching files with CSV processing)"""
         from datetime import datetime
         import glob
         import asyncio
@@ -899,20 +1014,85 @@ class FileMonitorManager:
             rule.last_run = datetime.now()
             rule.status = "transferring"
 
-            # Find matching files in source path
-            source_pattern = os.path.join(rule.source_path, rule.source_pattern)
-            matching_files = glob.glob(source_pattern)
+            # Find matching files in source path (with recursive search if enabled)
+            matching_files = []
+            source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
+
+            if rule.search_subfolders:
+                # Recursive search through all subdirectories
+                for root, dirs, files in os.walk(source_path):
+                    for filename in files:
+                        file_path = os.path.join(root, filename)
+
+                        # Check if file matches the source pattern
+                        if fnmatch.fnmatch(filename, rule.source_pattern):
+                            # Apply CSV filename pattern filtering if configured
+                            if rule.csv_filename_pattern:
+                                if file_path.lower().endswith('.csv'):
+                                    if fnmatch.fnmatch(filename, rule.csv_filename_pattern):
+                                        matching_files.append(file_path)
+                                # Skip non-CSV files when CSV pattern is set
+                            else:
+                                matching_files.append(file_path)
+            else:
+                # Non-recursive search (only files in source directory)
+                source_pattern = os.path.join(source_path, rule.source_pattern)
+                for file_path in glob.glob(source_pattern):
+                    if os.path.isfile(file_path):
+                        filename = os.path.basename(file_path)
+
+                        # Apply CSV filename pattern filtering if configured
+                        if rule.csv_filename_pattern:
+                            if file_path.lower().endswith('.csv'):
+                                if fnmatch.fnmatch(filename, rule.csv_filename_pattern):
+                                    matching_files.append(file_path)
+                            # Skip non-CSV files when CSV pattern is set
+                        else:
+                            matching_files.append(file_path)
 
             logger.info(f"   Found {len(matching_files)} matching files")
 
             # Transfer each file
+            transferred_count = 0
             for file_path in matching_files:
                 if not os.path.isfile(file_path):
                     continue
 
-                # Build destination path
+                # Validate CSV content if enabled
+                if rule.validate_csv_content and file_path.lower().endswith('.csv'):
+                    is_valid, reason = validate_csv_file(file_path)
+                    if not is_valid:
+                        logger.warning(f"⚠️ Skipping invalid CSV: {os.path.basename(file_path)} - {reason}")
+                        rule.skipped_files.append({
+                            'file': file_path,
+                            'reason': reason,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        if rule.skip_empty_files:
+                            continue
+
+                # Build destination path with renaming if configured
                 filename = os.path.basename(file_path)
+
+                if rule.rename_to:
+                    # Extract file extension
+                    _, ext = os.path.splitext(filename)
+                    # Create new filename with auto-increment counter
+                    filename = f"{rule.rename_to}_{rule.rename_counter:02d}{ext}"
+                    rule.rename_counter += 1
+                    logger.info(f"   🔄 Renaming: {os.path.basename(file_path)} → {filename}")
+
                 dest_path = os.path.join(rule.destination_path, filename)
+
+                # Check if destination file already exists (to prevent duplicate transfers)
+                if rule.action_type == ActionType.COPY:
+                    try:
+                        src_size = os.path.getsize(file_path)
+                        if check_remote_file_exists(dest_path, src_size, rule.username, rule.password):
+                            # File already exists with same size, skip transfer
+                            continue
+                    except Exception as check_error:
+                        logger.warning(f"   ⚠️ Could not check destination file: {check_error}")
 
                 logger.info(f"   Transferring: {filename}")
 
@@ -950,6 +1130,7 @@ class FileMonitorManager:
                     # Update statistics
                     rule.files_transferred += 1
                     rule.bytes_transferred += os.path.getsize(file_path)
+                    transferred_count += 1
 
                     # Handle post-transfer actions
                     if rule.action_type == ActionType.MOVE:
@@ -967,14 +1148,20 @@ class FileMonitorManager:
                         delete_thread = threading.Thread(target=delayed_delete, daemon=True)
                         delete_thread.start()
 
+                except Exception as transfer_error:
+                    logger.error(f"   ❌ Transfer failed for {filename}: {transfer_error}")
+
                 finally:
                     loop.close()
 
-            rule.status = "idle"
+            logger.info(f"   📊 Transferred {transferred_count} of {len(matching_files)} files")
+            rule.status = "scheduled"  # Return to scheduled status (not idle)
             rule.last_transfer_time = datetime.now()
 
         except Exception as e:
             logger.error(f"❌ Error executing scheduled rule: {e}")
+            import traceback
+            traceback.print_exc()
             rule.status = "error"
 
 
