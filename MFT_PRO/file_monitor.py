@@ -156,6 +156,68 @@ def find_csv_in_subfolders(parent_path: str, filename_pattern: str) -> Optional[
         return None
 
 
+def check_remote_file_exists(dest_path: str, source_size: int, username: str = None, password: str = None) -> bool:
+    """
+    Check if destination file already exists (with authentication for remote UNC paths).
+    Returns True if file exists and has same size as source.
+    """
+    import subprocess
+
+    try:
+        # Normalize destination path
+        dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+
+        # Check if this is a remote UNC path (starts with \\)
+        if dest_check_path.startswith('\\\\'):
+            # Extract host from UNC path (\\host\path)
+            unc_parts = dest_check_path[2:].split('\\', 1)
+            if len(unc_parts) >= 1:
+                dest_host = unc_parts[0]
+
+                # Authenticate if credentials are provided
+                if username and password:
+                    unc_share = f"\\\\{dest_host}"
+                    logger.debug(f"🔐 Authenticating to {unc_share} for duplicate check...")
+
+                    try:
+                        # Use net use to authenticate
+                        auth_cmd = f'net use "{unc_share}" /user:{username} {password}'
+                        result = subprocess.run(auth_cmd, shell=True, capture_output=True, text=True)
+
+                        if result.returncode != 0:
+                            # Check if connection already exists
+                            if "already in use" not in result.stdout.lower() and \
+                               "already in use" not in result.stderr.lower() and \
+                               "multiple connections" not in result.stdout.lower() and \
+                               "multiple connections" not in result.stderr.lower():
+                                logger.warning(f"⚠️ Could not authenticate for duplicate check: {result.stderr.strip()}")
+                                return False  # Can't verify, proceed with transfer
+                    except Exception as auth_error:
+                        logger.warning(f"⚠️ Authentication failed for duplicate check: {auth_error}")
+                        return False  # Can't verify, proceed with transfer
+
+        # Now check if file exists
+        if os.path.exists(dest_check_path):
+            try:
+                dest_size = os.path.getsize(dest_check_path)
+                if dest_size == source_size:
+                    logger.info(f"⏭️ Skipping (file already exists at destination with same size)")
+                    return True
+                else:
+                    logger.info(f"⚠️ File exists but size differs (source: {source_size}, dest: {dest_size}) - will re-transfer")
+                    return False
+            except Exception as size_error:
+                logger.warning(f"⚠️ Could not verify destination file size: {size_error}")
+                return False
+
+        # File doesn't exist, proceed with transfer
+        return False
+
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking remote file: {e}")
+        return False  # On error, proceed with transfer
+
+
 class FileMonitorHandler(FileSystemEventHandler):
     """Handles file system events and triggers transfers"""
 
@@ -170,6 +232,13 @@ class FileMonitorHandler(FileSystemEventHandler):
         """Check if filename matches rule pattern"""
         import fnmatch
         return fnmatch.fnmatch(filename, self.rule.source_pattern)
+
+    def _check_remote_file_exists(self, dest_path: str, source_size: int) -> bool:
+        """
+        Check if destination file already exists (with authentication for remote UNC paths).
+        Returns True if file exists and has same size as source.
+        """
+        return check_remote_file_exists(dest_path, source_size, self.rule.username, self.rule.password)
 
     def _should_transfer(self, file_path: str) -> bool:
         """Check if file should be transferred"""
@@ -296,21 +365,16 @@ class FileMonitorHandler(FileSystemEventHandler):
             dest_path = os.path.join(self.rule.destination_path, filename)
 
             # Check if destination file already exists (to prevent duplicate transfers)
-            dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
-            if self.rule.action_type == ActionType.COPY and os.path.exists(dest_check_path):
-                # For COPY action, skip if file already exists at destination
+            if self.rule.action_type == ActionType.COPY:
                 try:
                     src_size = os.path.getsize(file_path)
-                    dest_size = os.path.getsize(dest_check_path)
-                    if src_size == dest_size:
-                        logger.info(f"⏭️ Skipping (already exists at destination): {filename}")
+                    if self._check_remote_file_exists(dest_path, src_size):
+                        # File already exists with same size, skip transfer
                         if file_path in self.transferring_files:
                             self.transferring_files.remove(file_path)
                         return
-                    else:
-                        logger.info(f"⚠️ File exists but size differs - will re-transfer: {filename}")
                 except Exception as check_error:
-                    logger.warning(f"⚠️ Could not verify destination file: {check_error}")
+                    logger.warning(f"⚠️ Could not check destination file: {check_error}")
 
             logger.info(f"\n{'='*80}")
             logger.info(f"🚀 AUTO-TRANSFER TRIGGERED")
@@ -1003,19 +1067,14 @@ class FileMonitorManager:
                 dest_path = os.path.join(rule.destination_path, filename)
 
                 # Check if destination file already exists (to prevent duplicate transfers)
-                dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
-                if rule.action_type == ActionType.COPY and os.path.exists(dest_check_path):
-                    # For COPY action, skip if file already exists at destination
+                if rule.action_type == ActionType.COPY:
                     try:
                         src_size = os.path.getsize(file_path)
-                        dest_size = os.path.getsize(dest_check_path)
-                        if src_size == dest_size:
-                            logger.info(f"   ⏭️ Skipping (already exists at destination): {filename}")
+                        if check_remote_file_exists(dest_path, src_size, rule.username, rule.password):
+                            # File already exists with same size, skip transfer
                             continue
-                        else:
-                            logger.info(f"   ⚠️ File exists but size differs - will re-transfer: {filename}")
                     except Exception as check_error:
-                        logger.warning(f"   ⚠️ Could not verify destination file: {check_error}")
+                        logger.warning(f"   ⚠️ Could not check destination file: {check_error}")
 
                 logger.info(f"   Transferring: {filename}")
 
