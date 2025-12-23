@@ -164,20 +164,25 @@ def check_remote_file_exists(dest_path: str, source_size: int, username: str = N
     import subprocess
 
     try:
+        logger.info(f"🔍 Checking if destination file exists: {dest_path}")
+
         # Normalize destination path
         dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+        logger.info(f"   Normalized path: {dest_check_path}")
 
         # Check if this is a remote UNC path (starts with \\)
         if dest_check_path.startswith('\\\\'):
+            logger.info(f"   Detected remote UNC path")
             # Extract host from UNC path (\\host\path)
             unc_parts = dest_check_path[2:].split('\\', 1)
             if len(unc_parts) >= 1:
                 dest_host = unc_parts[0]
+                logger.info(f"   Remote host: {dest_host}")
 
                 # Authenticate if credentials are provided
                 if username and password:
                     unc_share = f"\\\\{dest_host}"
-                    logger.debug(f"🔐 Authenticating to {unc_share} for duplicate check...")
+                    logger.info(f"   🔐 Authenticating to {unc_share}...")
 
                     try:
                         # Use net use to authenticate
@@ -190,31 +195,44 @@ def check_remote_file_exists(dest_path: str, source_size: int, username: str = N
                                "already in use" not in result.stderr.lower() and \
                                "multiple connections" not in result.stdout.lower() and \
                                "multiple connections" not in result.stderr.lower():
-                                logger.warning(f"⚠️ Could not authenticate for duplicate check: {result.stderr.strip()}")
+                                logger.warning(f"   ⚠️ Authentication failed: {result.stderr.strip()}")
+                                logger.info(f"   Cannot verify destination, proceeding with transfer")
                                 return False  # Can't verify, proceed with transfer
+                            else:
+                                logger.info(f"   ℹ️ Connection already exists")
+                        else:
+                            logger.info(f"   ✅ Authentication successful")
                     except Exception as auth_error:
-                        logger.warning(f"⚠️ Authentication failed for duplicate check: {auth_error}")
+                        logger.warning(f"   ⚠️ Authentication error: {auth_error}")
+                        logger.info(f"   Cannot verify destination, proceeding with transfer")
                         return False  # Can't verify, proceed with transfer
+                else:
+                    logger.info(f"   No credentials provided, attempting check without auth")
 
         # Now check if file exists
+        logger.info(f"   Checking file existence...")
         if os.path.exists(dest_check_path):
+            logger.info(f"   ✅ File exists at destination")
             try:
                 dest_size = os.path.getsize(dest_check_path)
+                logger.info(f"   Source size: {source_size:,} bytes, Dest size: {dest_size:,} bytes")
                 if dest_size == source_size:
-                    logger.info(f"⏭️ Skipping (file already exists at destination with same size)")
+                    logger.info(f"   ⏭️ SKIPPING - File already exists with same size")
                     return True
                 else:
-                    logger.info(f"⚠️ File exists but size differs (source: {source_size}, dest: {dest_size}) - will re-transfer")
+                    logger.info(f"   ⚠️ File exists but size differs - will re-transfer")
                     return False
             except Exception as size_error:
-                logger.warning(f"⚠️ Could not verify destination file size: {size_error}")
+                logger.warning(f"   ⚠️ Could not verify destination file size: {size_error}")
                 return False
-
-        # File doesn't exist, proceed with transfer
-        return False
+        else:
+            logger.info(f"   File does not exist at destination - proceeding with transfer")
+            return False
 
     except Exception as e:
         logger.warning(f"⚠️ Error checking remote file: {e}")
+        import traceback
+        traceback.print_exc()
         return False  # On error, proceed with transfer
 
 
