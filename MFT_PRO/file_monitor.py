@@ -156,18 +156,35 @@ def find_csv_in_subfolders(parent_path: str, filename_pattern: str) -> Optional[
         return None
 
 
-def check_remote_file_exists(dest_path: str, source_size: int, username: str = None, password: str = None) -> bool:
+def check_remote_file_exists(dest_path: str, source_size: int, username: str = None, password: str = None, host: str = None) -> bool:
     """
     Check if destination file already exists (with authentication for remote UNC paths).
     Returns True if file exists and has same size as source.
     """
     import subprocess
+    import re
 
     try:
         logger.info(f"🔍 Checking if destination file exists: {dest_path}")
 
         # Normalize destination path
         dest_check_path = dest_path.replace('//', '\\\\').replace('/', '\\')
+
+        # If host is provided and path doesn't start with \\, prepend host
+        if host and not dest_check_path.startswith('\\\\'):
+            # Check if this is a local Windows path (e.g., C:\Users\...) and convert to UNC admin share format
+            drive_match = re.match(r'^([A-Za-z]):[\\/](.*)$', dest_check_path)
+            if drive_match:
+                # Convert C:\path to C$\path
+                drive_letter = drive_match.group(1).upper()
+                rest_of_path = drive_match.group(2)
+                stripped_path = f"{drive_letter}$\\{rest_of_path}"
+            else:
+                # Not a local path, just strip leading backslash
+                stripped_path = dest_check_path.lstrip('\\')
+
+            dest_check_path = f"\\\\{host}\\{stripped_path}"
+
         logger.info(f"   Normalized path: {dest_check_path}")
 
         # Check if this is a remote UNC path (starts with \\)
@@ -256,7 +273,7 @@ class FileMonitorHandler(FileSystemEventHandler):
         Check if destination file already exists (with authentication for remote UNC paths).
         Returns True if file exists and has same size as source.
         """
-        return check_remote_file_exists(dest_path, source_size, self.rule.username, self.rule.password)
+        return check_remote_file_exists(dest_path, source_size, self.rule.username, self.rule.password, self.rule.host)
 
     def _should_transfer(self, file_path: str) -> bool:
         """Check if file should be transferred"""
@@ -1088,7 +1105,7 @@ class FileMonitorManager:
                 if rule.action_type == ActionType.COPY:
                     try:
                         src_size = os.path.getsize(file_path)
-                        if check_remote_file_exists(dest_path, src_size, rule.username, rule.password):
+                        if check_remote_file_exists(dest_path, src_size, rule.username, rule.password, rule.host):
                             # File already exists with same size, skip transfer
                             continue
                     except Exception as check_error:
