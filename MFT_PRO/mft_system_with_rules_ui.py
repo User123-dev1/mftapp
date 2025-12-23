@@ -2843,7 +2843,7 @@ HTML_TEMPLATE = """
                     <td>${t.destination_path}</td>
                     <td>${t.protocol}</td>
                     <td><span class="status-badge status-${t.status}">${t.status}</span></td>
-                    <td>${new Date(t.timestamp).toLocaleString()}</td>
+                    <td>${t.timestamp}</td>
                     <td>${details}</td>
                 `;
             });
@@ -5069,13 +5069,17 @@ def get_transfers():
         for task in all_transfers:
             try:
                 # Manually construct dict from task attributes
+                # Format timestamp on server side to avoid JavaScript timezone confusion
+                task_timestamp = getattr(task, 'created_at', datetime.now()) if hasattr(task, 'created_at') else datetime.now()
+                formatted_timestamp = task_timestamp.strftime('%m/%d/%Y, %I:%M:%S %p')
+
                 transfer_dict = {
                     'task_id': getattr(task, 'task_id', 'unknown'),
                     'source_path': getattr(task, 'source_path', 'N/A'),
                     'destination_path': getattr(task, 'destination_path', 'N/A'),
                     'protocol': getattr(task.protocol, 'value', 'unc') if hasattr(task, 'protocol') else 'unc',
                     'status': getattr(task.status, 'value', 'unknown') if hasattr(task, 'status') else 'unknown',
-                    'timestamp': getattr(task, 'created_at', datetime.now()).isoformat() if hasattr(task, 'created_at') else datetime.now().isoformat(),
+                    'timestamp': formatted_timestamp,
                     'progress': getattr(task, 'progress', 0),
                     'error': getattr(task, 'error', None)
                 }
@@ -5649,16 +5653,30 @@ def get_dashboard_stats():
 
         # Process completed transfers
         for task in monitor.completed_transfers:
+            # Use completed_at if available, otherwise use created_at
+            task_time = None
             if hasattr(task, 'completed_at') and task.completed_at:
-                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                task_time = task.completed_at
+            elif hasattr(task, 'created_at') and task.created_at:
+                task_time = task.created_at
+
+            if task_time:
+                hours_ago = int((now - task_time).total_seconds() / 3600)
                 # Only count if within last 24 hours and not in future
                 if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['completed'] += 1
 
         # Process failed transfers
         for task in monitor.failed_transfers:
+            # Use completed_at if available, otherwise use created_at
+            task_time = None
             if hasattr(task, 'completed_at') and task.completed_at:
-                hours_ago = int((now - task.completed_at).total_seconds() / 3600)
+                task_time = task.completed_at
+            elif hasattr(task, 'created_at') and task.created_at:
+                task_time = task.created_at
+
+            if task_time:
+                hours_ago = int((now - task_time).total_seconds() / 3600)
                 # Only count if within last 24 hours and not in future
                 if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['failed'] += 1
