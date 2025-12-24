@@ -5896,6 +5896,8 @@ def get_dashboard_stats():
         }
 
         logger.info(f"📊 Dashboard stats: {total_transfers} transfers, {success_rate}% success rate")
+        logger.info(f"📈 Performance data - Completed: {sum(completed_series)} transfers, Failed: {sum(failed_series)} transfers")
+        logger.info(f"📈 Hourly breakdown: {completed_series}")
 
         return jsonify(stats)
 
