@@ -5846,12 +5846,15 @@ def get_dashboard_stats():
 
         # Process completed transfers
         for task in monitor.completed_transfers:
-            # Use completed_at if available, otherwise use created_at
+            # Use completed_at if available, otherwise use created_at, or assume current hour
             task_time = None
             if hasattr(task, 'completed_at') and task.completed_at:
                 task_time = task.completed_at
             elif hasattr(task, 'created_at') and task.created_at:
                 task_time = task.created_at
+            else:
+                # No timestamp found, assume it was in the current hour
+                task_time = now
 
             if task_time:
                 hours_ago = int((now - task_time).total_seconds() / 3600)
@@ -5861,12 +5864,15 @@ def get_dashboard_stats():
 
         # Process failed transfers
         for task in monitor.failed_transfers:
-            # Use completed_at if available, otherwise use created_at
+            # Use completed_at if available, otherwise use created_at, or assume current hour
             task_time = None
             if hasattr(task, 'completed_at') and task.completed_at:
                 task_time = task.completed_at
             elif hasattr(task, 'created_at') and task.created_at:
                 task_time = task.created_at
+            else:
+                # No timestamp found, assume it was in the current hour
+                task_time = now
 
             if task_time:
                 hours_ago = int((now - task_time).total_seconds() / 3600)
