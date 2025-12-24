@@ -5144,8 +5144,10 @@ def get_transfers():
             try:
                 # Manually construct dict from task attributes
                 # Format timestamp on server side to avoid JavaScript timezone confusion
+                # Convert UTC to Eastern Time (UTC-5)
                 task_timestamp = getattr(task, 'created_at', datetime.now()) if hasattr(task, 'created_at') else datetime.now()
-                formatted_timestamp = task_timestamp.strftime('%m/%d/%Y, %I:%M:%S %p')
+                eastern_time = task_timestamp - timedelta(hours=5)  # Convert UTC to EST
+                formatted_timestamp = eastern_time.strftime('%m/%d/%Y, %I:%M:%S %p')
 
                 transfer_dict = {
                     'task_id': getattr(task, 'task_id', 'unknown'),
