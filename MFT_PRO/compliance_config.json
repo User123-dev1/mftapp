@@ -1,7 +1,7 @@
 {
   "hipaa": {
     "framework": "hipaa",
-    "enabled": false,
+    "enabled": true,
     "encryption_required": true,
     "encryption_algorithm": "aes_256_gcm",
     "audit_retention_days": 2555,
@@ -133,7 +133,7 @@
   },
   "cfr_part_11": {
     "framework": "cfr_part_11",
-    "enabled": false,
+    "enabled": true,
     "encryption_required": true,
     "encryption_algorithm": "aes_256_gcm",
     "audit_retention_days": 2555,
