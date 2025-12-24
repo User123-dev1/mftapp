@@ -1403,13 +1403,22 @@ HTML_TEMPLATE = """
         <div id="history-tab" class="tab-content">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2>Transfer History</h2>
-                <button class="btn btn-danger" onclick="clearTransferHistory()" style="padding: 8px 16px;">
-                    🗑️ Clear History
-                </button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-warning" onclick="deleteSelectedTransfers()" style="padding: 8px 16px;">
+                        🗑️ Delete Selected
+                    </button>
+                    <button class="btn btn-danger" onclick="clearTransferHistory()" style="padding: 8px 16px;">
+                        🗑️ Clear All
+                    </button>
+                </div>
             </div>
+            <div id="history-message" style="margin-bottom: 10px;"></div>
             <table id="history-table">
                 <thead>
                     <tr>
+                        <th style="width: 40px;">
+                            <input type="checkbox" id="select-all-transfers" onchange="toggleSelectAllTransfers(this)">
+                        </th>
                         <th>Task ID</th>
                         <th>Source</th>
                         <th>Destination</th>
@@ -2808,15 +2817,55 @@ HTML_TEMPLATE = """
             displayHistory(currentDisplayedHistory);
         }
 
+        function toggleSelectAllTransfers(checkbox) {
+            const checkboxes = document.querySelectorAll('.transfer-checkbox');
+            checkboxes.forEach(cb => cb.checked = checkbox.checked);
+        }
+
+        function deleteSelectedTransfers() {
+            const checkboxes = document.querySelectorAll('.transfer-checkbox:checked');
+            const taskIds = Array.from(checkboxes).map(cb => cb.value);
+
+            if (taskIds.length === 0) {
+                showMessage('history-message', '⚠️ Please select at least one transfer to delete', 'warning');
+                return;
+            }
+
+            if (confirm(`Are you sure you want to delete ${taskIds.length} selected transfer(s)? This action cannot be undone.`)) {
+                fetch('/api/v1/history/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: taskIds })
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Refresh transfer history
+                            loadTransferHistory();
+                            showMessage('history-message', `✅ Deleted ${data.deleted_count} transfer(s) successfully!`, 'success');
+                            // Uncheck "select all"
+                            document.getElementById('select-all-transfers').checked = false;
+                        } else {
+                            showMessage('history-message', '❌ Failed to delete transfers: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(err => {
+                        showMessage('history-message', '❌ Error deleting transfers: ' + err.message, 'error');
+                    });
+            }
+        }
+
         function clearTransferHistory() {
-            if (confirm('Are you sure you want to clear all transfer history? This action cannot be undone.')) {
+            if (confirm('Are you sure you want to clear ALL transfer history? This action cannot be undone.')) {
                 fetch('/api/v1/history/clear', { method: 'POST' })
                     .then(r => r.json())
                     .then(data => {
                         if (data.success) {
-                            currentDisplayedHistory = [];
-                            displayHistory([]);
+                            // Refresh transfer history
+                            loadTransferHistory();
                             showMessage('history-message', '✅ Transfer history cleared successfully!', 'success');
+                            // Uncheck "select all"
+                            document.getElementById('select-all-transfers').checked = false;
                         } else {
                             showMessage('history-message', '❌ Failed to clear history: ' + data.error, 'error');
                         }
@@ -2862,6 +2911,7 @@ HTML_TEMPLATE = """
 
                 const row = tbody.insertRow();
                 row.innerHTML = `
+                    <td><input type="checkbox" class="transfer-checkbox" value="${t.task_id}"></td>
                     <td>${t.task_id.substring(0, 8)}...</td>
                     <td>${t.source_path}</td>
                     <td>${t.destination_path}</td>
@@ -5138,8 +5188,26 @@ def get_transfers():
 def clear_transfer_history():
     """Clear all transfer history"""
     try:
-        # Clear the transfer tasks list
-        mft_app.transfer_tasks.clear()
+        monitor = mft_app.monitor
+
+        # Clear all transfer lists
+        if hasattr(monitor, 'completed_transfers'):
+            cleared_count = len(monitor.completed_transfers)
+            monitor.completed_transfers.clear()
+            logger.info(f"🗑️ Cleared {cleared_count} completed transfers")
+
+        if hasattr(monitor, 'failed_transfers'):
+            failed_count = len(monitor.failed_transfers)
+            monitor.failed_transfers.clear()
+            logger.info(f"🗑️ Cleared {failed_count} failed transfers")
+
+        if hasattr(monitor, 'active_transfers'):
+            # Don't clear active transfers, only completed/failed
+            pass
+
+        # Also clear transfer_tasks if it exists
+        if hasattr(mft_app, 'transfer_tasks'):
+            mft_app.transfer_tasks.clear()
 
         logger.info("🗑️ Transfer history cleared")
 
@@ -5158,6 +5226,55 @@ def clear_transfer_history():
 
     except Exception as e:
         logger.error(f"Failed to clear transfer history: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/history/delete', methods=['POST'])
+def delete_transfer_history():
+    """Delete specific transfer(s) by task_id"""
+    try:
+        data = request.get_json()
+        task_ids = data.get('task_ids', [])
+
+        if not task_ids:
+            return jsonify({'success': False, 'error': 'No task IDs provided'}), 400
+
+        monitor = mft_app.monitor
+        deleted_count = 0
+
+        # Remove from completed transfers
+        if hasattr(monitor, 'completed_transfers'):
+            monitor.completed_transfers[:] = [
+                t for t in monitor.completed_transfers
+                if getattr(t, 'task_id', None) not in task_ids
+            ]
+            deleted_count += len(task_ids)
+
+        # Remove from failed transfers
+        if hasattr(monitor, 'failed_transfers'):
+            monitor.failed_transfers[:] = [
+                t for t in monitor.failed_transfers
+                if getattr(t, 'task_id', None) not in task_ids
+            ]
+
+        logger.info(f"🗑️ Deleted {len(task_ids)} transfer(s)")
+
+        audit_manager.log_event(
+            event_type=EventType.CONFIG_CHANGE,
+            username=session.get('username', 'system'),
+            action='delete_transfer_history',
+            result=EventResult.SUCCESS,
+            details={'task_ids': task_ids, 'count': len(task_ids)}
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {len(task_ids)} transfer(s) successfully',
+            'deleted_count': len(task_ids)
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to delete transfer history: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
     # RULES ENDPOINTS
