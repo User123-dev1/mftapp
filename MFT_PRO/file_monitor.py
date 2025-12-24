@@ -1035,9 +1035,29 @@ class FileMonitorManager:
             matching_files = []
             source_path = rule.source_path.replace('//', '\\\\').replace('/', '\\')
 
+            # Extract directory path (remove wildcard pattern like *.* or *.csv)
+            # os.walk() needs a directory, not a glob pattern
+            if '\\' in source_path:
+                # Split by backslash and check if last part looks like a pattern
+                parts = source_path.rsplit('\\', 1)
+                if len(parts) == 2 and ('*' in parts[1] or '?' in parts[1]):
+                    # Last part is a pattern, use directory only
+                    source_directory = parts[0]
+                else:
+                    # Last part is a folder name
+                    source_directory = source_path
+            else:
+                source_directory = source_path
+
+            logger.info(f"   Source directory: {source_directory}")
+            logger.info(f"   Source pattern: {rule.source_pattern}")
+            logger.info(f"   CSV pattern: {rule.csv_filename_pattern}")
+            logger.info(f"   Search subfolders: {rule.search_subfolders}")
+
             if rule.search_subfolders:
                 # Recursive search through all subdirectories
-                for root, dirs, files in os.walk(source_path):
+                logger.info(f"   🔍 Searching recursively in: {source_directory}")
+                for root, dirs, files in os.walk(source_directory):
                     for filename in files:
                         file_path = os.path.join(root, filename)
 
@@ -1047,7 +1067,10 @@ class FileMonitorManager:
                             if rule.csv_filename_pattern:
                                 if file_path.lower().endswith('.csv'):
                                     if fnmatch.fnmatch(filename, rule.csv_filename_pattern):
+                                        logger.info(f"      ✅ Match: {filename}")
                                         matching_files.append(file_path)
+                                    else:
+                                        logger.debug(f"      ⏭️ CSV doesn't match pattern: {filename}")
                                 # Skip non-CSV files when CSV pattern is set
                             else:
                                 matching_files.append(file_path)
