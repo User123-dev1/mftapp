@@ -5212,11 +5212,11 @@ def clear_transfer_history():
         logger.info("🗑️ Transfer history cleared")
 
         audit_manager.log_event(
-            event_type=EventType.CONFIG_CHANGE,
+            AuditEventType.CONFIG_CHANGED,
+            "Transfer history cleared",
             username=session.get('username', 'system'),
-            action='clear_transfer_history',
-            result=EventResult.SUCCESS,
-            details={'message': 'Transfer history cleared'}
+            result="success",
+            details={'action': 'clear_transfer_history'}
         )
 
         return jsonify({
@@ -5260,11 +5260,11 @@ def delete_transfer_history():
         logger.info(f"🗑️ Deleted {len(task_ids)} transfer(s)")
 
         audit_manager.log_event(
-            event_type=EventType.CONFIG_CHANGE,
+            AuditEventType.CONFIG_CHANGED,
+            f"Deleted {len(task_ids)} transfer(s) from history",
             username=session.get('username', 'system'),
-            action='delete_transfer_history',
-            result=EventResult.SUCCESS,
-            details={'task_ids': task_ids, 'count': len(task_ids)}
+            result="success",
+            details={'action': 'delete_transfer_history', 'task_ids': task_ids, 'count': len(task_ids)}
         )
 
         return jsonify({
