@@ -2841,7 +2841,7 @@ HTML_TEMPLATE = """
                     .then(data => {
                         if (data.success) {
                             // Refresh transfer history
-                            loadTransferHistory();
+                            loadHistory();
                             showMessage('history-message', `✅ Deleted ${data.deleted_count} transfer(s) successfully!`, 'success');
                             // Uncheck "select all"
                             document.getElementById('select-all-transfers').checked = false;
@@ -2862,7 +2862,7 @@ HTML_TEMPLATE = """
                     .then(data => {
                         if (data.success) {
                             // Refresh transfer history
-                            loadTransferHistory();
+                            loadHistory();
                             showMessage('history-message', '✅ Transfer history cleared successfully!', 'success');
                             // Uncheck "select all"
                             document.getElementById('select-all-transfers').checked = false;
