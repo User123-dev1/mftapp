@@ -8,8 +8,24 @@ from enum import Enum
 from dataclasses import dataclass
 import uuid
 from datetime import datetime
+import json
 
 logger = logging.getLogger(__name__)
+
+# Import activity logger
+try:
+    from activity_logger import activity_logger
+except ImportError:
+    activity_logger = None
+    logger.warning("Activity logger not available")
+
+# Import database
+try:
+    from database import get_database, FileTransfer
+except ImportError:
+    get_database = None
+    FileTransfer = None
+    logger.warning("Database not available - transfers will only be saved to JSON")
 
 
 class TransferProtocol(Enum):
@@ -63,23 +79,31 @@ class TransferConfig:
 
 class MFTApplication:
     """Main MFT Application"""
-    
-    def __init__(self):
-        self.monitor = TransferMonitor()
+
+    def __init__(self, state_manager=None):
+        self.monitor = TransferMonitor(state_manager=state_manager)
         self.protocol_handlers = {}
         self._initialize_handlers()
         logger.info("MFT Application initialized")
+
+        # Load saved transfer history
+        if state_manager:
+            self.monitor.load_state()
     
     def _initialize_handlers(self):
         """Initialize protocol handlers"""
         try:
+            logger.info("🔧 Initializing protocol handlers...")
+            logger.info("   Importing protocol_handlers module...")
+
             from protocol_handlers import (
                 SFTPHandler, FTPSHandler, HTTPSHandler,
                 WebDAVHandler, SMBHandler, UNCHandler,
                 TFTPHandler, AS2Handler
             )
 
-            logger.info("🔧 Initializing protocol handlers...")
+            logger.info("   ✅ Successfully imported all handler classes")
+            logger.info("   Creating handler instances...")
 
             self.protocol_handlers = {
                 TransferProtocol.SFTP: SFTPHandler(),
@@ -96,6 +120,12 @@ class MFTApplication:
             logger.info(f"✅ Initialized {len(self.protocol_handlers)} protocol handlers")
             for protocol in self.protocol_handlers.keys():
                 logger.info(f"   - {protocol.value}: {self.protocol_handlers[protocol].__class__.__name__}")
+        except ImportError as ie:
+            logger.error(f"❌ Import error when loading handlers: {ie}")
+            import traceback
+            traceback.print_exc()
+            # Initialize empty dict so app doesn't crash
+            self.protocol_handlers = {}
         except Exception as e:
             logger.error(f"❌ Error initializing handlers: {e}")
             import traceback
@@ -131,25 +161,71 @@ class MFTApplication:
         try:
             task.status = TransferStatus.IN_PROGRESS
             task.started_at = datetime.utcnow()
-            
+
+            # Update database when transfer starts
+            if self.monitor.db:
+                try:
+                    self.monitor.db.update_file_transfer(
+                        task.task_id,
+                        status=task.status.value,
+                        started_at=task.started_at.isoformat()
+                    )
+                    logger.debug(f"💾 Transfer {task.task_id} updated in database (started)")
+                except Exception as e:
+                    logger.error(f"Failed to update transfer start in database: {e}")
+
+            # Log transfer started to activity log
+            if activity_logger:
+                activity_logger.log_transfer_started(
+                    task.task_id,
+                    task.source_path,
+                    task.destination_path,
+                    task.protocol.value
+                )
+
+            logger.info(f"🔍 Looking for handler for protocol: {task.protocol}")
+            logger.info(f"   Available handlers: {list(self.protocol_handlers.keys())}")
+
             handler = self.protocol_handlers.get(task.protocol)
             if not handler:
+                logger.error(f"❌ No handler found for {task.protocol}")
+                logger.error(f"   task.protocol type: {type(task.protocol)}")
+                logger.error(f"   task.protocol value: {task.protocol.value if hasattr(task.protocol, 'value') else 'N/A'}")
+                logger.error(f"   Available handler keys and types:")
+                for key in self.protocol_handlers.keys():
+                    logger.error(f"      {key} (type: {type(key)}, value: {key.value if hasattr(key, 'value') else 'N/A'})")
                 raise ValueError(f"No handler for {task.protocol}")
-            
+
             result = await handler.transfer(
                 task.source_path,
                 task.destination_path,
                 task.config
             )
-            
+
             task.file_size = result.get('file_size')
             task.checksum_md5 = result.get('checksum_md5')
             task.checksum_sha256 = result.get('checksum_sha256')
-            
+
             self.monitor.complete_transfer(task.task_id)
-            
+
+            # Log transfer completed to activity log
+            if activity_logger:
+                activity_logger.log_transfer_completed(
+                    task.task_id,
+                    task.source_path,
+                    task.file_size
+                )
+
         except Exception as e:
             self.monitor.fail_transfer(task.task_id, str(e))
+
+            # Log transfer failed to activity log
+            if activity_logger:
+                activity_logger.log_transfer_failed(
+                    task.task_id,
+                    task.source_path,
+                    str(e)
+                )
     
     def get_transfer_status(self, task_id: str) -> Optional[Dict]:
         """Get transfer status"""
@@ -212,16 +288,54 @@ class TransferTask:
 
 class TransferMonitor:
     """Monitor transfers"""
-    
-    def __init__(self):
+
+    def __init__(self, state_manager=None):
         self.active_transfers: Dict[str, TransferTask] = {}
         self.completed_transfers = []
         self.failed_transfers = []
-    
+        self.state_manager = state_manager
+
+        # Initialize database connection
+        self.db = None
+        if get_database:
+            try:
+                self.db = get_database()
+                logger.info("✅ Database initialized for transfer tracking")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize database: {e}")
+                self.db = None
+
     def add_transfer(self, task: TransferTask):
         self.active_transfers[task.task_id] = task
         logger.info(f"Transfer {task.task_id} added")
-    
+
+        # Save to database
+        if self.db and FileTransfer:
+            try:
+                transfer = FileTransfer(
+                    task_id=task.task_id,
+                    source_path=task.source_path,
+                    destination_path=task.destination_path,
+                    protocol=task.protocol.value,
+                    status=task.status.value,
+                    file_size=task.file_size,
+                    transferred_bytes=task.transferred_bytes,
+                    checksum_md5=task.checksum_md5,
+                    checksum_sha256=task.checksum_sha256,
+                    error_message=task.error_message,
+                    retry_attempts=task.retry_attempts,
+                    created_at=task.created_at.isoformat() if task.created_at else None,
+                    started_at=task.started_at.isoformat() if task.started_at else None,
+                    completed_at=task.completed_at.isoformat() if task.completed_at else None,
+                    metadata=json.dumps(task.metadata or {})
+                )
+                self.db.create_file_transfer(transfer)
+                logger.debug(f"💾 Transfer {task.task_id} saved to database")
+            except Exception as e:
+                logger.error(f"Failed to save transfer to database: {e}")
+
+        self._save_state()
+
     def complete_transfer(self, task_id: str):
         if task_id in self.active_transfers:
             task = self.active_transfers.pop(task_id)
@@ -229,7 +343,24 @@ class TransferMonitor:
             task.completed_at = datetime.utcnow()
             self.completed_transfers.append(task)
             logger.info(f"Transfer {task_id} completed")
-    
+
+            # Update database
+            if self.db:
+                try:
+                    self.db.update_file_transfer(
+                        task_id,
+                        status=task.status.value,
+                        completed_at=task.completed_at.isoformat(),
+                        file_size=task.file_size,
+                        checksum_md5=task.checksum_md5,
+                        checksum_sha256=task.checksum_sha256
+                    )
+                    logger.debug(f"💾 Transfer {task_id} updated in database (completed)")
+                except Exception as e:
+                    logger.error(f"Failed to update transfer in database: {e}")
+
+            self._save_state()
+
     def fail_transfer(self, task_id: str, error: str):
         if task_id in self.active_transfers:
             task = self.active_transfers.pop(task_id)
@@ -238,6 +369,76 @@ class TransferMonitor:
             task.completed_at = datetime.utcnow()
             self.failed_transfers.append(task)
             logger.error(f"Transfer {task_id} failed: {error}")
+
+            # Update database
+            if self.db:
+                try:
+                    self.db.update_file_transfer(
+                        task_id,
+                        status=task.status.value,
+                        error_message=error,
+                        completed_at=task.completed_at.isoformat()
+                    )
+                    logger.debug(f"💾 Transfer {task_id} updated in database (failed)")
+                except Exception as e:
+                    logger.error(f"Failed to update transfer in database: {e}")
+
+            self._save_state()
+
+    def _save_state(self):
+        """Save transfer state to disk"""
+        if self.state_manager:
+            try:
+                active = [t.to_dict() for t in self.active_transfers.values()]
+                completed = [t.to_dict() for t in self.completed_transfers]
+                failed = [t.to_dict() for t in self.failed_transfers]
+                self.state_manager.save_transfers(active, completed, failed)
+            except Exception as e:
+                logger.error(f"Failed to save transfer state: {e}")
+
+    def load_state(self):
+        """Load transfer state from disk"""
+        if self.state_manager:
+            try:
+                data = self.state_manager.load_transfers()
+                if data:
+                    # Restore completed transfers
+                    for transfer_dict in data.get('completed_transfers', []):
+                        task = self._dict_to_task(transfer_dict)
+                        if task:
+                            self.completed_transfers.append(task)
+
+                    # Restore failed transfers
+                    for transfer_dict in data.get('failed_transfers', []):
+                        task = self._dict_to_task(transfer_dict)
+                        if task:
+                            self.failed_transfers.append(task)
+
+                    # Don't restore active transfers - they should restart if needed
+                    logger.info(f"📋 Restored {len(self.completed_transfers)} completed and {len(self.failed_transfers)} failed transfers")
+            except Exception as e:
+                logger.error(f"Failed to load transfer state: {e}")
+
+    def _dict_to_task(self, d: dict) -> Optional[TransferTask]:
+        """Convert dictionary to TransferTask"""
+        try:
+            task = TransferTask(
+                task_id=d['task_id'],
+                source_path=d['source_path'],
+                destination_path=d['destination_path'],
+                protocol=TransferProtocol(d['protocol']),
+                file_size=d.get('file_size', 0)
+            )
+            task.status = TransferStatus(d['status'])
+            task.error_message = d.get('error_message')
+            if d.get('created_at'):
+                task.created_at = datetime.fromisoformat(d['created_at'])
+            if d.get('completed_at'):
+                task.completed_at = datetime.fromisoformat(d['completed_at'])
+            return task
+        except Exception as e:
+            logger.error(f"Failed to restore transfer task: {e}")
+            return None
     
     def get_statistics(self) -> Dict:
         total = len(self.active_transfers) + len(self.completed_transfers) + len(self.failed_transfers)

@@ -216,6 +216,33 @@ class UserPermission:
 
 
 @dataclass
+class FileTransfer:
+    """File transfer record"""
+    id: Optional[int] = None
+    task_id: str = ""  # UUID for tracking
+    transfer_rule_id: Optional[int] = None  # Link to transfer rule if applicable
+    source_path: str = ""
+    destination_path: str = ""
+    protocol: str = "sftp"
+    status: str = "pending"  # pending, in_progress, completed, failed, cancelled
+    file_size: Optional[int] = None
+    transferred_bytes: int = 0
+    checksum_md5: Optional[str] = None
+    checksum_sha256: Optional[str] = None
+    error_message: Optional[str] = None
+    retry_attempts: int = 0
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    metadata: str = "{}"  # JSON with additional info
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = asdict(self)
+        result['metadata'] = json.loads(self.metadata) if self.metadata else {}
+        return result
+
+
+@dataclass
 class AuditLog:
     """Comprehensive audit trail"""
     id: Optional[int] = None
@@ -340,6 +367,28 @@ class Database:
                 FOREIGN KEY (transfer_rule_id) REFERENCES transfer_rules(id)
             );
 
+            -- File transfers (completed and in-progress)
+            CREATE TABLE IF NOT EXISTS file_transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL UNIQUE,
+                transfer_rule_id INTEGER,
+                source_path TEXT NOT NULL,
+                destination_path TEXT NOT NULL,
+                protocol TEXT DEFAULT 'sftp',
+                status TEXT DEFAULT 'pending',
+                file_size INTEGER,
+                transferred_bytes INTEGER DEFAULT 0,
+                checksum_md5 TEXT,
+                checksum_sha256 TEXT,
+                error_message TEXT,
+                retry_attempts INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                started_at DATETIME,
+                completed_at DATETIME,
+                metadata TEXT DEFAULT '{}',
+                FOREIGN KEY (transfer_rule_id) REFERENCES transfer_rules(id)
+            );
+
             -- Domain configuration
             CREATE TABLE IF NOT EXISTS domain_config (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,6 +467,10 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_pending_deletions_status ON pending_deletions(status);
             CREATE INDEX IF NOT EXISTS idx_pending_deletions_scheduled ON pending_deletions(scheduled_deletion);
             CREATE INDEX IF NOT EXISTS idx_transfer_queue_status ON transfer_queue(status);
+            CREATE INDEX IF NOT EXISTS idx_file_transfers_task_id ON file_transfers(task_id);
+            CREATE INDEX IF NOT EXISTS idx_file_transfers_status ON file_transfers(status);
+            CREATE INDEX IF NOT EXISTS idx_file_transfers_created_at ON file_transfers(created_at);
+            CREATE INDEX IF NOT EXISTS idx_file_transfers_rule_id ON file_transfers(transfer_rule_id);
             CREATE INDEX IF NOT EXISTS idx_domain_users_username ON domain_users(username);
             CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
             CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(username);
@@ -662,6 +715,125 @@ class Database:
         conn.close()
 
         return [TransferQueue(**dict(row)) for row in rows]
+
+    # File transfer operations
+    def create_file_transfer(self, transfer: FileTransfer) -> int:
+        """Create a new file transfer record"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO file_transfers (task_id, transfer_rule_id, source_path,
+                destination_path, protocol, status, file_size, transferred_bytes,
+                checksum_md5, checksum_sha256, error_message, retry_attempts,
+                created_at, started_at, completed_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (transfer.task_id, transfer.transfer_rule_id, transfer.source_path,
+              transfer.destination_path, transfer.protocol, transfer.status,
+              transfer.file_size, transfer.transferred_bytes, transfer.checksum_md5,
+              transfer.checksum_sha256, transfer.error_message, transfer.retry_attempts,
+              transfer.created_at, transfer.started_at, transfer.completed_at,
+              transfer.metadata))
+
+        transfer_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        return transfer_id
+
+    def update_file_transfer(self, task_id: str, **kwargs):
+        """Update file transfer fields"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build update query dynamically
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            if key in ['status', 'file_size', 'transferred_bytes', 'checksum_md5',
+                      'checksum_sha256', 'error_message', 'retry_attempts',
+                      'started_at', 'completed_at', 'metadata']:
+                updates.append(f"{key} = ?")
+                values.append(value)
+
+        if updates:
+            values.append(task_id)
+            query = f"UPDATE file_transfers SET {', '.join(updates)} WHERE task_id = ?"
+            cursor.execute(query, values)
+            conn.commit()
+
+        conn.close()
+
+    def get_file_transfer(self, task_id: str) -> Optional[FileTransfer]:
+        """Get file transfer by task ID"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM file_transfers WHERE task_id = ?", (task_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return FileTransfer(**dict(row))
+        return None
+
+    def get_file_transfers(self, status: Optional[str] = None,
+                          rule_id: Optional[int] = None,
+                          limit: int = 100) -> List[FileTransfer]:
+        """Get file transfers with optional filters"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM file_transfers WHERE 1=1"
+        params = []
+
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if rule_id:
+            query += " AND transfer_rule_id = ?"
+            params.append(rule_id)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [FileTransfer(**dict(row)) for row in rows]
+
+    def get_transfer_statistics(self, hours: int = 24) -> Dict[str, Any]:
+        """Get transfer statistics for the last N hours"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total,
+                COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+                COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0) as in_progress,
+                COALESCE(SUM(file_size), 0) as total_bytes
+            FROM file_transfers
+            WHERE created_at >= datetime('now', ?)
+        """, (f'-{hours} hours',))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return {
+                'total': row['total'],
+                'completed': row['completed'],
+                'failed': row['failed'],
+                'in_progress': row['in_progress'],
+                'total_bytes': row['total_bytes'] or 0,
+                'success_rate': (row['completed'] / row['total'] * 100) if row['total'] > 0 else 0
+            }
+
+        return {'total': 0, 'completed': 0, 'failed': 0, 'in_progress': 0,
+                'total_bytes': 0, 'success_rate': 0}
 
     # Domain operations
     def save_domain_config(self, config: DomainConfig) -> int:
