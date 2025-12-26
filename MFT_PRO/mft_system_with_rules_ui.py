@@ -69,8 +69,8 @@ state_manager = StateManager()
 # Initialize Authentication Manager
 auth_manager = AuthenticationManager()
 
-# Initialize MFT application
-mft_app = MFTApplication()
+# Initialize MFT application with state manager for transfer persistence
+mft_app = MFTApplication(state_manager=state_manager)
 
 # Initialize File Monitor Manager
 monitor_manager = FileMonitorManager(mft_app)
@@ -80,6 +80,11 @@ compliance_manager = ComplianceManager()
 
 # Initialize Audit Manager
 audit_manager = AuditManager()
+
+# Initialize System Log Handler for console log capture
+from system_log_handler import get_system_log_handler
+system_log_handler = get_system_log_handler()
+logger.info("System Log Handler initialized for UI display")
 
 # Initialize Active Directory Manager
 ad_manager = ActiveDirectoryManager()
@@ -1157,6 +1162,7 @@ HTML_TEMPLATE = """
                 <div class="dropdown-content">
                     <a onclick="showTab('audit'); closeAllDropdowns()">📝 Audit Log</a>
                     <a onclick="showTab('activity'); closeAllDropdowns()">📡 Activity Log</a>
+                    <a onclick="showTab('systemlogs'); closeAllDropdowns()">🖥️ System Logs</a>
                 </div>
             </div>
 
@@ -1340,11 +1346,12 @@ HTML_TEMPLATE = """
                 <canvas id="performanceChart" height="80"></canvas>
             </div>
 
-            <div class="info-box" style="margin-top: 20px;">
+            <div class="info-box" style="margin-top: 20px; color: #2d2d38;">
                 <strong>System Status</strong>
                 <p>All systems operational. Last AD sync: <span id="last-ad-sync">Never</span></p>
                 <p>Enabled compliance frameworks: <span id="enabled-frameworks">None</span></p>
             </div>
+
         </div>
         
         <!-- Transfer Tab -->
@@ -1354,12 +1361,12 @@ HTML_TEMPLATE = """
             
             <form id="transfer-form">
                 <div class="form-row-3">
+                    <div class="form-group">  
+    <label style="color: #f3f3ff;">Source Path:</label>  
+    <input type="text" id="source-path" placeholder="//192.168.1.10/C$/data/file.txt" required>  
+</div>
                     <div class="form-group">
-                        <label>Source Path:</label>
-                        <input type="text" id="source-path" placeholder="//192.168.1.10/C$/data/file.txt" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Protocol:</label>
+                        <label style = "color: #f3f3ff;">Protocol:</label>
                         <select id="protocol">
                             <option value="unc">UNC - Windows Shares (Port 445)</option>
                             <option value="smb">SMB - Windows SMB Protocol</option>
@@ -1368,29 +1375,29 @@ HTML_TEMPLATE = """
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Port:</label>
+                        <label style = "color:#f3f3ff;">Port:</label>
                         <input type="number" id="port" value="445">
                     </div>
                 </div>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Destination Host:</label>
+                        <label style = "color: #f3f3ff;">Destination Host:</label>
                         <input type="text" id="host" placeholder="10.10.100.4" required>
                     </div>
                     <div class="form-group">
-                        <label>Destination Path:</label>
+                        <label style="color:#f3f3ff;">Destination Path:</label>
                         <input type="text" id="dest-path" placeholder="C$/backup/file.txt" required>
                     </div>
                 </div>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Username (optional):</label>
+                        <label style = "color:#f3f3ff;">Username (optional):</label>
                         <input type="text" id="username">
                     </div>
                     <div class="form-group">
-                        <label>Password (optional):</label>
+                        <label style ="color:#f3f3ff;">Password (optional):</label>
                         <input type="password" id="password">
                     </div>
                 </div>
@@ -1738,13 +1745,13 @@ HTML_TEMPLATE = """
             <button class="btn btn-primary" onclick="loadActivityLog()">🔄 Refresh</button>
             <button class="btn btn-danger" onclick="clearActivityLog()" style="margin-left: 10px;">🗑️ Clear Log</button>
 
-            <h3 style="margin-top: 30px;">Recent Server Events</h3>
+            <h3 style="margin-top: 30px;">Recent Application Events</h3>
             <table id="activity-table">
                 <thead>
                     <tr>
                         <th>Timestamp</th>
-                        <th>Event</th>
-                        <th>Server</th>
+                        <th>Type</th>
+                        <th>Level</th>
                         <th>Message</th>
                         <th>Details</th>
                     </tr>
@@ -1767,6 +1774,76 @@ HTML_TEMPLATE = """
                 <tbody></tbody>
             </table>
         </div>
+
+        <!-- System Logs Tab -->
+        <div id="systemlogs-tab" class="tab-content">
+            <h2>System Console Logs</h2>
+
+            <div class="info-box" style="margin-bottom: 20px;">
+                <h3 style="color: #5E0BBC;">🖥️ Application Logs</h3>
+                <p>Real-time console logs from the MFT application for debugging and monitoring.</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 10px;">
+                    <div>
+                        <strong>Total:</strong> <span id="log-stat-total">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #3498db;">DEBUG:</strong> <span id="log-stat-debug" style="color: #3498db;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #27ae60;">INFO:</strong> <span id="log-stat-info" style="color: #27ae60;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #f39c12;">WARNING:</strong> <span id="log-stat-warning" style="color: #f39c12;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #e74c3c;">ERROR:</strong> <span id="log-stat-error" style="color: #e74c3c;">0</span>
+                    </div>
+                    <div>
+                        <strong style="color: #c0392b;">CRITICAL:</strong> <span id="log-stat-critical" style="color: #c0392b;">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <button class="btn btn-primary" onclick="loadSystemLogs()">🔄 Refresh</button>
+                <button class="btn btn-danger" onclick="clearSystemLogs()" style="margin-left: 10px;">🗑️ Clear Logs</button>
+
+                <span style="margin-left: 20px;">Filter by Level:</span>
+                <select id="log-level-filter" onchange="loadSystemLogs()" style="margin-left: 10px; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                    <option value="">All Levels</option>
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                </select>
+
+                <span style="margin-left: 20px;">Limit:</span>
+                <select id="log-limit" onchange="loadSystemLogs()" style="margin-left: 10px; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                    <option value="100">100</option>
+                    <option value="250">250</option>
+                    <option value="500" selected>500</option>
+                    <option value="1000">1000</option>
+                </select>
+
+                <label style="margin-left: 20px;">
+                    <input type="checkbox" id="log-auto-refresh" onchange="toggleAutoRefreshLogs()"> Auto-refresh (5s)
+                </label>
+            </div>
+
+            <table id="system-logs-table">
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Timestamp</th>
+                        <th style="width: 80px;">Level</th>
+                        <th style="width: 200px;">Logger</th>
+                        <th>Message</th>
+                        <th style="width: 100px;">Location</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Local Users Tab (Admin Only) -->
@@ -1774,15 +1851,16 @@ HTML_TEMPLATE = """
         <h2>Local User Accounts</h2>
         <div id="local-users-message" class="message"></div>
 
-        <div class="info-box" style="margin-bottom: 20px;">
-            <h3>ℹ️ Local Users Information</h3>
-            <ul style="margin-top: 10px; padding-left: 20px;">
-                <li><strong>System Admin</strong> account cannot be disabled</li>
-                <li>Local accounts are <strong>automatically disabled</strong> when Active Directory is synced</li>
-                <li>When AD is active, users must login with domain credentials</li>
-                <li>Local accounts (except system admin) are <strong>re-enabled</strong> if AD disconnects</li>
-            </ul>
-        </div>
+            <div class="info-box" style="margin-bottom: 20px; color: #2d2d38;">
+        <h3 style="color: #585d78;">ℹ️ Local Users Information</h3>
+        <ul style="margin-top: 10px; padding-left: 20px;">
+            <li><strong>System Admin</strong> account cannot be disabled</li>
+            <li>Local accounts are <strong>automatically disabled</strong> when Active Directory is synced</li>
+            <li>When AD is active, users must login with domain credentials</li>
+            <li>Local accounts (except system admin) are <strong>re-enabled</strong> if AD disconnects</li>
+        </ul>
+    </div>
+
 
         <button class="btn btn-success" onclick="showCreateUserModal()" style="margin-bottom: 20px;">
             ➕ Create Local User
@@ -2251,6 +2329,8 @@ HTML_TEMPLATE = """
                 loadAuditLog();
             } else if (tabName === 'activity') {
                 loadActivityLog();
+            } else if (tabName === 'systemlogs') {
+                loadSystemLogs();
             }
         }
 
@@ -2620,12 +2700,16 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            // Destroy existing chart if it exists
+            // If chart exists, update its data instead of destroying it
             if (performanceChart) {
-                performanceChart.destroy();
+                performanceChart.data.labels = performanceData.labels;
+                performanceChart.data.datasets[0].data = performanceData.completed;
+                performanceChart.data.datasets[1].data = performanceData.failed;
+                performanceChart.update('active');
+                return;
             }
 
-            // Create new chart
+            // Create new chart only if it doesn't exist
             performanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -2879,6 +2963,13 @@ HTML_TEMPLATE = """
         function displayHistory(transfers) {
             currentDisplayedHistory = transfers;
             const tbody = document.querySelector('#history-table tbody');
+
+            // SAVE checkbox states before clearing
+            const checkedTransfers = new Set();
+            tbody.querySelectorAll('.transfer-checkbox:checked').forEach(cb => {
+                checkedTransfers.add(cb.value);
+            });
+
             tbody.innerHTML = '';
 
             if (!transfers || transfers.length === 0) {
@@ -2910,8 +3001,10 @@ HTML_TEMPLATE = """
                 }
 
                 const row = tbody.insertRow();
+                // RESTORE checkbox state if it was previously checked
+                const isChecked = checkedTransfers.has(t.task_id) ? 'checked' : '';
                 row.innerHTML = `
-                    <td><input type="checkbox" class="transfer-checkbox" value="${t.task_id}"></td>
+                    <td><input type="checkbox" class="transfer-checkbox" value="${t.task_id}" ${isChecked}></td>
                     <td>${t.task_id.substring(0, 8)}...</td>
                     <td>${t.source_path}</td>
                     <td>${t.destination_path}</td>
@@ -3050,13 +3143,27 @@ HTML_TEMPLATE = """
                 const resultClass = event.result === 'success' ? 'status-completed' :
                                    event.result === 'failure' ? 'status-failed' : 'status-pending';
 
+                // Format details properly - convert object to readable string
+                let detailsText = '-';
+                if (event.details) {
+                    if (typeof event.details === 'object') {
+                        // Format as JSON with nice indentation, truncate if too long
+                        const jsonStr = JSON.stringify(event.details, null, 2);
+                        detailsText = jsonStr.length > 200
+                            ? `<span title="${jsonStr.replace(/"/g, '&quot;')}">${jsonStr.substring(0, 200)}...</span>`
+                            : `<pre style="margin: 0; font-size: 0.85em;">${jsonStr}</pre>`;
+                    } else {
+                        detailsText = event.details;
+                    }
+                }
+
                 row.innerHTML = `
                     <td>${new Date(event.timestamp).toLocaleString()}</td>
                     <td>${event.event_type}</td>
                     <td>${event.username || 'System'}</td>
                     <td>${event.action}</td>
                     <td><span class="status-badge ${resultClass}">${event.result}</span></td>
-                    <td>${event.details || '-'}</td>
+                    <td>${detailsText}</td>
                 `;
             });
 
@@ -3570,73 +3677,112 @@ HTML_TEMPLATE = """
         // ========================================
 
         function loadActivityLog() {
-            // Load server status
-            fetch('/api/v1/servers/status')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success) {
-                        // Update summary stats
-                        document.getElementById('activity-total-servers').textContent = data.total_servers;
-                        document.getElementById('activity-online-count').textContent = data.online_count;
-                        document.getElementById('activity-offline-count').textContent = data.offline_count;
-
-                        // Update server status table
-                        const statusTbody = document.querySelector('#server-status-table tbody');
-                        statusTbody.innerHTML = '';
-
-                        Object.entries(data.servers).forEach(([server_key, server]) => {
-                            const row = statusTbody.insertRow();
-                            const statusBadge = server.is_online
-                                ? '<span style="color: #27ae60; font-weight: bold;">● ONLINE</span>'
-                                : '<span style="color: #e74c3c; font-weight: bold;">● OFFLINE</span>';
-
-                            row.innerHTML = `
-                                <td>${server.host}:${server.port}</td>
-                                <td>${server.protocol.toUpperCase()}</td>
-                                <td>${statusBadge}</td>
-                                <td>${new Date(server.last_check).toLocaleString()}</td>
-                                <td>${server.total_downtime || 'None'}</td>
-                                <td>${server.offline_since ? new Date(server.offline_since).toLocaleString() : '-'}</td>
-                            `;
-                        });
-                    }
-                })
-                .catch(err => console.error('Failed to load server status:', err));
-
-            // Load activity log
-            fetch('/api/v1/servers/activity?limit=100')
+            // Load application activity events
+            fetch('/api/v1/activity/events?limit=100')
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
                         const activityTbody = document.querySelector('#activity-table tbody');
                         activityTbody.innerHTML = '';
 
-                        if (data.activity.length === 0) {
+                        // Load server status for the summary counts
+                        fetch('/api/v1/servers/status')
+                            .then(r => r.json())
+                            .then(serverData => {
+                                if (serverData.success) {
+                                    const totalServers = serverData.total_servers || 0;
+                                    const onlineServers = serverData.online_count || 0;
+                                    const offlineServers = serverData.offline_count || 0;
+
+                                    document.getElementById('activity-total-servers').textContent = totalServers;
+                                    document.getElementById('activity-online-count').textContent = onlineServers;
+                                    document.getElementById('activity-offline-count').textContent = offlineServers;
+                                }
+                            })
+                            .catch(err => console.error('Failed to load server status summary:', err));
+
+                        if (data.events.length === 0) {
                             activityTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No activity yet</td></tr>';
                             return;
                         }
 
-                        data.activity.forEach(activity => {
+                        data.events.forEach(event => {
                             const row = activityTbody.insertRow();
-                            const eventBadge = activity.event_type === 'server_online'
-                                ? '<span style="background: #27ae60; color: white; padding: 3px 8px; border-radius: 3px;">✅ ONLINE</span>'
-                                : '<span style="background: #e74c3c; color: white; padding: 3px 8px; border-radius: 3px;">❌ OFFLINE</span>';
 
+                            // Create badge based on level
+                            let levelBadge = '';
+                            if (event.level === 'success') {
+                                levelBadge = '<span style="background: #27ae60; color: white; padding: 3px 8px; border-radius: 3px;">✅ SUCCESS</span>';
+                            } else if (event.level === 'error') {
+                                levelBadge = '<span style="background: #e74c3c; color: white; padding: 3px 8px; border-radius: 3px;">❌ ERROR</span>';
+                            } else if (event.level === 'warning') {
+                                levelBadge = '<span style="background: #f39c12; color: white; padding: 3px 8px; border-radius: 3px;">⚠️ WARNING</span>';
+                            } else {
+                                levelBadge = '<span style="background: #3498db; color: white; padding: 3px 8px; border-radius: 3px;">ℹ️ INFO</span>';
+                            }
+
+                            // Format event type badge
+                            const typeBadge = `<span style="background: #9b59b6; color: white; padding: 3px 8px; border-radius: 3px; font-size: 0.85em;">${event.event_type.toUpperCase()}</span>`;
+
+                            // Format details
                             let details = '';
-                            if (activity.details && activity.details.downtime_formatted) {
-                                details = `Downtime: ${activity.details.downtime_formatted}`;
-                            } else if (activity.details && activity.details.protocol) {
-                                details = `Protocol: ${activity.details.protocol}`;
+                            if (event.details && Object.keys(event.details).length > 0) {
+                                if (event.details.task_id) {
+                                    details += `ID: ${event.details.task_id.substring(0, 8)}...`;
+                                }
+                                if (event.details.protocol) {
+                                    details += ` [${event.details.protocol.toUpperCase()}]`;
+                                }
+                                if (event.details.file_size) {
+                                    details += ` (${(event.details.file_size / 1024).toFixed(1)} KB)`;
+                                }
+                                if (event.details.error) {
+                                    details += ` Error: ${event.details.error.substring(0, 50)}...`;
+                                }
                             }
 
                             row.innerHTML = `
-                                <td>${new Date(activity.timestamp).toLocaleString()}</td>
-                                <td>${eventBadge}</td>
-                                <td>${activity.server}</td>
-                                <td>${activity.message}</td>
-                                <td>${details}</td>
+                                <td>${new Date(event.timestamp).toLocaleString()}</td>
+                                <td>${typeBadge}</td>
+                                <td>${levelBadge}</td>
+                                <td>${event.message}</td>
+                                <td><small>${details || '-'}</small></td>
                             `;
                         });
+
+                        // Update server status table (load actual monitored servers)
+                        fetch('/api/v1/servers/status')
+                            .then(r => r.json())
+                            .then(data => {
+                                const statusTbody = document.querySelector('#server-status-table tbody');
+                                statusTbody.innerHTML = '';
+
+                                if (data.success && data.servers && Object.keys(data.servers).length > 0) {
+                                    // Show actual monitored servers
+                                    Object.entries(data.servers).forEach(([serverKey, server]) => {
+                                        const row = statusTbody.insertRow();
+                                        const statusColor = server.is_online ? '#27ae60' : '#e74c3c';
+                                        const statusText = server.is_online ? '● ONLINE' : '● OFFLINE';
+                                        const lastCheck = new Date(server.last_check).toLocaleString();
+
+                                        row.innerHTML = `
+                                            <td>${server.host}:${server.port}</td>
+                                            <td>${server.protocol.toUpperCase()}</td>
+                                            <td><span style="color: ${statusColor}; font-weight: bold;">${statusText}</span></td>
+                                            <td>${lastCheck}</td>
+                                            <td>${server.total_downtime}</td>
+                                            <td>${server.offline_since ? new Date(server.offline_since).toLocaleString() : '-'}</td>
+                                        `;
+                                    });
+                                } else {
+                                    // No servers being monitored
+                                    const row = statusTbody.insertRow();
+                                    row.innerHTML = `
+                                        <td colspan="6" style="text-align: center; color: #888;">No servers being monitored</td>
+                                    `;
+                                }
+                            })
+                            .catch(err => console.error('Failed to load server status:', err));
                     }
                 })
                 .catch(err => console.error('Failed to load activity log:', err));
@@ -3644,7 +3790,7 @@ HTML_TEMPLATE = """
 
         function clearActivityLog() {
             if (confirm('Are you sure you want to clear the activity log? This action cannot be undone.')) {
-                fetch('/api/v1/servers/activity/clear', { method: 'POST' })
+                fetch('/api/v1/activity/clear', { method: 'POST' })
                     .then(r => r.json())
                     .then(data => {
                         if (data.success) {
@@ -3659,6 +3805,127 @@ HTML_TEMPLATE = """
                         console.error('Failed to clear activity log:', err);
                     });
             }
+        }
+
+        // ========================================
+        // SYSTEM LOGS FUNCTIONS
+        // ========================================
+
+        let systemLogsAutoRefresh = null;
+
+        function loadSystemLogs() {
+            const level = document.getElementById('log-level-filter').value;
+            const limit = document.getElementById('log-limit').value;
+
+            let url = `/api/v1/system/logs?limit=${limit}`;
+            if (level) {
+                url += `&level=${level}`;
+            }
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const tbody = document.querySelector('#system-logs-table tbody');
+                        tbody.innerHTML = '';
+
+                        // Update statistics
+                        if (data.stats) {
+                            document.getElementById('log-stat-total').textContent = data.stats.total || 0;
+                            document.getElementById('log-stat-debug').textContent = data.stats.debug || 0;
+                            document.getElementById('log-stat-info').textContent = data.stats.info || 0;
+                            document.getElementById('log-stat-warning').textContent = data.stats.warning || 0;
+                            document.getElementById('log-stat-error').textContent = data.stats.error || 0;
+                            document.getElementById('log-stat-critical').textContent = data.stats.critical || 0;
+                        }
+
+                        if (data.logs.length === 0) {
+                            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No logs found</td></tr>';
+                            return;
+                        }
+
+                        data.logs.forEach(log => {
+                            const row = document.createElement('tr');
+
+                            // Color code by level
+                            let levelColor = '#333';
+                            switch(log.level) {
+                                case 'DEBUG': levelColor = '#3498db'; break;
+                                case 'INFO': levelColor = '#27ae60'; break;
+                                case 'WARNING': levelColor = '#f39c12'; break;
+                                case 'ERROR': levelColor = '#e74c3c'; break;
+                                case 'CRITICAL': levelColor = '#c0392b'; break;
+                            }
+
+                            // Format timestamp
+                            const timestamp = new Date(log.timestamp).toLocaleString();
+
+                            // Get location info
+                            const location = log.funcName ? `${log.funcName}:${log.lineno}` : `Line ${log.lineno}`;
+
+                            row.innerHTML = `
+                                <td style="font-size: 0.9em;">${timestamp}</td>
+                                <td style="font-weight: bold; color: ${levelColor};">${log.level}</td>
+                                <td style="font-size: 0.9em;" title="${log.logger}">${log.logger.substring(0, 30)}${log.logger.length > 30 ? '...' : ''}</td>
+                                <td style="word-break: break-word;">${escapeHtml(log.message)}</td>
+                                <td style="font-size: 0.85em; color: #666;" title="${log.pathname}">${location}</td>
+                            `;
+
+                            // Add exception info if present
+                            if (log.exception) {
+                                const exRow = document.createElement('tr');
+                                exRow.innerHTML = `<td colspan="5" style="background-color: #ffe6e6; padding: 10px; font-family: monospace; font-size: 0.85em; white-space: pre-wrap;">${escapeHtml(log.exception)}</td>`;
+                                tbody.appendChild(row);
+                                tbody.appendChild(exRow);
+                            } else {
+                                tbody.appendChild(row);
+                            }
+                        });
+                    }
+                })
+                .catch(err => console.error('Failed to load system logs:', err));
+        }
+
+        function clearSystemLogs() {
+            if (confirm('Are you sure you want to clear the system logs? This action cannot be undone.')) {
+                fetch('/api/v1/system/logs/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('System logs cleared successfully!');
+                            loadSystemLogs();
+                        } else {
+                            alert('Failed to clear system logs: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error clearing system logs: ' + err.message);
+                        console.error('Failed to clear system logs:', err);
+                    });
+            }
+        }
+
+        function toggleAutoRefreshLogs() {
+            const checkbox = document.getElementById('log-auto-refresh');
+
+            if (checkbox.checked) {
+                // Start auto-refresh
+                loadSystemLogs(); // Load immediately
+                systemLogsAutoRefresh = setInterval(loadSystemLogs, 5000); // Refresh every 5 seconds
+            } else {
+                // Stop auto-refresh
+                if (systemLogsAutoRefresh) {
+                    clearInterval(systemLogsAutoRefresh);
+                    systemLogsAutoRefresh = null;
+                }
+            }
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // ========================================
@@ -5030,6 +5297,92 @@ def export_audit_log():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ACTIVITY LOG ENDPOINTS
+@app.route('/api/v1/activity/events', methods=['GET'])
+def get_activity_events():
+    """Get application activity events"""
+    try:
+        from activity_logger import activity_logger
+
+        limit = int(request.args.get('limit', 100))
+        event_type = request.args.get('type')  # Optional filter
+
+        events = activity_logger.get_events(limit=limit, event_type=event_type)
+
+        return jsonify({
+            'success': True,
+            'events': events,
+            'total': len(events)
+        })
+    except Exception as e:
+        logger.error(f"Failed to get activity events: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/activity/clear', methods=['POST'])
+def clear_activity_log():
+    """Clear activity log"""
+    try:
+        from activity_logger import activity_logger
+        activity_logger.clear_events()
+
+        return jsonify({'success': True, 'message': 'Activity log cleared'})
+    except Exception as e:
+        logger.error(f"Failed to clear activity log: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# SYSTEM LOG ENDPOINTS
+@app.route('/api/v1/system/logs', methods=['GET'])
+def get_system_logs():
+    """Get system console logs"""
+    try:
+        limit = int(request.args.get('limit', 500))
+        level = request.args.get('level')  # Optional filter: DEBUG, INFO, WARNING, ERROR, CRITICAL
+        logger_name = request.args.get('logger')  # Optional filter by logger name
+
+        logs = system_log_handler.get_logs(limit=limit, level=level, logger_name=logger_name)
+        stats = system_log_handler.get_stats()
+
+        return jsonify({
+            'success': True,
+            'logs': logs,
+            'total': len(logs),
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Failed to get system logs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/system/logs/clear', methods=['POST'])
+def clear_system_logs():
+    """Clear system logs"""
+    try:
+        system_log_handler.clear_logs()
+        logger.info("System logs cleared by user")
+
+        return jsonify({'success': True, 'message': 'System logs cleared'})
+    except Exception as e:
+        logger.error(f"Failed to clear system logs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/system/logs/stats', methods=['GET'])
+def get_system_logs_stats():
+    """Get system logs statistics"""
+    try:
+        stats = system_log_handler.get_stats()
+
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Failed to get system logs stats: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # TRANSFER ENDPOINTS
 @app.route('/api/v1/transfers', methods=['POST'])
 def create_transfer():
@@ -5841,7 +6194,14 @@ def get_dashboard_stats():
         active_rules = len([r for r in monitor_manager.rules.values() if r.enabled])
 
         # Prepare hourly transfer data for last 24 hours
-        now = datetime.now()
+        # Use UTC time to match the timestamps on transfer tasks
+        now_utc = datetime.utcnow()
+
+        # Convert to Eastern Time for display (UTC-5)
+        from pytz import timezone
+        eastern = timezone('US/Eastern')
+        now_eastern = datetime.now(eastern)
+
         hourly_data = {i: {'completed': 0, 'failed': 0} for i in range(24)}
 
         # Process completed transfers
@@ -5854,13 +6214,14 @@ def get_dashboard_stats():
                 task_time = task.created_at
             else:
                 # No timestamp found, assume it was in the current hour
-                task_time = now
+                task_time = now_utc
 
             if task_time:
-                hours_ago = int((now - task_time).total_seconds() / 3600)
+                hours_ago = int((now_utc - task_time).total_seconds() / 3600)
                 # Only count if within last 24 hours and not in future
                 if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['completed'] += 1
+                    logger.debug(f"  ✓ Counted completed transfer: {hours_ago} hours ago (task_time={task_time}, now={now_utc})")
 
         # Process failed transfers
         for task in monitor.failed_transfers:
@@ -5872,16 +6233,17 @@ def get_dashboard_stats():
                 task_time = task.created_at
             else:
                 # No timestamp found, assume it was in the current hour
-                task_time = now
+                task_time = now_utc
 
             if task_time:
-                hours_ago = int((now - task_time).total_seconds() / 3600)
+                hours_ago = int((now_utc - task_time).total_seconds() / 3600)
                 # Only count if within last 24 hours and not in future
                 if 0 <= hours_ago < 24:
                     hourly_data[hours_ago]['failed'] += 1
+                    logger.debug(f"  ✓ Counted failed transfer: {hours_ago} hours ago (task_time={task_time}, now={now_utc})")
 
-        # Format hourly data for chart
-        hours = [(now - timedelta(hours=i)).strftime('%H:00') for i in range(23, -1, -1)]
+        # Format hourly data for chart - use Eastern Time for labels
+        hours = [(now_eastern - timedelta(hours=i)).strftime('%H:00') for i in range(23, -1, -1)]
         completed_series = [hourly_data[23-i]['completed'] for i in range(24)]
         failed_series = [hourly_data[23-i]['failed'] for i in range(24)]
 
@@ -6185,23 +6547,49 @@ def shutdown_server():
 # ============================================================================
 
 if __name__ == '__main__':
-    print("="*80)
-    print("🚀 MFT SYSTEM - ENHANCED WITH SEARCH")
-    print("="*80)
-    print()
-    print("✅ MFT Application initialized")
-    print("✅ File Monitor Manager initialized")
-    print("✅ Compliance Manager initialized")
-    print("✅ Audit Manager initialized")
-    print("✅ Active Directory Manager initialized")
-    print()
-    print("🔍 NEW FEATURES:")
-    print("   ✅ User/Group search bar")
-    print("   ✅ Assign users to groups")
-    print("   ✅ View group members")
-    print("   ✅ Fixed permission editing")
-    print()
-    print("🌐 Server starting on http://127.0.0.1:5000")
-    print("="*80)
+    import sys
+    import threading
+    import webbrowser
+    import time
 
-    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    # Check if running in desktop mode (with GUI)
+    desktop_mode = '--desktop' in sys.argv or '--gui' in sys.argv
+
+    if not desktop_mode:
+        print("="*80)
+        print("🚀 MFT SYSTEM - ENHANCED WITH SEARCH")
+        print("="*80)
+        print()
+        print("✅ MFT Application initialized")
+        print("✅ File Monitor Manager initialized")
+        print("✅ Compliance Manager initialized")
+        print("✅ Audit Manager initialized")
+        print("✅ Active Directory Manager initialized")
+        print()
+        print("🔍 NEW FEATURES:")
+        print("   ✅ User/Group search bar")
+        print("   ✅ Assign users to groups")
+        print("   ✅ View group members")
+        print("   ✅ Fixed permission editing")
+        print()
+        print("🌐 Server starting on http://127.0.0.1:5000")
+        print("="*80)
+
+    # Configure port (default 8000)
+    port = 8000
+
+    # Auto-open browser after a short delay
+    def open_browser():
+        time.sleep(2)  # Wait for server to start
+        webbrowser.open(f'http://127.0.0.1:{port}')
+        if desktop_mode:
+            logger.info(f"🌐 Dashboard opened in browser at http://127.0.0.1:{port}")
+
+    # Start browser opener in background thread
+    threading.Thread(target=open_browser, daemon=True).start()
+
+    if not desktop_mode:
+        print(f"🌐 Server starting on http://127.0.0.1:{port}")
+        print("="*80)
+
+    app.run(debug=False if desktop_mode else True, host='0.0.0.0', port=port, use_reloader=False)
