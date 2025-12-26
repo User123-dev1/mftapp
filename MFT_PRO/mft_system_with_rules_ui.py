@@ -58,6 +58,11 @@ from auth_manager import AuthenticationManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize System Log Handler early (before other components)
+from system_log_handler import get_system_log_handler
+system_log_handler = get_system_log_handler()
+logger.info("System Log Handler initialized for UI display")
+
 # Create Flask app
 app = Flask(__name__)
 app.secret_key = 'mft-system-secret-key-change-this-in-production-' + os.urandom(24).hex()
@@ -80,11 +85,6 @@ compliance_manager = ComplianceManager()
 
 # Initialize Audit Manager
 audit_manager = AuditManager()
-
-# Initialize System Log Handler for console log capture
-from system_log_handler import get_system_log_handler
-system_log_handler = get_system_log_handler()
-logger.info("System Log Handler initialized for UI display")
 
 # Initialize Active Directory Manager
 ad_manager = ActiveDirectoryManager()
