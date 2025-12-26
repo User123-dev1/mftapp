@@ -397,27 +397,89 @@ class TransferMonitor:
                 logger.error(f"Failed to save transfer state: {e}")
 
     def load_state(self):
-        """Load transfer state from disk"""
-        if self.state_manager:
+        """Load transfer state from database and disk"""
+        # First, try to load from database (primary source)
+        if self.db:
             try:
-                data = self.state_manager.load_transfers()
-                if data:
-                    # Restore completed transfers
-                    for transfer_dict in data.get('completed_transfers', []):
-                        task = self._dict_to_task(transfer_dict)
-                        if task:
-                            self.completed_transfers.append(task)
+                logger.info("Loading transfer history from database...")
 
-                    # Restore failed transfers
-                    for transfer_dict in data.get('failed_transfers', []):
-                        task = self._dict_to_task(transfer_dict)
-                        if task:
-                            self.failed_transfers.append(task)
+                # Load completed transfers from database
+                completed_from_db = self.db.get_file_transfers(status='completed', limit=1000)
+                for db_transfer in completed_from_db:
+                    task = self._db_transfer_to_task(db_transfer)
+                    if task:
+                        self.completed_transfers.append(task)
 
-                    # Don't restore active transfers - they should restart if needed
-                    logger.info(f"📋 Restored {len(self.completed_transfers)} completed and {len(self.failed_transfers)} failed transfers")
+                # Load failed transfers from database
+                failed_from_db = self.db.get_file_transfers(status='failed', limit=1000)
+                for db_transfer in failed_from_db:
+                    task = self._db_transfer_to_task(db_transfer)
+                    if task:
+                        self.failed_transfers.append(task)
+
+                logger.info(f"📋 Loaded from database: {len(self.completed_transfers)} completed and {len(self.failed_transfers)} failed transfers")
             except Exception as e:
-                logger.error(f"Failed to load transfer state: {e}")
+                logger.error(f"Failed to load transfer state from database: {e}")
+
+        # Fallback: Load from JSON if database didn't load anything
+        if len(self.completed_transfers) == 0 and len(self.failed_transfers) == 0:
+            if self.state_manager:
+                try:
+                    logger.info("Loading transfer history from JSON (fallback)...")
+                    data = self.state_manager.load_transfers()
+                    if data:
+                        # Restore completed transfers
+                        for transfer_dict in data.get('completed_transfers', []):
+                            task = self._dict_to_task(transfer_dict)
+                            if task:
+                                self.completed_transfers.append(task)
+
+                        # Restore failed transfers
+                        for transfer_dict in data.get('failed_transfers', []):
+                            task = self._dict_to_task(transfer_dict)
+                            if task:
+                                self.failed_transfers.append(task)
+
+                        logger.info(f"📋 Loaded from JSON: {len(self.completed_transfers)} completed and {len(self.failed_transfers)} failed transfers")
+                except Exception as e:
+                    logger.error(f"Failed to load transfer state from JSON: {e}")
+
+    def _db_transfer_to_task(self, db_transfer) -> Optional[TransferTask]:
+        """Convert database FileTransfer to TransferTask"""
+        try:
+            # Create a minimal TransferConfig (won't be used for completed transfers)
+            config = TransferConfig(
+                protocol=TransferProtocol(db_transfer.protocol),
+                host="localhost",
+                port=22
+            )
+
+            task = TransferTask(
+                task_id=db_transfer.task_id,
+                source_path=db_transfer.source_path,
+                destination_path=db_transfer.destination_path,
+                protocol=TransferProtocol(db_transfer.protocol),
+                config=config,
+                file_size=db_transfer.file_size
+            )
+            task.status = TransferStatus(db_transfer.status)
+            task.error_message = db_transfer.error_message
+            task.checksum_md5 = db_transfer.checksum_md5
+            task.checksum_sha256 = db_transfer.checksum_sha256
+            task.retry_attempts = db_transfer.retry_attempts
+
+            # Parse timestamps
+            if db_transfer.created_at:
+                task.created_at = datetime.fromisoformat(db_transfer.created_at)
+            if db_transfer.started_at:
+                task.started_at = datetime.fromisoformat(db_transfer.started_at)
+            if db_transfer.completed_at:
+                task.completed_at = datetime.fromisoformat(db_transfer.completed_at)
+
+            return task
+        except Exception as e:
+            logger.error(f"Failed to convert database transfer to task: {e}")
+            return None
 
     def _dict_to_task(self, d: dict) -> Optional[TransferTask]:
         """Convert dictionary to TransferTask"""
