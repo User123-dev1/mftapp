@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GMP Asset Manager</title>
+<style>
+:root {
+  --bg: #f4f6f8; --panel: #fff; --text: #1b2430; --muted: #5d6b7a; --line: #d9e0e6;
+  --accent: #0b5cad; --ok: #127a3a; --ok-bg: #e3f5ea; --bad: #b42318; --bad-bg: #fde8e6; --warn: #8a5a00; --warn-bg: #fff4d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11161c; --panel: #1a2129; --text: #e6edf3; --muted: #93a1b0; --line: #2c3743;
+    --accent: #5aa7f0; --ok: #4cc17a; --ok-bg: #12301f; --bad: #ff7b6e; --bad-bg: #3a1714; --warn: #f0c050; --warn-bg: #352a0e;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; flex: 1; }
+nav { display: flex; gap: 4px; padding: 8px 16px; flex-wrap: wrap; background: var(--panel); border-bottom: 1px solid var(--line); }
+nav button { background: none; border: 0; padding: 8px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 14px; }
+nav button.active { background: var(--accent); color: #fff; }
+main { padding: 16px; max-width: 1150px; margin: 0 auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 3px; }
+label.check { display: flex; gap: 6px; align-items: center; color: var(--text); }
+label.check input { width: auto; }
+button.btn { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
+button.btn.secondary { background: none; color: var(--accent); }
+button.btn.danger { background: var(--bad); border-color: var(--bad); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 14px; }
+#scanInput { font-size: 22px; padding: 14px; font-family: ui-monospace, monospace; }
+.verdict { border-radius: 10px; padding: 18px; font-size: 26px; font-weight: 700; text-align: center; margin: 12px 0; }
+.verdict.ok { background: var(--ok-bg); color: var(--ok); }
+.verdict.bad { background: var(--bad-bg); color: var(--bad); }
+.verdict.neutral { background: var(--bg); color: var(--muted); font-size: 18px; }
+ul.reasons { margin: 6px 0 0; padding-left: 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.tbl { overflow-x: auto; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.pill.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+.pill.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+a.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px; background: var(--text); color: var(--bg); display: none; max-width: 90vw; z-index: 50; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
+.modal { background: var(--panel); border-radius: 10px; padding: 18px; width: 100%; max-width: 520px; max-height: 92vh; overflow: auto; }
+.sigbox { border: 2px solid var(--accent); border-radius: 8px; padding: 10px; margin-top: 12px; }
+video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
+.label-img { background: #fff; padding: 6px; border-radius: 6px; max-width: 100%; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="loginView" class="hidden">
+  <main style="max-width:420px">
+    <div class="panel">
+      <h2>GMP Asset Manager - Sign in</h2>
+      <form id="loginForm">
+        <label>User ID</label><input name="username" autocomplete="username" required>
+        <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+        <div class="row" style="margin-top:14px"><button class="btn">Sign in</button></div>
+      </form>
+      <p class="muted" style="font-size:13px">Authorized users only. All activity is recorded in a secure, computer-generated audit trail.</p>
+    </div>
+  </main>
+</div>
+
+<div id="pwView" class="hidden">
+  <main style="max-width:420px">
+    <div class="panel">
+      <h2>Change password</h2>
+      <p class="muted">Your password must be changed before continuing (first login or expiry).</p>
+      <form id="pwForm">
+        <label>Current password</label><input name="old_password" type="password" required>
+        <label>New password (10+ chars, upper, lower, digit)</label><input name="new_password" type="password" required>
+        <label>Confirm new password</label><input name="confirm" type="password" required>
+        <div class="row" style="margin-top:14px"><button class="btn">Change password</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="appView" class="hidden">
+  <header>
+    <h1>GMP Asset Manager</h1>
+    <span id="who" class="muted"></span>
+    <button class="btn secondary" id="logoutBtn">Sign out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="content"></main>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const state = { token: sessionStorage.getItem("gmp_token"), me: null, tab: "scan", moveTarget: null, scanMode: "lookup", camera: null };
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const can = (perm) => state.me && state.me.permissions.includes(perm);
+
+function toast(msg, ms = 3500) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = "none", ms);
+}
+
+function beep(ok) {
+  try {
+    const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = ok ? 1200 : 300; o.connect(g); g.connect(ctx.destination);
+    g.gain.value = 0.08; o.start(); o.stop(ctx.currentTime + (ok ? 0.12 : 0.45));
+  } catch (_) { /* audio unavailable */ }
+}
+
+async function api(method, url, body, raw = false) {
+  const res = await fetch(url, {
+    method, headers: { "Content-Type": "application/json", ...(state.token ? { Authorization: "Bearer " + state.token } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+    // 401 is also used for a failed e-signature; only a dead session ends the UI session
+    if (res.status === 401 && state.me && /^(Session|Not authenticated)/.test(detail)) logoutLocal(detail);
+    throw new Error(detail);
+  }
+  if (raw) return res;
+  return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
+}
+
+function logoutLocal(msg) {
+  stopCamera();
+  state.token = null; state.me = null; sessionStorage.removeItem("gmp_token");
+  show("login"); if (msg) toast(msg);
+}
+
+function show(view) {
+  for (const v of ["login", "pw", "app"]) $("#" + v + "View").classList.toggle("hidden", v !== view);
+  if (view === "login") $("#loginForm [name=username]").focus();
+}
+
+// ---- Modals, forms and electronic signatures ------------------------------
+function modal(html, onSubmit) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal"><form>${html}<div class="row" style="margin-top:14px;justify-content:flex-end">
+    <button type="button" class="btn secondary" data-cancel>Cancel</button><button class="btn">Submit</button></div></form></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); refocusScan(); };
+  $("[data-cancel]", bg).onclick = close;
+  $("form", bg).onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target), data = {};
+    for (const [k, v] of fd.entries()) data[k] = v;
+    for (const cb of e.target.querySelectorAll("input[type=checkbox]")) data[cb.name] = cb.checked;
+    try { await onSubmit(data); close(); } catch (err) { toast(err.message, 6000); beep(false); }
+  };
+  const first = $("input, select, textarea", bg); if (first) first.focus();
+}
+
+function sigBlock(meaning) {
+  return `<div class="sigbox"><b>Electronic signature - ${esc(meaning.toUpperCase())}</b>
+    <div class="muted" style="font-size:13px">Signing as <b>${esc(state.me.full_name)}</b> (${esc(state.me.username)}).
+    By entering your password you confirm this electronic signature is the legally binding equivalent of your handwritten signature.</div>
+    <label>Password</label><input name="sig_password" type="password" autocomplete="current-password" required></div>`;
+}
+
+const field = (name, labelText, attrs = "") => `<label>${labelText}</label><input name="${name}" ${attrs}>`;
+const select = (name, labelText, options, selected) => `<label>${labelText}</label><select name="${name}">${
+  options.map(o => `<option value="${esc(o)}" ${o === selected ? "selected" : ""}>${esc(o.replace(/_/g, " "))}</option>`).join("")}</select>`;
+const today = () => new Date().toISOString().slice(0, 10);
+
+// ---- Tabs ----------------------------------------------------------------
+const TABS = [
+  ["scan", "Scan", () => true], ["assets", "Assets", () => can("asset.view")],
+  ["approvals", "Approvals", () => can("calibration.approve")], ["deviations", "Deviations", () => can("asset.view")],
+  ["due", "Due list", () => can("asset.view")], ["audit", "Audit trail", () => can("audit.view")],
+  ["admin", "Administration", () => can("user.manage")],
+];
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.filter(t => t[2]()).map(([id, name]) =>
+    `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}">${name}</button>`).join("");
+  for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => openTab(b.dataset.tab);
+}
+
+async function openTab(tab) {
+  if (tab !== "scan") stopCamera();
+  state.tab = tab; renderTabs();
+  const c = $("#content");
+  c.innerHTML = `<div class="panel muted">Loading...</div>`;
+  try { await VIEWS[tab](c); } catch (err) { c.innerHTML = `<div class="panel">${esc(err.message)}</div>`; }
+}
+
+// ---- Scan station --------------------------------------------------------
+function refocusScan() {
+  const inp = $("#scanInput");
+  if (inp && !document.querySelector(".modal-bg")) inp.focus();
+}
+
+const VIEWS = {};
+VIEWS.scan = async (c) => {
+  c.innerHTML = `
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Scan station</h2>
+      <div class="row">
+        <select id="scanMode" style="width:auto">
+          <option value="lookup">Mode: Check fitness for use</option>
+          ${can("asset.move") ? `<option value="move">Mode: Move assets to location</option>` : ""}
+        </select>
+        <button class="btn secondary" id="camBtn">Use camera</button>
+      </div>
+    </div>
+    <p class="muted" style="margin:8px 0">Scan with a USB/Bluetooth scanner (keyboard mode), a camera, or type the code and press Enter.
+      Supports Code 128/39 asset &amp; location tags and GS1-128 / GS1 DataMatrix / QR (GTIN, lot, expiry, serial, GIAI).</p>
+    <div id="moveInfo" class="pill warn hidden" style="margin-bottom:8px"></div>
+    <form id="scanForm"><input id="scanInput" autocomplete="off" placeholder="Scan barcode..." autofocus></form>
+    <div id="camWrap" class="hidden" style="margin-top:10px"><video id="camVideo" playsinline muted></video></div>
+  </div>
+  <div id="scanResult"></div>`;
+  $("#scanMode").value = state.scanMode;
+  $("#scanMode").onchange = (e) => { state.scanMode = e.target.value; state.moveTarget = null; updateMoveInfo(); refocusScan(); };
+  updateMoveInfo();
+  $("#scanForm").onsubmit = (e) => { e.preventDefault(); const v = $("#scanInput").value; $("#scanInput").value = ""; if (v.trim()) handleScan(v); };
+  // Most wedge scanners send GS (FNC1) as Ctrl+] which browsers drop - map it to the GS substitute.
+  $("#scanInput").addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === "]" || e.code === "BracketRight")) { e.preventDefault(); e.target.value += "|"; }
+  });
+  $("#scanInput").addEventListener("blur", () => setTimeout(() => { if (state.tab === "scan") refocusScan(); }, 150));
+  $("#camBtn").onclick = () => state.camera ? stopCamera() : startCamera();
+  refocusScan();
+};
+
+function updateMoveInfo() {
+  const el = $("#moveInfo"); if (!el) return;
+  el.classList.toggle("hidden", state.scanMode !== "move");
+  el.textContent = state.moveTarget ? `Moving scanned assets to ${state.moveTarget.code} - ${state.moveTarget.name}` : "Scan the destination LOCATION barcode first";
+}
+
+async function handleScan(raw) {
+  const out = $("#scanResult");
+  let r;
+  try { r = await api("POST", "/api/scan", { data: raw }); } catch (err) { toast(err.message); beep(false); return; }
+
+  if (state.scanMode === "move") {
+    if (r.match_type === "location") {
+      state.moveTarget = r.location; updateMoveInfo(); beep(true);
+      out.innerHTML = `<div class="panel"><div class="verdict neutral">Destination set: ${esc(r.location.code)}</div></div>`;
+      return;
+    }
+    if (r.match_type === "asset" && state.moveTarget) {
+      try {
+        await api("POST", `/api/assets/${encodeURIComponent(r.asset.asset_tag)}/move`, { location_code: state.moveTarget.code });
+        beep(true);
+        out.innerHTML = `<div class="panel"><div class="verdict ok">${esc(r.asset.asset_tag)} moved to ${esc(state.moveTarget.code)}</div></div>`;
+      } catch (err) { beep(false); out.innerHTML = `<div class="panel"><div class="verdict bad">${esc(err.message)}</div></div>`; }
+      return;
+    }
+  }
+
+  if (r.match_type === "asset") {
+    const a = r.asset, f = r.fitness;
+    beep(f.fit_for_use);
+    out.innerHTML = `<div class="panel">
+      <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
+      ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${f.warnings.length ? `<p>${f.warnings.map(x => `<span class="pill warn">${esc(x)}</span>`).join(" ")}</p>` : ""}
+      ${assetSummary(a)}
+      <div class="row" style="margin-top:12px">
+        <button class="btn" data-open>Open asset record</button>
+        ${can("asset.status.remove") && a.status !== "retired" ? `<button class="btn danger" data-issue>Report problem</button>` : ""}
+      </div>
+      <p class="muted" style="font-size:12px">Checked ${esc(f.checked_at)} UTC by ${esc(state.me.username)}</p></div>`;
+    $("[data-open]", out).onclick = () => openAsset(a.asset_tag);
+    const issue = $("[data-issue]", out); if (issue) issue.onclick = () => reportIssue(a.asset_tag);
+  } else if (r.match_type === "location") {
+    beep(true);
+    out.innerHTML = `<div class="panel"><div class="verdict neutral">Location ${esc(r.location.code)}</div>
+      <p>${esc(r.location.name)} ${r.location.area_class ? `<span class="pill">${esc(r.location.area_class)}</span>` : ""} - ${r.asset_count} active asset(s).</p>
+      <a class="link" data-list>Show assets at this location</a></div>`;
+    $("[data-list]", out).onclick = () => { state.assetFilter = { location: r.location.code }; openTab("assets"); };
+  } else {
+    const p = r.parsed;
+    beep(false);
+    out.innerHTML = `<div class="panel">
+      <div class="verdict ${p.valid ? (r.expired ? "bad" : "neutral") : "bad"}">${
+        !p.valid ? "INVALID / UNREADABLE BARCODE" : r.match_type === "gs1_item" ? (r.expired ? "EXPIRED GS1 ITEM" : "GS1 item - not a registered asset") : "Not found"}</div>
+      ${p.errors.length ? `<ul class="reasons">${p.errors.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${parsedTable(p)}</div>`;
+  }
+}
+
+function parsedTable(p) {
+  const rows = Object.entries(p.elements).map(([ai, v]) => `<tr><td>(${esc(ai)})</td><td>${esc(p.element_titles[ai] || "")}</td><td class="mono">${esc(v)}</td></tr>`).join("");
+  return `<p class="muted">Symbology: ${esc(p.symbology || "not transmitted")} - Data: <span class="mono">${esc(p.data)}</span></p>
+    ${rows ? `<div class="tbl"><table><tr><th>AI</th><th>Meaning</th><th>Value</th></tr>${rows}</table></div>` : ""}
+    ${p.expiry ? `<p>Expiry: <b>${esc(p.expiry)}</b></p>` : ""}`;
+}
+
+async function startCamera() {
+  const wrap = $("#camWrap"), video = $("#camVideo");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream; await video.play();
+    wrap.classList.remove("hidden"); $("#camBtn").textContent = "Stop camera";
+    let last = "", lastAt = 0;
+    const onCode = (text) => {
+      const now = Date.now();
+      if (text === last && now - lastAt < 2500) return;  // debounce repeat reads
+      last = text; lastAt = now; handleScan(text);
+    };
+    if ("BarcodeDetector" in window) {
+      const detector = new BarcodeDetector({ formats: ["code_128", "code_39", "data_matrix", "qr_code", "ean_13", "ean_8", "upc_a", "itf"] });
+      const cam = { stream, timer: setInterval(async () => {
+        try { const codes = await detector.detect(video); if (codes.length) onCode(codes[0].rawValue); } catch (_) {}
+      }, 300) };
+      state.camera = cam;
+    } else {
+      await loadScript("https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js");
+      const reader = new ZXing.BrowserMultiFormatReader();
+      stream.getTracks().forEach(t => t.stop());
+      state.camera = { reader };
+      reader.decodeFromConstraints({ video: { facingMode: "environment" } }, video, (res) => { if (res) onCode(res.getText()); });
+    }
+  } catch (err) {
+    toast("Camera unavailable: " + err.message + " (camera access requires HTTPS or localhost)", 6000);
+    stopCamera();
+  }
+}
+
+function stopCamera() {
+  const cam = state.camera; state.camera = null;
+  if (cam) {
+    if (cam.timer) clearInterval(cam.timer);
+    if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+    if (cam.reader) cam.reader.reset();
+  }
+  const wrap = $("#camWrap"); if (wrap) wrap.classList.add("hidden");
+  const btn = $("#camBtn"); if (btn) btn.textContent = "Use camera";
+}
+
+function loadScript(src) {
+  return new Promise((ok, fail) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => fail(new Error("could not load decoder")); document.head.appendChild(s); });
+}
+
+// ---- Assets --------------------------------------------------------------
+const statusPill = (s) => `<span class="pill ${s === "in_service" ? "ok" : s === "quarantine" ? "bad" : s === "retired" ? "" : "warn"}">${esc(s.replace(/_/g, " "))}</span>`;
+
+function assetSummary(a) {
+  return `<div class="grid" style="margin-top:8px">
+    <div><label>Asset tag</label><b class="mono">${esc(a.asset_tag)}</b></div>
+    <div><label>Description</label>${esc(a.description)}</div>
+    <div><label>Status</label>${statusPill(a.status)}</div>
+    <div><label>Qualification</label>${esc(a.qualification_status.replace(/_/g, " "))}</div>
+    <div><label>GMP impact</label>${esc(a.gmp_impact)}</div>
+    <div><label>Location</label>${esc(a.location_code || "-")} ${a.location_name ? `<span class="muted">${esc(a.location_name)}</span>` : ""}</div>
+    <div><label>Calibration due</label>${a.calibration_required ? esc(a.calibration_due_on || "not calibrated") : "n/a"}</div>
+    <div><label>PM due</label>${a.pm_required ? esc(a.pm_due_on || "-") : "n/a"}</div>
+    <div><label>Manufacturer / model</label>${esc(a.manufacturer || "-")} ${esc(a.model || "")}</div>
+    <div><label>Serial / GTIN</label><span class="mono">${esc(a.serial_number || "-")} ${esc(a.gtin || "")}</span></div>
+  </div>`;
+}
+
+VIEWS.assets = async (c) => {
+  const filter = state.assetFilter || {}; state.assetFilter = null;
+  const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v)).toString();
+  const assets = await api("GET", "/api/assets" + (qs ? "?" + qs : ""));
+  c.innerHTML = `<div class="panel">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Assets ${filter.location ? "at " + esc(filter.location) : ""}</h2>
+      ${can("asset.create") ? `<button class="btn" id="newAsset">Register asset</button>` : ""}</div>
+    <div class="row" style="margin:10px 0"><input id="q" placeholder="Search tag, description, serial, model" style="max-width:360px" value="${esc(filter.q || "")}">
+      <select id="st" style="width:auto"><option value="">All statuses</option>${["commissioning", "in_service", "out_of_service", "quarantine", "retired"].map(s => `<option ${filter.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
+    <div class="tbl"><table><tr><th>Tag</th><th>Description</th><th>Location</th><th>Status</th><th>Cal due</th><th>Fit for use</th></tr>
+    ${assets.map(a => `<tr><td><a class="link mono" data-tag="${esc(a.asset_tag)}">${esc(a.asset_tag)}</a></td><td>${esc(a.description)}</td>
+      <td>${esc(a.location_code || "-")}</td><td>${statusPill(a.status)}</td><td>${a.calibration_required ? esc(a.calibration_due_on || "never") : "n/a"}</td>
+      <td>${a.fitness.fit_for_use ? `<span class="pill ok">Yes</span>` : `<span class="pill bad" title="${esc(a.fitness.reasons.join("; "))}">No</span>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No assets</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  const reload = () => { state.assetFilter = { ...filter, q: $("#q").value, status: $("#st").value }; openTab("assets"); };
+  $("#q").onkeydown = (e) => { if (e.key === "Enter") reload(); };
+  $("#st").onchange = reload;
+  const nb = $("#newAsset"); if (nb) nb.onclick = newAssetForm;
+};
+
+async function newAssetForm() {
+  const locs = await api("GET", "/api/locations");
+  modal(`<h2>Register asset</h2>
+    ${field("asset_tag", "Asset tag (scan or type)", "required")}${field("description", "Description", "required")}
+    <div class="grid">${select("category", "Category", ["equipment", "instrument", "utility", "computerized_system", "facility", "reference_standard"])}
+    ${select("gmp_impact", "GMP impact", ["direct", "indirect", "none"])}
+    ${field("manufacturer", "Manufacturer")}${field("model", "Model")}${field("serial_number", "Serial number")}${field("gtin", "GTIN (optional)")}
+    ${field("department", "Department")}${select("location_code", "Location", ["", ...locs.map(l => l.code)])}</div>
+    <label class="check"><input type="checkbox" name="is_reference_standard"> Reference / calibration standard</label>
+    <label class="check"><input type="checkbox" name="calibration_required"> Calibration required</label>
+    ${field("calibration_interval_days", "Calibration interval (days)", 'type="number" min="1"')}
+    <label class="check"><input type="checkbox" name="pm_required"> Preventive maintenance required</label>
+    ${field("pm_interval_days", "PM interval (days)", 'type="number" min="1"')}`, async (d) => {
+    const body = { ...d, calibration_interval_days: d.calibration_interval_days ? +d.calibration_interval_days : null,
+      pm_interval_days: d.pm_interval_days ? +d.pm_interval_days : null, location_code: d.location_code || null, gtin: d.gtin || null };
+    const a = await api("POST", "/api/assets", body);
+    toast(`Asset ${a.asset_tag} registered (commissioning)`); openAsset(a.asset_tag);
+  });
+}
+
+async function openAsset(tag) {
+  stopCamera();
+  state.tab = "assets"; renderTabs();
+  const a = await api("GET", "/api/assets/" + encodeURIComponent(tag));
+  const label = await api("GET", `/api/assets/${encodeURIComponent(tag)}/label.svg`, undefined, true).then(r => r.blob()).then(b => URL.createObjectURL(b));
+  const c = $("#content");
+  const f = a.fitness;
+  const actions = [];
+  if (a.status !== "retired") {
+    if (can("asset.edit")) actions.push(["edit", "Edit details"]);
+    if (can("calibration.record") && a.calibration_required) actions.push(["cal", "Record calibration"]);
+    if (can("maintenance.record")) actions.push(["pm", "Record maintenance"]);
+    if (can("asset.status.remove") || can("asset.status.release")) actions.push(["status", "Change status"]);
+    if (can("asset.qualify") && a.gmp_impact !== "none") actions.push(["qual", "Set qualification"]);
+    if (can("asset.status.remove")) actions.push(["issue", "Report problem"]);
+  }
+  c.innerHTML = `<div class="panel">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.asset_tag)} - ${esc(a.description)}</h2>
+      <a class="link" id="back">Back to list</a></div>
+    <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
+    ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    ${assetSummary(a)}
+    <p class="muted" style="font-size:12px">Version ${a.version} - created ${esc(a.created_at)} by ${esc(a.created_by)} - last change ${esc(a.updated_at)} by ${esc(a.updated_by)}</p>
+    <div class="row">${actions.map(([k, t]) => `<button class="btn ${k === "issue" ? "danger" : "secondary"}" data-act="${k}">${t}</button>`).join("")}
+      <a class="link" id="printLabel">Print label</a> <a class="link" id="auditLink">Audit trail</a></div>
+    <p><img class="label-img" src="${label}" alt="Asset barcode label"></p></div>
+  <div class="panel"><h2>Calibration history</h2><div class="tbl"><table><tr><th>#</th><th>Performed</th><th>By</th><th>As found</th><th>As left</th><th>Standards / cert</th><th>Status</th><th>Signatures</th></tr>
+    ${a.calibrations.map(r => `<tr><td>${r.id}</td><td>${esc(r.performed_on)}</td><td>${esc(r.performed_by)}</td><td>${pf(r.as_found)}</td><td>${pf(r.as_left)}</td>
+      <td>${esc(r.standards_used.join(", ") || r.certificate_ref || "")}</td><td>${esc(r.status.replace(/_/g, " "))}</td><td>${sigList(r.signatures)}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Maintenance history</h2><div class="tbl"><table><tr><th>Performed</th><th>Type</th><th>Description</th><th>Signatures</th></tr>
+    ${a.maintenance.map(m => `<tr><td>${esc(m.performed_on)}</td><td>${esc(m.maintenance_type)}</td><td>${esc(m.description)}${m.requalification_required ? ` <span class="pill warn">requalification</span>` : ""}</td><td>${sigList(m.signatures)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Deviations</h2><div class="tbl"><table><tr><th>Number</th><th>Status</th><th>Description</th><th>Opened</th></tr>
+    ${a.deviations.map(d => `<tr><td>${esc(d.number)}</td><td>${esc(d.status)}</td><td>${esc(d.description)}</td><td>${esc(d.opened_at)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Status / qualification signatures</h2>${sigList(a.signatures) || `<span class="muted">None</span>`}</div>`;
+  $("#back").onclick = () => openTab("assets");
+  $("#auditLink").onclick = () => { state.auditFilter = { entity_type: "asset", entity_id: a.asset_tag }; openTab("audit"); };
+  $("#printLabel").onclick = () => { const w = window.open(""); w.document.write(`<img src="${label}" onload="print()">`); };
+  for (const b of c.querySelectorAll("[data-act]")) b.onclick = () => ASSET_ACTIONS[b.dataset.act](a);
+}
+
+const pf = (v) => `<span class="pill ${v === "pass" ? "ok" : v === "fail" ? "bad" : ""}">${esc(v.replace(/_/g, " "))}</span>`;
+const sigList = (sigs) => sigs.map(s => `<div style="font-size:12px">${esc(s.full_name)} (${esc(s.username)}) - <b>${esc(s.meaning)}</b> - ${esc(s.signed_at)}</div>`).join("");
+
+function reportIssue(tag) {
+  modal(`<h2>Report problem - ${esc(tag)}</h2><p class="muted">A deviation is opened and an in-service asset is taken out of service.</p>
+    <label>Describe the problem</label><textarea name="description" rows="3" required></textarea>`, async (d) => {
+    const dev = await api("POST", `/api/assets/${encodeURIComponent(tag)}/issues`, d);
+    toast(`Deviation ${dev.number} opened`); openAsset(tag);
+  });
+}
+
+const ASSET_ACTIONS = {
+  edit: (a) => modal(`<h2>Edit ${esc(a.asset_tag)}</h2>
+    ${field("description", "Description", `value="${esc(a.description)}" required`)}
+    <div class="grid">${field("manufacturer", "Manufacturer", `value="${esc(a.manufacturer || "")}"`)}${field("model", "Model", `value="${esc(a.model || "")}"`)}
+    ${field("serial_number", "Serial number", `value="${esc(a.serial_number || "")}"`)}${field("department", "Department", `value="${esc(a.department || "")}"`)}
+    ${field("calibration_interval_days", "Calibration interval (days)", `type="number" value="${a.calibration_interval_days || ""}"`)}
+    ${field("pm_interval_days", "PM interval (days)", `type="number" value="${a.pm_interval_days || ""}"`)}</div>
+    <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
+    const changes = {};
+    for (const k of ["description", "manufacturer", "model", "serial_number", "department"]) if ((d[k] || null) !== (a[k] || null)) changes[k] = d[k] || null;
+    for (const k of ["calibration_interval_days", "pm_interval_days"]) if (d[k] && +d[k] !== a[k]) changes[k] = +d[k];
+    await api("PATCH", "/api/assets/" + encodeURIComponent(a.asset_tag), { changes, reason: d.reason, expected_version: a.version });
+    toast("Saved"); openAsset(a.asset_tag);
+  }),
+  cal: (a) => modal(`<h2>Record calibration - ${esc(a.asset_tag)}</h2>
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <div class="grid">${select("as_found", "As found", ["pass", "fail", "not_applicable"])}${select("as_left", "As left", ["pass", "fail"])}</div>
+    ${field("standards", "Reference standards used (scan tags, comma separated)")}
+    ${field("certificate_ref", "External certificate reference (if calibrated by vendor)")}
+    <label>Notes</label><textarea name="notes" rows="2"></textarea>${sigBlock("performed")}`, async (d) => {
+    const rec = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/calibrations`, {
+      performed_on: d.performed_on, as_found: d.as_found, as_left: d.as_left,
+      standards: d.standards.split(/[,\s]+/).filter(Boolean), certificate_ref: d.certificate_ref || null, notes: d.notes || null,
+      signature: { password: d.sig_password } });
+    toast(rec.deviation_number ? `Out of tolerance: ${rec.deviation_number} opened, asset quarantined` : "Calibration recorded - awaiting QA approval", 6000);
+    openAsset(a.asset_tag);
+  }),
+  pm: (a) => modal(`<h2>Record maintenance - ${esc(a.asset_tag)}</h2>
+    ${select("maintenance_type", "Type", ["preventive", "corrective"])}
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <label>Work performed</label><textarea name="description" rows="3" required></textarea>
+    <label class="check"><input type="checkbox" name="requalification_required"> Change affects qualified state - requalification required</label>
+    ${sigBlock("performed")}`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/maintenance`, { ...d, signature: { password: d.sig_password } });
+    toast("Maintenance recorded"); openAsset(a.asset_tag);
+  }),
+  status: (a) => {
+    const targets = { commissioning: ["in_service", "retired"], in_service: ["out_of_service", "quarantine", "retired"],
+      out_of_service: ["in_service", "quarantine", "retired"], quarantine: ["out_of_service", "in_service", "retired"] }[a.status] || [];
+    const allowed = targets.filter(t => can(["in_service", "retired"].includes(t) ? "asset.status.release" : "asset.status.remove"));
+    if (!allowed.length) return toast("No status changes available for your role");
+    modal(`<h2>Change status - ${esc(a.asset_tag)}</h2><p>Current: ${statusPill(a.status)}</p>
+      ${select("status", "New status", allowed)}<label>Reason (required)</label><input name="reason" required>
+      <div id="sigWrap"></div>`, async (d) => {
+      const needsSig = ["in_service", "retired"].includes(d.status);
+      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: d.status, reason: d.reason, signature: needsSig ? { password: d.sig_password } : null });
+      toast("Status changed"); openAsset(a.asset_tag);
+    });
+    const sel = $(".modal select[name=status]"), wrap = $("#sigWrap");
+    const upd = () => wrap.innerHTML = sel.value === "in_service" ? sigBlock("released") : sel.value === "retired" ? sigBlock("approved") : "";
+    sel.onchange = upd; upd();
+  },
+  qual: (a) => modal(`<h2>Qualification - ${esc(a.asset_tag)}</h2>
+    ${select("qualification_status", "Qualification status", ["pending", "iq_complete", "oq_complete", "qualified", "requalification_required"], a.qualification_status)}
+    <label>Reason / protocol references (required)</label><input name="reason" required>${sigBlock("approved")}`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/qualification`, { qualification_status: d.qualification_status, reason: d.reason, signature: { password: d.sig_password } });
+    toast("Qualification updated"); openAsset(a.asset_tag);
+  }),
+  issue: (a) => reportIssue(a.asset_tag),
+};
+
+// ---- QA approvals ----------------------------------------------------------
+VIEWS.approvals = async (c) => {
+  const recs = await api("GET", "/api/calibrations?status=pending_approval");
+  c.innerHTML = `<div class="panel"><h2>Calibrations awaiting QA approval</h2><div class="tbl"><table>
+    <tr><th>#</th><th>Asset</th><th>Performed</th><th>By</th><th>As found</th><th>As left</th><th>Standards / cert</th><th>Deviation</th><th></th></tr>
+    ${recs.map(r => `<tr><td>${r.id}</td><td><a class="link" data-tag="${esc(r.asset_tag)}">${esc(r.asset_tag)}</a></td><td>${esc(r.performed_on)}</td><td>${esc(r.performed_by)}</td>
+      <td>${pf(r.as_found)}</td><td>${pf(r.as_left)}</td><td>${esc(r.standards_used.join(", ") || r.certificate_ref || "")}</td><td>${esc(r.deviation_number || "")}</td>
+      <td><button class="btn" data-review="${r.id}">Review</button></td></tr>`).join("") || `<tr><td colspan="9" class="muted">Nothing pending</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  for (const b of c.querySelectorAll("[data-review]")) b.onclick = () => {
+    const r = recs.find(x => x.id === +b.dataset.review);
+    modal(`<h2>Review calibration #${r.id} - ${esc(r.asset_tag)}</h2>
+      <p>Performed ${esc(r.performed_on)} by ${esc(r.performed_by)}. As found ${pf(r.as_found)}, as left ${pf(r.as_left)}.</p>
+      ${r.notes ? `<p class="muted">${esc(r.notes)}</p>` : ""}
+      ${select("decision", "Decision", ["approve", "reject"])}<label>Comment (required to reject)</label><input name="comment">
+      <div id="sigWrap">${sigBlock("approved")}</div>`, async (d) => {
+      await api("POST", `/api/calibrations/${r.id}/review`, { decision: d.decision, comment: d.comment || null, signature: { password: d.sig_password } });
+      toast(`Calibration #${r.id} ${d.decision}d`); openTab("approvals");
+    });
+    const sel = $(".modal select[name=decision]");
+    sel.onchange = () => $("#sigWrap").innerHTML = sigBlock(sel.value === "approve" ? "approved" : "rejected");
+  };
+};
+
+// ---- Deviations ------------------------------------------------------------
+VIEWS.deviations = async (c) => {
+  const devs = await api("GET", "/api/deviations");
+  c.innerHTML = `<div class="panel"><h2>Deviations</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Asset</th><th>Source</th><th>Description</th><th>Status</th><th>Opened</th><th>Closure</th><th></th></tr>
+    ${devs.map(d => `<tr><td>${esc(d.number)}</td><td><a class="link" data-tag="${esc(d.asset_tag)}">${esc(d.asset_tag)}</a></td><td>${esc(d.source)}</td>
+      <td>${esc(d.description)}</td><td><span class="pill ${d.status === "open" ? "bad" : "ok"}">${d.status}</span></td><td>${esc(d.opened_at)}<br><span class="muted">${esc(d.opened_by)}</span></td>
+      <td>${d.closure_comment ? esc(d.closure_comment) + sigList(d.signatures) : ""}</td>
+      <td>${d.status === "open" && can("deviation.close") ? `<button class="btn" data-close="${esc(d.number)}">Close</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No deviations</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  for (const b of c.querySelectorAll("[data-close]")) b.onclick = () => modal(`<h2>Close ${esc(b.dataset.close)}</h2>
+    <label>Investigation summary, impact assessment and CAPA (required)</label><textarea name="comment" rows="4" required></textarea>${sigBlock("approved")}`, async (d) => {
+    await api("POST", `/api/deviations/${encodeURIComponent(b.dataset.close)}/close`, { comment: d.comment, signature: { password: d.sig_password } });
+    toast("Deviation closed"); openTab("deviations");
+  });
+};
+
+// ---- Due list ----------------------------------------------------------------
+VIEWS.due = async (c) => {
+  const r = await api("GET", "/api/reports/due?days=" + (state.dueDays || 30));
+  const tbl = (rows) => `<div class="tbl"><table><tr><th>Asset</th><th>Description</th><th>Location</th><th>Status</th><th>Due</th></tr>
+    ${rows.map(x => `<tr><td><a class="link" data-tag="${esc(x.asset_tag)}">${esc(x.asset_tag)}</a></td><td>${esc(x.description)}</td><td>${esc(x.location || "-")}</td>
+      <td>${statusPill(x.status)}</td><td><span class="pill ${x.overdue ? "bad" : "warn"}">${esc(x.due_on || "never calibrated")}${x.overdue ? " overdue" : ""}</span></td></tr>`).join("") || `<tr><td colspan="5" class="muted">Nothing due</td></tr>`}</table></div>`;
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Due within</h2>
+    <select id="days" style="width:auto">${[7, 30, 60, 90].map(d => `<option value="${d}" ${d === r.horizon_days ? "selected" : ""}>${d} days</option>`).join("")}</select></div></div>
+    <div class="panel"><h2>Calibration</h2>${tbl(r.calibration)}</div><div class="panel"><h2>Preventive maintenance</h2>${tbl(r.maintenance)}</div>`;
+  $("#days").onchange = (e) => { state.dueDays = +e.target.value; openTab("due"); };
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+};
+
+// ---- Audit trail ---------------------------------------------------------------
+VIEWS.audit = async (c) => {
+  const f = state.auditFilter || {}; state.auditFilter = null;
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const rows = await api("GET", "/api/audit?" + qs);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Audit trail ${f.entity_id ? "- " + esc(f.entity_id) : ""}</h2>
+    <div class="row"><button class="btn secondary" id="verify">Verify integrity</button><button class="btn secondary" id="export">Export CSV</button></div></div>
+    <div id="verifyResult"></div>
+    <div class="row" style="margin:10px 0">
+      <select id="fType" style="width:auto">${["", "asset", "calibration", "maintenance", "deviation", "user", "location", "audit_trail"].map(t => `<option ${t === f.entity_type ? "selected" : ""} value="${t}">${t || "All record types"}</option>`).join("")}</select>
+      <input id="fId" placeholder="Record ID / tag" value="${esc(f.entity_id || "")}" style="max-width:180px"><input id="fUser" placeholder="User" value="${esc(f.username || "")}" style="max-width:160px">
+      <button class="btn" id="apply">Filter</button></div>
+    <div class="tbl"><table><tr><th>#</th><th>Timestamp (UTC)</th><th>User</th><th>Action</th><th>Record</th><th>Old value</th><th>New value</th><th>Reason</th></tr>
+    ${rows.map(r => `<tr><td>${r.seq}</td><td>${esc(r.timestamp)}</td><td>${esc(r.username)}</td><td>${esc(r.action)}</td><td>${esc(r.entity_type)} ${esc(r.entity_id || "")}</td>
+      <td class="mono">${esc(r.old_value || "")}</td><td class="mono">${esc((r.new_value || "").slice(0, 400))}</td><td>${esc(r.reason || "")}</td></tr>`).join("")}</table></div></div>`;
+  const cur = () => ({ entity_type: $("#fType").value, entity_id: $("#fId").value.trim(), username: $("#fUser").value.trim() });
+  $("#apply").onclick = () => { state.auditFilter = cur(); openTab("audit"); };
+  $("#verify").onclick = async () => {
+    const v = await api("GET", "/api/audit/verify");
+    $("#verifyResult").innerHTML = `<div class="verdict ${v.valid ? "ok" : "bad"}" style="font-size:16px">${v.valid
+      ? `Audit trail intact - ${v.entries_checked} entries verified`
+      : `INTEGRITY FAILURE at entry #${v.broken_at_seq}: ${esc(v.problem)}`}</div>`;
+  };
+  $("#export").onclick = async () => {
+    const qs2 = new URLSearchParams(Object.entries(cur()).filter(([, v]) => v)).toString();
+    const blob = await (await api("GET", "/api/audit/export.csv?" + qs2, undefined, true)).blob();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "audit_trail.csv"; a.click();
+  };
+};
+
+// ---- Administration ----------------------------------------------------------
+VIEWS.admin = async (c) => {
+  const [users, locs] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations")]);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Users</h2><button class="btn" id="newUser">Add user</button></div>
+    <div class="tbl"><table><tr><th>User ID</th><th>Name</th><th>Role</th><th>State</th><th></th></tr>
+    ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.role)}</td>
+      <td>${u.active ? (u.locked ? `<span class="pill bad">locked</span>` : `<span class="pill ok">active</span>`) : `<span class="pill">inactive</span>`}</td>
+      <td><button class="btn secondary" data-user="${u.id}">Manage</button></td></tr>`).join("")}</table></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Locations</h2><button class="btn" id="newLoc">Add location</button></div>
+    <div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Area class</th><th></th></tr>
+    ${locs.map(l => `<tr><td class="mono">${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.area_class || "")}</td><td><a class="link" data-loc="${esc(l.code)}">Label</a></td></tr>`).join("")}</table></div></div>`;
+  const roles = ["viewer", "operator", "technician", "qa", "admin"];
+  $("#newUser").onclick = () => modal(`<h2>Add user</h2>${field("username", "User ID (never re-used)", "required")}${field("full_name", "Full name (shown on e-signatures)", "required")}
+    ${select("role", "Role", roles)}${field("temporary_password", "Temporary password (must be changed at first login)", 'type="password" required')}`, async (d) => {
+    await api("POST", "/api/users", d); toast("User created"); openTab("admin");
+  });
+  for (const b of c.querySelectorAll("[data-user]")) b.onclick = () => {
+    const u = users.find(x => x.id === +b.dataset.user);
+    modal(`<h2>Manage ${esc(u.username)}</h2>${select("role", "Role", roles, u.role)}
+      <label class="check"><input type="checkbox" name="active" ${u.active ? "checked" : ""}> Active</label>
+      <label class="check"><input type="checkbox" name="unlock"> Unlock account / reset failed attempts</label>
+      ${field("temporary_password", "Reset to temporary password (optional)", 'type="password"')}
+      <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+      await api("PATCH", `/api/users/${u.id}`, { role: d.role !== u.role ? d.role : null, active: d.active !== !!u.active ? d.active : null,
+        unlock: d.unlock, temporary_password: d.temporary_password || null, reason: d.reason });
+      toast("User updated"); openTab("admin");
+    });
+  };
+  $("#newLoc").onclick = () => modal(`<h2>Add location</h2>${field("code", "Location code (printed as barcode)", "required")}${field("name", "Name", "required")}
+    ${select("area_class", "Area classification", ["", "Grade A", "Grade B", "Grade C", "Grade D", "CNC", "Warehouse", "Laboratory"])}`, async (d) => {
+    await api("POST", "/api/locations", { ...d, area_class: d.area_class || null }); toast("Location created"); openTab("admin");
+  });
+  for (const a of c.querySelectorAll("[data-loc]")) a.onclick = async () => {
+    const blob = await (await api("GET", `/api/locations/${encodeURIComponent(a.dataset.loc)}/label.svg`, undefined, true)).blob();
+    const w = window.open(""); w.document.write(`<img src="${URL.createObjectURL(blob)}" onload="print()">`);
+  };
+};
+
+// ---- Boot ----------------------------------------------------------------------
+$("#loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api("POST", "/api/auth/login", d);
+    state.token = r.token; sessionStorage.setItem("gmp_token", r.token);
+    e.target.reset(); await boot();
+  } catch (err) { toast(err.message); }
+};
+$("#pwForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  if (d.new_password !== d.confirm) return toast("Passwords do not match");
+  try { await api("POST", "/api/auth/change-password", { old_password: d.old_password, new_password: d.new_password }); e.target.reset(); toast("Password changed"); await boot(); }
+  catch (err) { toast(err.message, 6000); }
+};
+$("#logoutBtn").onclick = async () => { try { await api("POST", "/api/auth/logout"); } catch (_) {} logoutLocal("Signed out"); };
+
+async function boot() {
+  if (!state.token) return show("login");
+  try { state.me = await api("GET", "/api/me"); } catch (_) { return logoutLocal(); }
+  if (state.me.must_change_password) return show("pw");
+  $("#who").textContent = `${state.me.full_name} (${state.me.username}) - ${state.me.role}`;
+  show("app"); openTab(state.tab);
+}
+boot();
+</script>
+</body>
+</html>
