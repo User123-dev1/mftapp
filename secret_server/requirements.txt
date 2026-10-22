@@ -1,0 +1,15 @@
+# Secret Server dependencies
+fastapi>=0.110
+uvicorn[standard]>=0.24
+pydantic>=2.5
+python-multipart>=0.0.9   # SAML HTTP-POST binding (form parsing)
+cryptography>=42.0        # AES-256-GCM envelope encryption, HKDF
+PyJWT>=2.8                # session tokens, OIDC id_token validation
+httpx>=0.27               # OIDC discovery / token / JWKS calls
+pyotp>=2.9                # TOTP multi-factor authentication
+signxml>=4.0              # SAML XML signature verification
+lxml>=5.0
+ldap3>=2.9                # optional: Active Directory password changer
+
+# Tests
+pytest>=8.0
