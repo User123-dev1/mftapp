@@ -169,3 +169,29 @@ def test_admin_can_register_and_plan_but_not_release(api):
     r = api.call("admin", "post", f"/api/assets/{tag}/status",
                  json={"status": "in_service", "reason": "Try", "signature": api.sig("admin")})
     assert r.status_code == 403
+
+
+def test_standard_departments_and_sites(api):
+    r = api.ok("admin", "post", "/api/departments/load-standard")
+    assert r["added"] >= 15 and r["skipped"] == 0
+    assert api.ok("admin", "post", "/api/departments/load-standard")["added"] == 0  # idempotent
+    names = [d["name"] for d in api.ok("tech1", "get", "/api/departments")]
+    assert {"Quality Assurance", "Quality Control", "Manufacturing / Production", "Human Resources"} <= set(names)
+    assert api.call("tech1", "post", "/api/departments/load-standard").status_code == 403
+
+    api.ok("admin", "post", "/api/locations", status=201, json={"code": "US-MD", "name": "Our Maryland plant"})
+    r = api.ok("admin", "post", "/api/locations/load-standard")
+    assert r["skipped"] == 1  # existing US-MD kept
+    locs = {l["code"]: l["name"] for l in api.ok("tech1", "get", "/api/locations")}
+    assert locs["US-MD"] == "Our Maryland plant" and locs["CN-SH"] == "China - Shanghai" and "EU-IE" in locs
+
+    asset = api.ok("tech1", "post", "/api/assets", status=201,
+                   json=PUMP | {"location_code": "CN-SH", "department": "qc"})
+    assert asset["department"] == "Quality Control"  # code accepted, stored as name
+    r = api.call("tech1", "post", "/api/assets", json=PUMP | {"location_code": "CN-SH", "department": "Marketing"})
+    assert r.status_code == 422
+    updated = api.ok("tech1", "patch", f"/api/assets/{asset['asset_tag']}",
+                     json={"changes": {"department": "Facilities & Engineering"}, "reason": "Ownership transfer"})
+    assert updated["department"] == "Facilities & Engineering"
+    api.ok("admin", "post", "/api/departments", status=201, json={"code": "LOG", "name": "Cold Chain Logistics"})
+    assert api.call("admin", "post", "/api/departments", json={"code": "QA", "name": "Dup"}).status_code == 409

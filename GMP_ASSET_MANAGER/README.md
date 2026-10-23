@@ -20,7 +20,13 @@ be changed at first login. Then:
 
 1. **Company setup** (admin, first login): enter the company name, site, address and the
    **asset ID prefix**, e.g. `ACME`. No assets can be registered until this is done.
-2. As **admin**, add users (qa, technician, operator, viewer) and locations under **Administration**.
+2. As **admin**, go to **Administration** and add users (qa, technician, operator, viewer).
+   - Click **Load standard pharma departments** to add QA, QC, Manufacturing, Facilities & Engineering,
+     Validation, Microbiology, Warehouse, HR, … (19 in total).
+   - Click **Load standard sites** to add USA - Maryland, China - Shanghai, Europe - Ireland/Germany/Switzerland, … (19 in total).
+   - Both lists can be extended with **Add department** / **Add location**.
+   - Loading again never duplicates or overwrites entries.
+   - The same **Load standard list** links appear in the add-asset form while a list is empty.
 3. As **technician**, click **+ Add new asset**:
    - The system generates the next asset ID (`ACME-000001`, `ACME-000002`, ...).
    - Choose **Active** or **Inactive**.

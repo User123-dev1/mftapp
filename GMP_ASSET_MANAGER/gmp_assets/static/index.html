@@ -201,10 +201,33 @@ function sigBlock(meaning) {
     <label>Password</label><input name="sig_password" type="password" autocomplete="current-password" required></div>`;
 }
 
-const field = (name, labelText, attrs = "") => `<label>${labelText}</label><input name="${name}" ${attrs}>`;
-const select = (name, labelText, options, selected) => `<label>${labelText}</label><select name="${name}">${
-  options.map(o => `<option value="${esc(o)}" ${o === selected ? "selected" : ""}>${esc(o.replace(/_/g, " "))}</option>`).join("")}</select>`;
+const field = (name, labelText, attrs = "") => `<div><label>${labelText}</label><input name="${name}" ${attrs}></div>`;
+const select = (name, labelText, options, selected) => `<div><label>${labelText}</label><select name="${name}">${
+  options.map(o => `<option value="${esc(o)}" ${o === selected ? "selected" : ""}>${esc(o.replace(/_/g, " "))}</option>`).join("")}</select></div>`;
 const today = () => new Date().toISOString().slice(0, 10);
+const optionsHtml = (pairs, selected) => pairs.map(([v, t]) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(t)}</option>`).join("");
+const selectPairs = (name, labelText, pairs, selected) => `<div><label>${labelText}</label><select name="${name}">${optionsHtml(pairs, selected)}</select></div>`;
+const deptPairs = (ds, current) => [["", "- none -"], ...ds.filter(d => d.active).map(d => [d.name, d.name]),
+  ...(current && !ds.some(d => d.name === current) ? [[current, current + " (not in list)"]] : [])];
+const locPairs = (ls) => [["", "- none -"], ...ls.filter(l => l.active).map(l => [l.code, `${l.code} - ${l.name}`])];
+
+// "Load standard list" for departments / locations, offered wherever the list is empty
+const LOADERS = {
+  department: { url: "/api/departments", load: "/api/departments/load-standard", pairs: deptPairs },
+  location_code: { url: "/api/locations", load: "/api/locations/load-standard", pairs: locPairs },
+};
+const loadLink = (field, list) => !list.length && can("location.manage")
+  ? `<a class="link" style="font-size:13px" data-load="${field}">Load standard list</a>` : "";
+function wireLoadLinks(root) {
+  for (const a of root.querySelectorAll("[data-load]")) a.onclick = async () => {
+    const L = LOADERS[a.dataset.load];
+    try {
+      const r = await api("POST", L.load);
+      $(`select[name=${a.dataset.load}]`, root).innerHTML = optionsHtml(L.pairs(await api("GET", L.url)), "");
+      toast(`${r.added} added to the list`); a.remove();
+    } catch (err) { toast(err.message); }
+  };
+}
 
 // ---- Tabs ----------------------------------------------------------------
 const TABS = [
@@ -399,6 +422,7 @@ function assetSummary(a) {
     <div><label>Status</label>${statusPill(a.status)}</div>
     <div><label>Qualification</label>${esc(a.qualification_status.replace(/_/g, " "))}</div>
     <div><label>GMP impact</label>${esc(a.gmp_impact)}</div>
+    <div><label>Department</label>${esc(a.department || "-")}</div>
     <div><label>Location</label>${esc(a.location_code || "-")} ${a.location_name ? `<span class="muted">${esc(a.location_name)}</span>` : ""}</div>
     <div><label>Calibration due</label>${a.calibration_required ? esc(a.calibration_due_on || "not calibrated") : "n/a"}</div>
     <div><label>Next PM due</label>${a.pm_required ? esc(a.pm_due_on || "-") : "no PM plan"}</div>
@@ -432,14 +456,15 @@ VIEWS.assets = async (c) => {
 };
 
 async function newAssetForm(prefill = {}) {
-  const locs = await api("GET", "/api/locations");
+  const [locs, depts] = await Promise.all([api("GET", "/api/locations"), api("GET", "/api/departments")]);
   modal(`<h2>Add new asset</h2>
     <p class="muted" style="margin-top:0">The asset ID is generated automatically (${esc(state.company.asset_prefix)}-000001, ...).</p>
     ${field("description", "Description", 'required placeholder="e.g. Analytical balance"')}
     <div class="grid">${select("category", "Category", ["equipment", "instrument", "utility", "computerized_system", "facility", "reference_standard"])}
     ${select("gmp_impact", "GMP impact", ["direct", "indirect", "none"])}
     ${field("manufacturer", "Manufacturer")}${field("model", "Model")}${field("serial_number", "Serial number")}
-    ${field("department", "Department")}${select("location_code", "Location", ["", ...locs.map(l => l.code)])}</div>
+    <div>${selectPairs("department", "Department", deptPairs(depts))}${loadLink("department", depts)}</div>
+    <div>${selectPairs("location_code", "Location / site", locPairs(locs))}${loadLink("location_code", locs)}</div></div>
     <label>Initial status</label>
     <div class="row"><label class="check"><input type="radio" name="initial_state" value="inactive" checked> Inactive (default)</label>
       <label class="check"><input type="radio" name="initial_state" value="active"> Active - ready for use</label></div>
@@ -457,6 +482,7 @@ async function newAssetForm(prefill = {}) {
     const a = await api("POST", "/api/assets", body);
     assetCreatedDialog(a);
   });
+  wireLoadLinks($(".modal"));
   for (const [k, v] of Object.entries(prefill)) { const el = $(`.modal [name=${k}]`); if (el && v) el.value = v; }
   if (prefill.asset_tag || prefill.gtin) $(".modal details").open = true;
 }
@@ -681,10 +707,12 @@ const ASSET_ACTIONS = {
       toast(`${wo.number} created`); openAsset(a.asset_tag);
     });
   },
-  edit: (a) => modal(`<h2>Edit ${esc(a.asset_tag)}</h2>
+  edit: async (a) => {
+    const depts = await api("GET", "/api/departments");
+    modal(`<h2>Edit ${esc(a.asset_tag)}</h2>
     ${field("description", "Description", `value="${esc(a.description)}" required`)}
     <div class="grid">${field("manufacturer", "Manufacturer", `value="${esc(a.manufacturer || "")}"`)}${field("model", "Model", `value="${esc(a.model || "")}"`)}
-    ${field("serial_number", "Serial number", `value="${esc(a.serial_number || "")}"`)}${field("department", "Department", `value="${esc(a.department || "")}"`)}
+    ${field("serial_number", "Serial number", `value="${esc(a.serial_number || "")}"`)}<div>${selectPairs("department", "Department", deptPairs(depts, a.department), a.department || "")}${loadLink("department", depts)}</div>
     ${a.calibration_required ? field("calibration_interval_days", "Calibration interval (days)", `type="number" value="${a.calibration_interval_days || ""}"`) : ""}</div>
     <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
     const changes = {};
@@ -692,7 +720,9 @@ const ASSET_ACTIONS = {
     if (d.calibration_interval_days && +d.calibration_interval_days !== a.calibration_interval_days) changes.calibration_interval_days = +d.calibration_interval_days;
     await api("PATCH", "/api/assets/" + encodeURIComponent(a.asset_tag), { changes, reason: d.reason, expected_version: a.version });
     toast("Saved"); openAsset(a.asset_tag);
-  }),
+    });
+    wireLoadLinks($(".modal"));
+  },
   cal: (a) => modal(`<h2>Record calibration - ${esc(a.asset_tag)}</h2>
     ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
     <div class="grid">${select("as_found", "As found", ["pass", "fail", "not_applicable"])}${select("as_left", "As left", ["pass", "fail"])}</div>
@@ -828,7 +858,8 @@ VIEWS.audit = async (c) => {
 
 // ---- Administration ----------------------------------------------------------
 VIEWS.admin = async (c) => {
-  const [users, locs, co] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"), api("GET", "/api/company")]);
+  const [users, locs, co, depts] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"),
+    api("GET", "/api/company"), api("GET", "/api/departments")]);
   c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Company</h2>
       <button class="btn secondary" id="editCompany">Edit</button></div>
     <div class="grid"><div><label>Company</label>${esc(co.name)}</div><div><label>Site</label>${esc(co.site_name)}</div>
@@ -839,9 +870,20 @@ VIEWS.admin = async (c) => {
     ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.role)}</td>
       <td>${u.active ? (u.locked ? `<span class="pill bad">locked</span>` : `<span class="pill ok">active</span>`) : `<span class="pill">inactive</span>`}</td>
       <td><button class="btn secondary" data-user="${u.id}">Manage</button></td></tr>`).join("")}</table></div></div>
-  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Locations</h2><button class="btn" id="newLoc">Add location</button></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Departments</h2>
+      <div class="row"><button class="btn secondary" id="loadDepts">Load standard pharma departments</button><button class="btn" id="newDept">Add department</button></div></div>
+    <div class="tbl"><table><tr><th>Code</th><th>Name</th></tr>
+    ${depts.map(d => `<tr><td class="mono">${esc(d.code)}</td><td>${esc(d.name)}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No departments yet - click "Load standard pharma departments" or add your own.</td></tr>`}</table></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Locations / sites</h2>
+      <div class="row"><button class="btn secondary" id="loadLocs">Load standard sites</button><button class="btn" id="newLoc">Add location</button></div></div>
     <div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Area class</th><th></th></tr>
-    ${locs.map(l => `<tr><td class="mono">${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.area_class || "")}</td><td><a class="link" data-loc="${esc(l.code)}">Label</a></td></tr>`).join("")}</table></div></div>`;
+    ${locs.map(l => `<tr><td class="mono">${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.area_class || "")}</td><td><a class="link" data-loc="${esc(l.code)}">Label</a></td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted">No locations yet - click "Load standard sites" (USA - Maryland, China - Shanghai, Europe - ...) or add your own rooms/areas.</td></tr>`}</table></div></div>`;
+  for (const [id, url, what] of [["#loadDepts", "/api/departments/load-standard", "departments"], ["#loadLocs", "/api/locations/load-standard", "sites"]])
+    $(id).onclick = async () => { const r = await api("POST", url); toast(`${r.added} ${what} added, ${r.skipped} already present`); openTab("admin"); };
+  $("#newDept").onclick = () => modal(`<h2>Add department</h2>${field("code", "Code (e.g. QA)", 'required maxlength="20"')}${field("name", "Name", "required")}`, async (d) => {
+    await api("POST", "/api/departments", d); toast("Department added"); openTab("admin");
+  });
   const roles = ["viewer", "operator", "technician", "qa", "admin"];
   $("#editCompany").onclick = () => modal(`<h2>Edit company</h2>${field("name", "Company name", `value="${esc(co.name)}" required`)}
     ${field("site_name", "Site name", `value="${esc(co.site_name)}" required`)}<label>Address</label><textarea name="address" rows="2">${esc(co.address || "")}</textarea>
@@ -866,7 +908,7 @@ VIEWS.admin = async (c) => {
     });
   };
   $("#newLoc").onclick = () => modal(`<h2>Add location</h2>${field("code", "Location code (printed as barcode)", "required")}${field("name", "Name", "required")}
-    ${select("area_class", "Area classification", ["", "Grade A", "Grade B", "Grade C", "Grade D", "CNC", "Warehouse", "Laboratory"])}`, async (d) => {
+    ${select("area_class", "Area classification", ["", "Site", "Grade A", "Grade B", "Grade C", "Grade D", "CNC", "Warehouse", "Laboratory", "Office"])}`, async (d) => {
     await api("POST", "/api/locations", { ...d, area_class: d.area_class || null }); toast("Location created"); openTab("admin");
   });
   for (const a of c.querySelectorAll("[data-loc]")) a.onclick = async () => {

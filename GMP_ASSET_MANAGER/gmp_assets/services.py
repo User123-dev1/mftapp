@@ -94,6 +94,26 @@ EDITABLE_ASSET_FIELDS = (
 PREFIX_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
 WORK_TYPES = ("preventive", "inspection", "cleaning", "corrective")
 INTERVAL_UNITS = ("days", "weeks", "months")
+# Starter lists an administrator can load with one click (existing entries are kept)
+STANDARD_DEPARTMENTS = (
+    ("QA", "Quality Assurance"), ("QC", "Quality Control"), ("MICRO", "Microbiology"),
+    ("MFG", "Manufacturing / Production"), ("PKG", "Packaging"), ("FAC", "Facilities & Engineering"),
+    ("MAINT", "Maintenance"), ("METRO", "Metrology / Calibration"), ("VAL", "Validation"),
+    ("WH", "Warehouse & Logistics"), ("SC", "Supply Chain & Procurement"), ("RA", "Regulatory Affairs"),
+    ("RND", "Research & Development"), ("PD", "Process Development"), ("AD", "Analytical Development"),
+    ("EHS", "Environment, Health & Safety"), ("IT", "IT / Computer Systems"), ("HR", "Human Resources"),
+    ("FIN", "Finance"),
+)
+STANDARD_SITES = (
+    ("US-MD", "USA - Maryland"), ("US-NJ", "USA - New Jersey"), ("US-MA", "USA - Massachusetts"),
+    ("US-NC", "USA - North Carolina (RTP)"), ("PR-PR", "Puerto Rico"),
+    ("CN-SH", "China - Shanghai"), ("CN-SZ", "China - Suzhou"),
+    ("EU-IE", "Europe - Ireland"), ("EU-DE", "Europe - Germany"), ("EU-CH", "Europe - Switzerland"),
+    ("EU-BE", "Europe - Belgium"), ("EU-FR", "Europe - France"), ("EU-IT", "Europe - Italy"),
+    ("EU-UK", "Europe - United Kingdom"), ("IN-HYD", "India - Hyderabad"), ("SG-SG", "Singapore"),
+    ("JP-TYO", "Japan - Tokyo"), ("GH-ACC", "Ghana - Accra"), ("ZA-JNB", "South Africa - Johannesburg"),
+)
+
 # Events that can trigger a work order automatically
 PM_EVENTS = {
     "asset_activated": "Asset activated / released to service",
@@ -448,6 +468,74 @@ class GMPAssetService:
                          entity_id=loc["id"], new=loc)
             return loc
 
+    def load_standard_locations(self, user: dict) -> dict:
+        """Add the standard site list (USA - Maryland, China - Shanghai, Europe - ...); existing codes are skipped."""
+        self.require(user, "location.manage")
+        added = []
+        with self.db.transaction() as conn:
+            for code, name in STANDARD_SITES:
+                if conn.execute("SELECT 1 FROM locations WHERE code = ? UNION SELECT 1 FROM assets WHERE asset_tag = ?",
+                                (code, code)).fetchone():
+                    continue
+                conn.execute("INSERT INTO locations (code, name, area_class, created_at) VALUES (?, ?, 'Site', ?)",
+                             (code, name, clock.now_iso()))
+                added.append(code)
+            if added:
+                audit.record(conn, username=user["username"], action="LOCATIONS_LOADED", entity_type="location",
+                             new={"added": added}, reason="Loaded standard site list")
+        return {"added": len(added), "skipped": len(STANDARD_SITES) - len(added)}
+
+    # ------------------------------------------------------------------
+    # Departments
+    # ------------------------------------------------------------------
+
+    def list_departments(self, user: dict) -> List[dict]:
+        self.require(user, "asset.view")
+        with self.db.read() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM departments ORDER BY name")]
+
+    def create_department(self, user: dict, code: str, name: str) -> dict:
+        self.require(user, "location.manage")
+        code, name = (code or "").strip().upper(), (name or "").strip()
+        if not re.match(r"^[A-Z0-9][A-Z0-9_-]{0,19}$", code):
+            raise ValidationFailed("Department code must be 1-20 characters: A-Z, 0-9, - _")
+        if len(name) < 2:
+            raise ValidationFailed("Department name is required")
+        with self.db.transaction() as conn:
+            if conn.execute("SELECT 1 FROM departments WHERE code = ? OR name = ?", (code, name)).fetchone():
+                raise Conflict("A department with this code or name already exists")
+            cur = conn.execute("INSERT INTO departments (code, name, created_at) VALUES (?, ?, ?)", (code, name, clock.now_iso()))
+            dept = dict(conn.execute("SELECT * FROM departments WHERE id = ?", (cur.lastrowid,)).fetchone())
+            audit.record(conn, username=user["username"], action="DEPARTMENT_CREATED", entity_type="department",
+                         entity_id=dept["id"], new=dept)
+            return dept
+
+    def load_standard_departments(self, user: dict) -> dict:
+        self.require(user, "location.manage")
+        added = []
+        with self.db.transaction() as conn:
+            for code, name in STANDARD_DEPARTMENTS:
+                if conn.execute("SELECT 1 FROM departments WHERE code = ? OR name = ?", (code, name)).fetchone():
+                    continue
+                conn.execute("INSERT INTO departments (code, name, created_at) VALUES (?, ?, ?)", (code, name, clock.now_iso()))
+                added.append(code)
+            if added:
+                audit.record(conn, username=user["username"], action="DEPARTMENTS_LOADED", entity_type="department",
+                             new={"added": added}, reason="Loaded standard pharmaceutical department list")
+        return {"added": len(added), "skipped": len(STANDARD_DEPARTMENTS) - len(added)}
+
+    @staticmethod
+    def _canonical_department(conn, value: Optional[str]) -> Optional[str]:
+        """Departments must come from the managed list; returns the stored spelling."""
+        value = (value or "").strip()
+        if not value:
+            return None
+        row = conn.execute("SELECT name FROM departments WHERE active = 1 AND (name = ? OR code = ?)",
+                           (value, value.upper())).fetchone()
+        if row is None:
+            raise ValidationFailed(f"Department '{value}' is not in the department list (Administration > Departments)")
+        return row["name"]
+
     # ------------------------------------------------------------------
     # Assets
     # ------------------------------------------------------------------
@@ -558,6 +646,7 @@ class GMPAssetService:
             company = conn.execute("SELECT * FROM company WHERE id = 1").fetchone()
             if company is None:
                 raise Conflict("Company setup must be completed before assets can be registered")
+            data["department"] = self._canonical_department(conn, data.get("department"))
             tag = supplied_tag or self._next_asset_tag(conn, company)
             if conn.execute("SELECT 1 FROM assets WHERE asset_tag = ?", (tag,)).fetchone() or \
                     conn.execute("SELECT 1 FROM locations WHERE code = ?", (tag,)).fetchone():
@@ -629,6 +718,8 @@ class GMPAssetService:
                 merged["gtin"] = self._normalise_gtin(changes["gtin"])
             for flag in ("is_reference_standard", "calibration_required"):
                 merged[flag] = int(bool(merged[flag]))
+            if "department" in changes:
+                merged["department"] = self._canonical_department(conn, changes["department"])
             self._validate_asset_fields(merged)
             if not merged["calibration_required"]:
                 merged["calibration_interval_days"] = None

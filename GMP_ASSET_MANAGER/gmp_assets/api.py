@@ -71,6 +71,11 @@ class CompanyIn(BaseModel):
     reason: Optional[str] = None
 
 
+class DepartmentIn(BaseModel):
+    code: str
+    name: str
+
+
 class AssetIn(BaseModel):
     asset_tag: Optional[str] = Field(default=None, description="Leave empty to generate the next asset ID")
     initial_state: str = Field(default="inactive", description="active | inactive")
@@ -309,6 +314,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/locations", status_code=201)
     def create_location(body: LocationIn, user: dict = Depends(current_user)):
         return service.create_location(user, body.code, body.name, body.area_class)
+
+    @app.post("/api/locations/load-standard")
+    def load_standard_locations(user: dict = Depends(current_user)):
+        return service.load_standard_locations(user)
+
+    @app.get("/api/departments")
+    def departments(user: dict = Depends(current_user)):
+        return service.list_departments(user)
+
+    @app.post("/api/departments", status_code=201)
+    def create_department(body: DepartmentIn, user: dict = Depends(current_user)):
+        return service.create_department(user, body.code, body.name)
+
+    @app.post("/api/departments/load-standard")
+    def load_standard_departments(user: dict = Depends(current_user)):
+        return service.load_standard_departments(user)
 
     @app.get("/api/locations/{code}/label.svg")
     def location_label(code: str, user: dict = Depends(current_user)):
