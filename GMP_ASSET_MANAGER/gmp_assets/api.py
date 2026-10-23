@@ -245,7 +245,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # -- UI ------------------------------------------------------------------
     @app.get("/", include_in_schema=False)
     def index():
-        return FileResponse(STATIC_DIR / "index.html")
+        # never cache the UI, so a server update is picked up on the next page load
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/health")
     def health():
