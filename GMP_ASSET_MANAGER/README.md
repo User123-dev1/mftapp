@@ -31,6 +31,10 @@ be changed at first login. Then:
    asset and **activates** it (e-signature).
 6. Operators scan the asset at the point of use and get **FIT FOR USE** or **DO NOT USE** with reasons.
 
+**Forgot the admin password or locked out?** Stop the server and run this from the same folder:
+`python -m gmp_assets.reset_password admin`. It sets a temporary password, which must be changed at
+next sign-in. The reset is recorded in the audit trail.
+
 ## Active / inactive
 
 **Active** means in service and usable. **Inactive** means new, or taken out of service.
