@@ -157,3 +157,15 @@ def test_manual_work_order_cancel_and_schedule_pause(api):
     entries = api.ok("qa1", "get", "/api/audit?entity_type=pm_schedule")
     assert any(e["action"] == "PM_SCHEDULE_MODIFIED" and e["reason"] == "Pump mothballed" for e in entries)
     assert api.ok("qa1", "get", "/api/audit/verify")["valid"]
+
+
+def test_admin_can_register_and_plan_but_not_release(api):
+    add_locations(api)
+    asset = api.ok("admin", "post", "/api/assets", status=201, json=BIOREACTOR)
+    tag = asset["asset_tag"]
+    api.ok("admin", "post", f"/api/assets/{tag}/pm-schedules", status=201,
+           json={"title": "Quarterly PM", "interval_value": 3, "interval_unit": "months"})
+    # admin may not release GMP equipment to service or approve QA records
+    r = api.call("admin", "post", f"/api/assets/{tag}/status",
+                 json={"status": "in_service", "reason": "Try", "signature": api.sig("admin")})
+    assert r.status_code == 403

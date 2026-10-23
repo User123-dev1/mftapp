@@ -118,7 +118,7 @@ video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
 
 <div id="appView" class="hidden">
   <header>
-    <h1>GMP Asset Manager <span id="companyName" class="muted" style="font-weight:400"></span></h1>
+    <h1>GMP Asset Manager <span class="pill" title="Application version">v1.2</span> <span id="companyName" class="muted" style="font-weight:400"></span></h1>
     <span id="who" class="muted"></span>
     <button class="btn secondary" id="logoutBtn">Sign out</button>
   </header>
@@ -324,7 +324,10 @@ async function handleScan(raw) {
       <div class="verdict ${p.valid ? (r.expired ? "bad" : "neutral") : "bad"}">${
         !p.valid ? "INVALID / UNREADABLE BARCODE" : r.match_type === "gs1_item" ? (r.expired ? "EXPIRED GS1 ITEM" : "GS1 item - not a registered asset") : "Not found"}</div>
       ${p.errors.length ? `<ul class="reasons">${p.errors.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      ${parsedTable(p)}</div>`;
+      ${parsedTable(p)}
+      ${p.valid && can("asset.create") && (!p.is_gs1 || (p.gtin && p.serial)) ? `<button class="btn" data-induct>Register as new asset</button>` : ""}</div>`;
+    const ind = $("[data-induct]", out);
+    if (ind) ind.onclick = () => newAssetForm(p.is_gs1 ? { gtin: p.gtin, serial_number: p.serial } : { asset_tag: p.data });
   }
 }
 
@@ -418,7 +421,8 @@ VIEWS.assets = async (c) => {
       <td>${esc(a.location_code || "-")}</td><td>${statusPill(a.status)}</td><td>${a.pm_required ? esc(a.pm_due_on) : "-"}</td>
       <td>${a.calibration_required ? esc(a.calibration_due_on || "never") : "n/a"}</td>
       <td>${a.fitness.fit_for_use ? `<span class="pill ok">Yes</span>` : `<span class="pill bad" title="${esc(a.fitness.reasons.join("; "))}">No</span>`}</td></tr>`).join("")
-      || `<tr><td colspan="7" class="muted">No assets yet${can("asset.create") ? ' - click "+ Add new asset" to register the first one' : ""}.</td></tr>`}
+      || `<tr><td colspan="7" class="muted">No assets yet${can("asset.create") ? ' - click "+ Add new asset" to register the first one'
+        : ` - your role (${esc(state.me.role)}) cannot register assets; ask an administrator or technician`}.</td></tr>`}
     </table></div></div>`;
   for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
   const reload = () => { state.assetFilter = { ...filter, q: $("#q").value, status: $("#st").value }; openTab("assets"); };
@@ -427,7 +431,7 @@ VIEWS.assets = async (c) => {
   const nb = $("#newAsset"); if (nb) nb.onclick = newAssetForm;
 };
 
-async function newAssetForm() {
+async function newAssetForm(prefill = {}) {
   const locs = await api("GET", "/api/locations");
   modal(`<h2>Add new asset</h2>
     <p class="muted" style="margin-top:0">The asset ID is generated automatically (${esc(state.company.asset_prefix)}-000001, ...).</p>
@@ -453,6 +457,8 @@ async function newAssetForm() {
     const a = await api("POST", "/api/assets", body);
     assetCreatedDialog(a);
   });
+  for (const [k, v] of Object.entries(prefill)) { const el = $(`.modal [name=${k}]`); if (el && v) el.value = v; }
+  if (prefill.asset_tag || prefill.gtin) $(".modal details").open = true;
 }
 
 function dialog(html) {

@@ -17,7 +17,12 @@ from typing import Dict, FrozenSet, List
 ROLES = ("admin", "qa", "technician", "operator", "viewer")
 
 ROLE_PERMISSIONS: Dict[str, FrozenSet[str]] = {
-    "admin": frozenset({"user.manage", "location.manage", "company.manage", "asset.view", "audit.view"}),
+    # Admins may register assets and plan/perform maintenance (small sites often have one person doing this),
+    # but never approve GMP records: calibration approval and release to service stay with QA.
+    "admin": frozenset({
+        "user.manage", "location.manage", "company.manage", "asset.view", "audit.view",
+        "asset.create", "asset.edit", "asset.move", "maintenance.plan", "maintenance.record",
+    }),
     "qa": frozenset({
         "asset.view", "asset.edit", "audit.view", "asset.status.remove", "asset.status.release",
         "asset.qualify", "calibration.approve", "deviation.close", "maintenance.plan",

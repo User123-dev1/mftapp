@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .config import Settings
 from .db import Database
 from .security import ROLE_PERMISSIONS
@@ -219,7 +220,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         yield
         task.cancel()
 
-    app = FastAPI(title="GMP Asset Management", version="1.1.0", lifespan=lifespan,
+    app = FastAPI(title="GMP Asset Management", version=__version__, lifespan=lifespan,
                   description="GMP-regulated equipment & instrument asset management with barcode scanning "
                               "(21 CFR Part 11 / EU Annex 11).")
     app.state.service = service
@@ -250,7 +251,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "site": settings.site_name}
+        return {"status": "ok", "version": __version__}
 
     # -- Auth ----------------------------------------------------------------
     @app.post("/api/auth/login")
