@@ -18,11 +18,42 @@ On first start an `admin` account is created. The temporary password is printed
 to the console, or you can set it with `GMP_ADMIN_PASSWORD`. The password must
 be changed at first login. Then:
 
-1. As **admin**, create users (qa, technician, operator, viewer) and locations.
-2. As **technician**, register assets. They start in `commissioning` and are *not fit for use*.
-3. Record the calibration with an e-signature, then a **QA** user approves it.
-4. **QA** sets the qualification to `qualified` and releases the asset to `in_service` (e-signature).
-5. Operators scan the asset at the point of use and get **FIT FOR USE** or **DO NOT USE** with reasons.
+1. **Company setup** (admin, first login): enter the company name, site, address and the
+   **asset ID prefix**, e.g. `ACME`. No assets can be registered until this is done.
+2. As **admin**, add users (qa, technician, operator, viewer) and locations under **Administration**.
+3. As **technician**, click **+ Add new asset**:
+   - The system generates the next asset ID (`ACME-000001`, `ACME-000002`, ...).
+   - Choose **Active** or **Inactive**.
+   - Print the barcode label straight from the confirmation dialog.
+   - Equipment that already carries a tag can keep it (optional field).
+4. Click **Add PM / trigger** to plan maintenance (see below).
+5. GMP-impacting assets: record the calibration (e-signed), then **QA** approves it, qualifies the
+   asset and **activates** it (e-signature).
+6. Operators scan the asset at the point of use and get **FIT FOR USE** or **DO NOT USE** with reasons.
+
+## Active / inactive
+
+**Active** means in service and usable. **Inactive** means new, or taken out of service.
+
+- Non-GMP equipment can be registered as Active, or activated later by a technician.
+- GMP-impacting equipment (direct/indirect impact), and anything needing calibration, starts Inactive.
+  It can only be activated by QA with an electronic signature, once it is qualified and calibrated with no open deviations.
+- Deactivating needs a reason. **Quarantine** and **Retire** remain available for GMP holds and end of life.
+
+## PM schedules, event triggers and work orders
+
+Each asset can have any number of maintenance plans:
+
+| Trigger | Behaviour |
+|---|---|
+| **Time-based**: every N days, weeks or months | A work order is raised automatically when the PM comes due, optionally *N* days early (lead time). This is checked hourly and whenever work orders are listed. Completing it moves the next due date forward from the completion date. Cancelling skips that occurrence. |
+| **Event-based** | A work order is raised the moment the event happens: asset moved, activated, deactivated, quarantined, calibration failed, corrective repair recorded, or deviation closed. Example: *"Post-move leak test, complete within 2 days"*. |
+
+- **Blocks use** (on by default): the asset shows **DO NOT USE** while an event work order is open, or a scheduled PM is overdue.
+- You can also raise manual work orders.
+- Completing a work order needs an e-signature and creates a maintenance record.
+- The **Work orders** tab lists everything open, overdue and completed.
+- Schedules can be paused and resumed, with a reason that goes into the audit trail.
 
 API docs: `http://127.0.0.1:8000/docs`. Tests: `python -m pytest tests`.
 
@@ -74,6 +105,7 @@ A malformed scan, such as one with a bad check digit, is rejected. It is never m
 
 ## Configuration (environment variables)
 
+Company details are set in the UI. Environment variables:
 `GMP_DB_PATH`, `GMP_ADMIN_USERNAME`, `GMP_ADMIN_PASSWORD`, `GMP_SESSION_IDLE_MINUTES` (15),
 `GMP_MAX_FAILED_LOGINS` (5), `GMP_PASSWORD_MAX_AGE_DAYS` (90), `GMP_PASSWORD_MIN_LENGTH` (10),
 `GMP_PBKDF2_ITERATIONS` (310000), `GMP_SITE_NAME`.

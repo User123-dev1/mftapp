@@ -164,11 +164,12 @@ def test_reason_required_and_optimistic_locking(api):
     assert r.status_code == 422
     r = api.call("tech1", "patch", "/api/assets/BAL-0001", json={"changes": {"status": "in_service"}, "reason": "hack"})
     assert r.status_code == 422
+    version = api.ok("tech1", "get", "/api/assets/BAL-0001")["version"]
     asset = api.ok("tech1", "patch", "/api/assets/BAL-0001",
-                   json={"changes": {"model": "XS205DU"}, "reason": "Nameplate correction", "expected_version": 1})
-    assert asset["version"] == 2
+                   json={"changes": {"model": "XS205DU"}, "reason": "Nameplate correction", "expected_version": version})
+    assert asset["version"] == version + 1
     r = api.call("tech1", "patch", "/api/assets/BAL-0001",
-                 json={"changes": {"model": "Other"}, "reason": "Stale edit", "expected_version": 1})
+                 json={"changes": {"model": "Other"}, "reason": "Stale edit", "expected_version": version})
     assert r.status_code == 409
     entry = api.ok("qa1", "get", "/api/audit?entity_type=asset&entity_id=BAL-0001")[0]
     assert entry["action"] == "ASSET_MODIFIED" and '"XS205"' in entry["old_value"] and entry["reason"] == "Nameplate correction"

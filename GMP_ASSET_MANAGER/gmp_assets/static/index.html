@@ -43,6 +43,7 @@ ul.reasons { margin: 6px 0 0; padding-left: 20px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
+td.mono { white-space: nowrap; word-break: normal; }
 .tbl { overflow-x: auto; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
 .pill.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
@@ -65,6 +66,7 @@ video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
   <main style="max-width:420px">
     <div class="panel">
       <h2>GMP Asset Manager - Sign in</h2>
+      <p id="loginCompany" class="muted" style="margin-top:-6px"></p>
       <form id="loginForm">
         <label>User ID</label><input name="username" autocomplete="username" required>
         <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
@@ -90,9 +92,33 @@ video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
   </main>
 </div>
 
+<div id="setupView" class="hidden">
+  <main style="max-width:560px">
+    <div class="panel">
+      <h2>Company setup</h2>
+      <p class="muted">Welcome. Before assets can be registered, tell us about your company. You can change this later under Administration.</p>
+      <form id="setupForm">
+        <label>Company name</label><input name="name" required placeholder="e.g. Acme Biologics Ltd">
+        <label>Site / plant name</label><input name="site_name" required placeholder="e.g. Accra Plant 1">
+        <label>Address (optional)</label><textarea name="address" rows="2"></textarea>
+        <label>Asset ID prefix (1-10 letters/digits)</label><input name="asset_prefix" required maxlength="10" placeholder="e.g. ACME" style="text-transform:uppercase">
+        <p class="muted" style="font-size:13px">Assets will be numbered <b id="prefixPreview">ACME-000001</b>, -000002, ...</p>
+        <div class="row" style="margin-top:14px"><button class="btn">Save and continue</button>
+          <button type="button" class="btn secondary" id="setupLogout">Sign out</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="waitView" class="hidden">
+  <main style="max-width:480px"><div class="panel"><h2>System not set up yet</h2>
+    <p>An administrator must complete the company setup before the system can be used.</p>
+    <button class="btn secondary" id="waitLogout">Sign out</button></div></main>
+</div>
+
 <div id="appView" class="hidden">
   <header>
-    <h1>GMP Asset Manager</h1>
+    <h1>GMP Asset Manager <span id="companyName" class="muted" style="font-weight:400"></span></h1>
     <span id="who" class="muted"></span>
     <button class="btn secondary" id="logoutBtn">Sign out</button>
   </header>
@@ -103,7 +129,7 @@ video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
 
 <script>
 "use strict";
-const state = { token: sessionStorage.getItem("gmp_token"), me: null, tab: "scan", moveTarget: null, scanMode: "lookup", camera: null };
+const state = { token: sessionStorage.getItem("gmp_token"), me: null, tab: null, company: null, moveTarget: null, scanMode: "lookup", camera: null };
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const can = (perm) => state.me && state.me.permissions.includes(perm);
@@ -140,12 +166,12 @@ async function api(method, url, body, raw = false) {
 
 function logoutLocal(msg) {
   stopCamera();
-  state.token = null; state.me = null; sessionStorage.removeItem("gmp_token");
+  state.token = null; state.me = null; state.tab = null; state.company = null; sessionStorage.removeItem("gmp_token");
   show("login"); if (msg) toast(msg);
 }
 
 function show(view) {
-  for (const v of ["login", "pw", "app"]) $("#" + v + "View").classList.toggle("hidden", v !== view);
+  for (const v of ["login", "pw", "setup", "wait", "app"]) $("#" + v + "View").classList.toggle("hidden", v !== view);
   if (view === "login") $("#loginForm [name=username]").focus();
 }
 
@@ -182,7 +208,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 // ---- Tabs ----------------------------------------------------------------
 const TABS = [
-  ["scan", "Scan", () => true], ["assets", "Assets", () => can("asset.view")],
+  ["assets", "Assets", () => can("asset.view")], ["workorders", "Work orders", () => can("asset.view")],
+  ["scan", "Scan", () => true],
   ["approvals", "Approvals", () => can("calibration.approve")], ["deviations", "Deviations", () => can("asset.view")],
   ["due", "Due list", () => can("asset.view")], ["audit", "Audit trail", () => can("audit.view")],
   ["admin", "Administration", () => can("user.manage")],
@@ -355,18 +382,23 @@ function loadScript(src) {
 }
 
 // ---- Assets --------------------------------------------------------------
-const statusPill = (s) => `<span class="pill ${s === "in_service" ? "ok" : s === "quarantine" ? "bad" : s === "retired" ? "" : "warn"}">${esc(s.replace(/_/g, " "))}</span>`;
+const STATUS_LABEL = {
+  in_service: ["Active", "ok"], commissioning: ["Inactive - new", "warn"], out_of_service: ["Inactive", "warn"],
+  quarantine: ["Quarantined", "bad"], retired: ["Retired", ""],
+};
+const statusPill = (s) => `<span class="pill ${STATUS_LABEL[s][1]}">${STATUS_LABEL[s][0]}</span>`;
+const canActivate = (a) => a.gmp_impact === "none" ? can("asset.edit") : can("asset.status.release");
 
 function assetSummary(a) {
   return `<div class="grid" style="margin-top:8px">
-    <div><label>Asset tag</label><b class="mono">${esc(a.asset_tag)}</b></div>
+    <div><label>Asset ID</label><b class="mono">${esc(a.asset_tag)}</b></div>
     <div><label>Description</label>${esc(a.description)}</div>
     <div><label>Status</label>${statusPill(a.status)}</div>
     <div><label>Qualification</label>${esc(a.qualification_status.replace(/_/g, " "))}</div>
     <div><label>GMP impact</label>${esc(a.gmp_impact)}</div>
     <div><label>Location</label>${esc(a.location_code || "-")} ${a.location_name ? `<span class="muted">${esc(a.location_name)}</span>` : ""}</div>
     <div><label>Calibration due</label>${a.calibration_required ? esc(a.calibration_due_on || "not calibrated") : "n/a"}</div>
-    <div><label>PM due</label>${a.pm_required ? esc(a.pm_due_on || "-") : "n/a"}</div>
+    <div><label>Next PM due</label>${a.pm_required ? esc(a.pm_due_on || "-") : "no PM plan"}</div>
     <div><label>Manufacturer / model</label>${esc(a.manufacturer || "-")} ${esc(a.model || "")}</div>
     <div><label>Serial / GTIN</label><span class="mono">${esc(a.serial_number || "-")} ${esc(a.gtin || "")}</span></div>
   </div>`;
@@ -377,14 +409,16 @@ VIEWS.assets = async (c) => {
   const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v)).toString();
   const assets = await api("GET", "/api/assets" + (qs ? "?" + qs : ""));
   c.innerHTML = `<div class="panel">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Assets ${filter.location ? "at " + esc(filter.location) : ""}</h2>
-      ${can("asset.create") ? `<button class="btn" id="newAsset">Register asset</button>` : ""}</div>
-    <div class="row" style="margin:10px 0"><input id="q" placeholder="Search tag, description, serial, model" style="max-width:360px" value="${esc(filter.q || "")}">
-      <select id="st" style="width:auto"><option value="">All statuses</option>${["commissioning", "in_service", "out_of_service", "quarantine", "retired"].map(s => `<option ${filter.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
-    <div class="tbl"><table><tr><th>Tag</th><th>Description</th><th>Location</th><th>Status</th><th>Cal due</th><th>Fit for use</th></tr>
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Asset register ${filter.location ? "- " + esc(filter.location) : ""}</h2>
+      ${can("asset.create") ? `<button class="btn" id="newAsset">+ Add new asset</button>` : ""}</div>
+    <div class="row" style="margin:10px 0"><input id="q" placeholder="Search ID, description, serial, model" style="max-width:360px" value="${esc(filter.q || "")}">
+      <select id="st" style="width:auto"><option value="">All statuses</option>${Object.entries(STATUS_LABEL).map(([s, [l]]) => `<option value="${s}" ${filter.status === s ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="tbl"><table><tr><th>Asset ID</th><th>Description</th><th>Location</th><th>Status</th><th>Next PM</th><th>Cal due</th><th>Fit for use</th></tr>
     ${assets.map(a => `<tr><td><a class="link mono" data-tag="${esc(a.asset_tag)}">${esc(a.asset_tag)}</a></td><td>${esc(a.description)}</td>
-      <td>${esc(a.location_code || "-")}</td><td>${statusPill(a.status)}</td><td>${a.calibration_required ? esc(a.calibration_due_on || "never") : "n/a"}</td>
-      <td>${a.fitness.fit_for_use ? `<span class="pill ok">Yes</span>` : `<span class="pill bad" title="${esc(a.fitness.reasons.join("; "))}">No</span>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No assets</td></tr>`}
+      <td>${esc(a.location_code || "-")}</td><td>${statusPill(a.status)}</td><td>${a.pm_required ? esc(a.pm_due_on) : "-"}</td>
+      <td>${a.calibration_required ? esc(a.calibration_due_on || "never") : "n/a"}</td>
+      <td>${a.fitness.fit_for_use ? `<span class="pill ok">Yes</span>` : `<span class="pill bad" title="${esc(a.fitness.reasons.join("; "))}">No</span>`}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">No assets yet${can("asset.create") ? ' - click "+ Add new asset" to register the first one' : ""}.</td></tr>`}
     </table></div></div>`;
   for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
   const reload = () => { state.assetFilter = { ...filter, q: $("#q").value, status: $("#st").value }; openTab("assets"); };
@@ -395,50 +429,111 @@ VIEWS.assets = async (c) => {
 
 async function newAssetForm() {
   const locs = await api("GET", "/api/locations");
-  modal(`<h2>Register asset</h2>
-    ${field("asset_tag", "Asset tag (scan or type)", "required")}${field("description", "Description", "required")}
+  modal(`<h2>Add new asset</h2>
+    <p class="muted" style="margin-top:0">The asset ID is generated automatically (${esc(state.company.asset_prefix)}-000001, ...).</p>
+    ${field("description", "Description", 'required placeholder="e.g. Analytical balance"')}
     <div class="grid">${select("category", "Category", ["equipment", "instrument", "utility", "computerized_system", "facility", "reference_standard"])}
     ${select("gmp_impact", "GMP impact", ["direct", "indirect", "none"])}
-    ${field("manufacturer", "Manufacturer")}${field("model", "Model")}${field("serial_number", "Serial number")}${field("gtin", "GTIN (optional)")}
+    ${field("manufacturer", "Manufacturer")}${field("model", "Model")}${field("serial_number", "Serial number")}
     ${field("department", "Department")}${select("location_code", "Location", ["", ...locs.map(l => l.code)])}</div>
-    <label class="check"><input type="checkbox" name="is_reference_standard"> Reference / calibration standard</label>
+    <label>Initial status</label>
+    <div class="row"><label class="check"><input type="radio" name="initial_state" value="inactive" checked> Inactive (default)</label>
+      <label class="check"><input type="radio" name="initial_state" value="active"> Active - ready for use</label></div>
+    <p class="muted" style="font-size:12px;margin:2px 0 0">GMP-impacting assets and assets needing calibration stay Inactive until qualified/calibrated and released by QA.</p>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="pm_required"> Create a preventive maintenance (PM) schedule</label>
+    <div class="grid">${field("pm_interval_days", "PM every (days)", 'type="number" min="1" placeholder="e.g. 90"')}</div>
     <label class="check"><input type="checkbox" name="calibration_required"> Calibration required</label>
-    ${field("calibration_interval_days", "Calibration interval (days)", 'type="number" min="1"')}
-    <label class="check"><input type="checkbox" name="pm_required"> Preventive maintenance required</label>
-    ${field("pm_interval_days", "PM interval (days)", 'type="number" min="1"')}`, async (d) => {
+    <div class="grid">${field("calibration_interval_days", "Calibration every (days)", 'type="number" min="1"')}</div>
+    <label class="check"><input type="checkbox" name="is_reference_standard"> This is a reference / calibration standard</label>
+    <details style="margin-top:8px"><summary class="muted">Existing label or GTIN (optional)</summary>
+      ${field("asset_tag", "Existing asset tag - leave blank to generate a new ID")}${field("gtin", "GTIN")}</details>`, async (d) => {
     const body = { ...d, calibration_interval_days: d.calibration_interval_days ? +d.calibration_interval_days : null,
-      pm_interval_days: d.pm_interval_days ? +d.pm_interval_days : null, location_code: d.location_code || null, gtin: d.gtin || null };
+      pm_interval_days: d.pm_interval_days ? +d.pm_interval_days : null, location_code: d.location_code || null,
+      gtin: d.gtin || null, asset_tag: d.asset_tag || null };
     const a = await api("POST", "/api/assets", body);
-    toast(`Asset ${a.asset_tag} registered (commissioning)`); openAsset(a.asset_tag);
+    assetCreatedDialog(a);
   });
 }
+
+function dialog(html) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal">${html}</div>`;
+  document.body.appendChild(bg);
+  return bg;
+}
+
+async function labelSvg(tag) {
+  return api("GET", `/api/assets/${encodeURIComponent(tag)}/label.svg`);
+}
+
+function printSvg(svg, title) {
+  const w = window.open("", "_blank", "width=480,height=360");
+  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>
+    @page { margin: 4mm; } body { margin: 0; display: flex; justify-content: center; } svg { width: 90mm; height: auto; }
+    </style></head><body>${svg}</body></html>`);
+  w.document.close(); w.focus();
+  setTimeout(() => w.print(), 250);
+}
+
+async function assetCreatedDialog(a) {
+  const svg = await labelSvg(a.asset_tag);
+  const bg = dialog(`<h2>Asset created</h2>
+    <p>Asset ID <b class="mono" style="font-size:20px">${esc(a.asset_tag)}</b> - ${esc(a.description)} ${statusPill(a.status)}</p>
+    <div class="label-img" style="text-align:center">${svg}</div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn secondary" data-pm>Add PM / trigger</button>
+      <button class="btn secondary" data-open>Open asset</button>
+      <button class="btn" data-print>Print barcode label</button></div>`);
+  $("[data-print]", bg).onclick = () => printSvg(svg, a.asset_tag);
+  $("[data-open]", bg).onclick = () => { bg.remove(); openAsset(a.asset_tag); };
+  const pmBtn = $("[data-pm]", bg);
+  if (can("maintenance.plan")) pmBtn.onclick = () => { bg.remove(); openAsset(a.asset_tag).then(() => pmScheduleForm(a.asset_tag)); };
+  else pmBtn.remove();
+  toast(`Asset ${a.asset_tag} registered`);
+}
+
+const triggerText = (s, events) => s.trigger_type === "time"
+  ? `Every ${s.interval_value} ${s.interval_unit}${s.lead_days ? ` (raised ${s.lead_days} days early)` : ""}`
+  : `On event: ${esc(events[s.event] || s.event)} - complete within ${s.interval_value} ${s.interval_unit}`;
 
 async function openAsset(tag) {
   stopCamera();
   state.tab = "assets"; renderTabs();
-  const a = await api("GET", "/api/assets/" + encodeURIComponent(tag));
-  const label = await api("GET", `/api/assets/${encodeURIComponent(tag)}/label.svg`, undefined, true).then(r => r.blob()).then(b => URL.createObjectURL(b));
+  const [a, svg, opts] = await Promise.all([api("GET", "/api/assets/" + encodeURIComponent(tag)), labelSvg(tag), pmOptions()]);
   const c = $("#content");
   const f = a.fitness;
   const actions = [];
   if (a.status !== "retired") {
-    if (can("asset.edit")) actions.push(["edit", "Edit details"]);
-    if (can("calibration.record") && a.calibration_required) actions.push(["cal", "Record calibration"]);
-    if (can("maintenance.record")) actions.push(["pm", "Record maintenance"]);
-    if (can("asset.status.remove") || can("asset.status.release")) actions.push(["status", "Change status"]);
-    if (can("asset.qualify") && a.gmp_impact !== "none") actions.push(["qual", "Set qualification"]);
-    if (can("asset.status.remove")) actions.push(["issue", "Report problem"]);
+    if (a.status !== "in_service" && canActivate(a)) actions.push(["activate", "Activate", ""]);
+    if (a.status === "in_service" && can("asset.status.remove")) actions.push(["deactivate", "Deactivate", "secondary"]);
+    if (can("asset.edit")) actions.push(["edit", "Edit details", "secondary"]);
+    if (can("maintenance.plan")) actions.push(["schedule", "Add PM / trigger", "secondary"], ["wo", "New work order", "secondary"]);
+    if (can("calibration.record") && a.calibration_required) actions.push(["cal", "Record calibration", "secondary"]);
+    if (can("maintenance.record")) actions.push(["pm", "Record ad-hoc maintenance", "secondary"]);
+    if (can("asset.qualify") && a.gmp_impact !== "none") actions.push(["qual", "Set qualification", "secondary"]);
+    if (can("asset.status.remove") || can("asset.status.release")) actions.push(["status", "Quarantine / retire", "secondary"]);
+    if (can("asset.status.remove")) actions.push(["issue", "Report problem", "danger"]);
   }
   c.innerHTML = `<div class="panel">
     <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.asset_tag)} - ${esc(a.description)}</h2>
-      <a class="link" id="back">Back to list</a></div>
+      <a class="link" id="back">Back to register</a></div>
     <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
     ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    ${f.warnings.length ? `<p>${f.warnings.map(x => `<span class="pill warn">${esc(x)}</span>`).join(" ")}</p>` : ""}
     ${assetSummary(a)}
     <p class="muted" style="font-size:12px">Version ${a.version} - created ${esc(a.created_at)} by ${esc(a.created_by)} - last change ${esc(a.updated_at)} by ${esc(a.updated_by)}</p>
-    <div class="row">${actions.map(([k, t]) => `<button class="btn ${k === "issue" ? "danger" : "secondary"}" data-act="${k}">${t}</button>`).join("")}
-      <a class="link" id="printLabel">Print label</a> <a class="link" id="auditLink">Audit trail</a></div>
-    <p><img class="label-img" src="${label}" alt="Asset barcode label"></p></div>
+    <div class="row">${actions.map(([k, t, cls]) => `<button class="btn ${cls}" data-act="${k}">${t}</button>`).join("")}</div>
+    <div class="row" style="margin-top:12px;align-items:flex-end"><div class="label-img">${svg}</div>
+      <div><button class="btn secondary" id="printLabel">Print barcode label</button><br><a class="link" id="auditLink">View audit trail</a></div></div></div>
+  <div class="panel"><h2>Work orders</h2><div class="tbl"><table><tr><th>Number</th><th>Title</th><th>Type</th><th>Raised by</th><th>Due</th><th>Status</th><th></th></tr>
+    ${a.work_orders.map(woRow).join("") || `<tr><td colspan="7" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>PM schedules &amp; event triggers</h2><div class="tbl"><table><tr><th>Title</th><th>Type</th><th>Trigger</th><th>Next due</th><th>Blocks use</th><th>State</th><th></th></tr>
+    ${a.pm_schedules.map(s => `<tr><td>${esc(s.title)}${s.instructions ? `<div class="muted" style="font-size:12px">${esc(s.instructions)}</div>` : ""}</td>
+      <td>${esc(s.work_type)}</td><td>${triggerText(s, opts.events)}</td><td>${esc(s.next_due_on || "-")}</td><td>${s.blocks_use ? "Yes" : "No"}</td>
+      <td>${s.active ? `<span class="pill ok">active</span>` : `<span class="pill">paused</span>`}</td>
+      <td>${can("maintenance.plan") && a.status !== "retired" ? `<button class="btn secondary" data-toggle-sch="${s.id}" data-active="${s.active}">${s.active ? "Pause" : "Resume"}</button>` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">No PM plan yet${can("maintenance.plan") ? ' - use "Add PM / trigger"' : ""}.</td></tr>`}</table></div></div>
   <div class="panel"><h2>Calibration history</h2><div class="tbl"><table><tr><th>#</th><th>Performed</th><th>By</th><th>As found</th><th>As left</th><th>Standards / cert</th><th>Status</th><th>Signatures</th></tr>
     ${a.calibrations.map(r => `<tr><td>${r.id}</td><td>${esc(r.performed_on)}</td><td>${esc(r.performed_by)}</td><td>${pf(r.as_found)}</td><td>${pf(r.as_left)}</td>
       <td>${esc(r.standards_used.join(", ") || r.certificate_ref || "")}</td><td>${esc(r.status.replace(/_/g, " "))}</td><td>${sigList(r.signatures)}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">None</td></tr>`}</table></div></div>
@@ -449,15 +544,103 @@ async function openAsset(tag) {
   <div class="panel"><h2>Status / qualification signatures</h2>${sigList(a.signatures) || `<span class="muted">None</span>`}</div>`;
   $("#back").onclick = () => openTab("assets");
   $("#auditLink").onclick = () => { state.auditFilter = { entity_type: "asset", entity_id: a.asset_tag }; openTab("audit"); };
-  $("#printLabel").onclick = () => { const w = window.open(""); w.document.write(`<img src="${label}" onload="print()">`); };
+  $("#printLabel").onclick = () => printSvg(svg, a.asset_tag);
   for (const b of c.querySelectorAll("[data-act]")) b.onclick = () => ASSET_ACTIONS[b.dataset.act](a);
+  for (const b of c.querySelectorAll("[data-toggle-sch]")) b.onclick = () => toggleSchedule(+b.dataset.toggleSch, b.dataset.active === "1", a.asset_tag);
+  wireWoButtons(c, () => openAsset(a.asset_tag));
 }
+
+async function pmOptions() {
+  return state.pmOptions || (state.pmOptions = await api("GET", "/api/pm/options"));
+}
+
+async function pmScheduleForm(tag) {
+  const opts = await pmOptions();
+  const units = opts.interval_units;
+  modal(`<h2>Add PM schedule / event trigger - ${esc(tag)}</h2>
+    ${field("title", "Title", 'required placeholder="e.g. Quarterly PM, Post-move leak test"')}
+    <div class="grid">${select("work_type", "Work type", opts.work_types)}${select("trigger_type", "Trigger", ["time", "event"])}</div>
+    <div data-time>
+      <div class="grid">${field("t_value", "Repeat every", 'type="number" min="1" value="3"')}${select("t_unit", "Unit", units, "months")}
+      ${field("first_due_on", "First due on (optional)", 'type="date"')}${field("lead_days", "Raise work order days before due", 'type="number" min="0" value="7"')}</div>
+    </div>
+    <div data-event class="hidden">
+      <label>When this happens</label><select name="event">${Object.entries(opts.events).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
+      <div class="grid">${field("e_value", "Complete within", 'type="number" min="1" value="1"')}${select("e_unit", "Unit", units, "days")}</div>
+    </div>
+    <label class="check"><input type="checkbox" name="blocks_use" checked> Asset is DO NOT USE while this work is open (event) or overdue (schedule)</label>
+    <label>Instructions / checklist</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
+    const isTime = d.trigger_type === "time";
+    await api("POST", `/api/assets/${encodeURIComponent(tag)}/pm-schedules`, {
+      title: d.title, work_type: d.work_type, trigger_type: d.trigger_type, instructions: d.instructions || null,
+      interval_value: +(isTime ? d.t_value : d.e_value), interval_unit: isTime ? d.t_unit : d.e_unit,
+      event: isTime ? null : d.event, lead_days: isTime ? +(d.lead_days || 0) : 0, blocks_use: d.blocks_use,
+      first_due_on: isTime && d.first_due_on ? d.first_due_on : null });
+    toast(isTime ? "PM schedule created - work orders will be raised automatically" : "Event trigger created");
+    openAsset(tag);
+  });
+  const sel = $(".modal select[name=trigger_type]");
+  sel.onchange = () => { $(".modal [data-time]").classList.toggle("hidden", sel.value !== "time"); $(".modal [data-event]").classList.toggle("hidden", sel.value !== "event"); };
+}
+
+function toggleSchedule(id, active, tag) {
+  modal(`<h2>${active ? "Pause" : "Resume"} PM schedule</h2><label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("PATCH", `/api/pm-schedules/${id}`, { changes: { active: !active }, reason: d.reason });
+    toast(active ? "Schedule paused" : "Schedule resumed"); openAsset(tag);
+  });
+}
+
+// ---- Work orders -------------------------------------------------------------
+function woRow(w, showAsset = false) {
+  const trig = w.trigger === "schedule" ? "Schedule" : w.trigger === "manual" ? `Manual (${esc(w.created_by)})` : "Event: " + esc((state.pmOptions?.events || {})[w.trigger.slice(6)] || w.trigger.slice(6));
+  const st = w.status === "open" ? (w.overdue ? `<span class="pill bad">overdue</span>` : `<span class="pill warn">open</span>`)
+    : `<span class="pill ${w.status === "completed" ? "ok" : ""}">${w.status}</span>`;
+  const btns = w.status !== "open" ? (w.closure_notes ? `<span class="muted" style="font-size:12px">${esc(w.closure_notes)}</span>${sigList(w.signatures)}` : "")
+    : `${can("maintenance.record") ? `<button class="btn" data-complete="${esc(w.number)}">Complete</button>` : ""}
+       ${can("maintenance.plan") ? `<button class="btn secondary" data-cancel-wo="${esc(w.number)}">Cancel</button>` : ""}`;
+  return `<tr><td class="mono">${esc(w.number)}</td>${showAsset ? `<td><a class="link mono" data-tag="${esc(w.asset_tag)}">${esc(w.asset_tag)}</a><div class="muted" style="font-size:12px">${esc(w.asset_description)}</div></td>` : ""}
+    <td>${esc(w.title)}${w.blocks_use ? ` <span class="pill bad" title="Asset may not be used while open/overdue">blocks use</span>` : ""}
+      ${w.instructions ? `<div class="muted" style="font-size:12px">${esc(w.instructions)}</div>` : ""}</td>
+    <td>${esc(w.work_type)}</td><td>${trig}</td><td>${esc(w.due_on)}</td><td>${st}</td><td>${btns}</td></tr>`;
+}
+
+function wireWoButtons(c, after) {
+  for (const b of c.querySelectorAll("[data-complete]")) b.onclick = () => modal(`<h2>Complete ${esc(b.dataset.complete)}</h2>
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <label>Work performed / results</label><textarea name="notes" rows="3" required></textarea>
+    <label class="check"><input type="checkbox" name="requalification_required"> Change affects qualified state - requalification required</label>
+    ${sigBlock("performed")}`, async (d) => {
+    await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.complete)}/complete`, {
+      performed_on: d.performed_on, notes: d.notes, requalification_required: d.requalification_required, signature: { password: d.sig_password } });
+    toast(`${b.dataset.complete} completed`); after();
+  });
+  for (const b of c.querySelectorAll("[data-cancel-wo]")) b.onclick = () => modal(`<h2>Cancel ${esc(b.dataset.cancelWo)}</h2>
+    <p class="muted">For a scheduled work order this skips the occurrence; the next one is planned one interval later.</p>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.cancelWo)}/cancel`, d);
+    toast(`${b.dataset.cancelWo} cancelled`); after();
+  });
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+}
+
+VIEWS.workorders = async (c) => {
+  await pmOptions();
+  const status = state.woStatus ?? "open";
+  const wos = await api("GET", "/api/work-orders" + (status ? "?status=" + status : ""));
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Work orders</h2>
+    <select id="woSt" style="width:auto">${[["open", "Open"], ["completed", "Completed"], ["cancelled", "Cancelled"], ["", "All"]].map(([v, l]) => `<option value="${v}" ${v === status ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <p class="muted">Scheduled PM work orders are raised automatically when they come due; event triggers raise them instantly.</p>
+    <div class="tbl"><table><tr><th>Number</th><th>Asset</th><th>Title</th><th>Type</th><th>Raised by</th><th>Due</th><th>Status</th><th></th></tr>
+    ${wos.map(w => woRow(w, true)).join("") || `<tr><td colspan="8" class="muted">No work orders</td></tr>`}</table></div></div>`;
+  $("#woSt").onchange = (e) => { state.woStatus = e.target.value; openTab("workorders"); };
+  wireWoButtons(c, () => openTab("workorders"));
+};
 
 const pf = (v) => `<span class="pill ${v === "pass" ? "ok" : v === "fail" ? "bad" : ""}">${esc(v.replace(/_/g, " "))}</span>`;
 const sigList = (sigs) => sigs.map(s => `<div style="font-size:12px">${esc(s.full_name)} (${esc(s.username)}) - <b>${esc(s.meaning)}</b> - ${esc(s.signed_at)}</div>`).join("");
 
 function reportIssue(tag) {
-  modal(`<h2>Report problem - ${esc(tag)}</h2><p class="muted">A deviation is opened and an in-service asset is taken out of service.</p>
+  modal(`<h2>Report problem - ${esc(tag)}</h2><p class="muted">A deviation is opened and an active asset is deactivated.</p>
     <label>Describe the problem</label><textarea name="description" rows="3" required></textarea>`, async (d) => {
     const dev = await api("POST", `/api/assets/${encodeURIComponent(tag)}/issues`, d);
     toast(`Deviation ${dev.number} opened`); openAsset(tag);
@@ -465,23 +648,49 @@ function reportIssue(tag) {
 }
 
 const ASSET_ACTIONS = {
+  activate: (a) => {
+    const gmp = a.gmp_impact !== "none";
+    modal(`<h2>Activate ${esc(a.asset_tag)}</h2>
+      <p class="muted">${gmp ? "GMP asset: release to service requires a QA electronic signature and a clean fitness check." : "The asset will be marked Active and fit for use."}</p>
+      ${a.fitness.reasons.filter(r => !r.startsWith("Status")).length ? `<p class="pill bad">Blocked: ${esc(a.fitness.reasons.filter(r => !r.startsWith("Status")).join("; "))}</p>` : ""}
+      <label>Reason (required)</label><input name="reason" required value="Released for use">${gmp ? sigBlock("released") : ""}`, async (d) => {
+      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: "in_service", reason: d.reason, signature: gmp ? { password: d.sig_password } : null });
+      toast(`${a.asset_tag} is now Active`); openAsset(a.asset_tag);
+    });
+  },
+  deactivate: (a) => modal(`<h2>Deactivate ${esc(a.asset_tag)}</h2><p class="muted">The asset will show DO NOT USE until it is activated again.</p>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: "out_of_service", reason: d.reason });
+    toast(`${a.asset_tag} is now Inactive`); openAsset(a.asset_tag);
+  }),
+  schedule: (a) => pmScheduleForm(a.asset_tag),
+  wo: async (a) => {
+    const opts = await pmOptions();
+    modal(`<h2>New work order - ${esc(a.asset_tag)}</h2>
+      ${field("title", "Title", "required")}<div class="grid">${select("work_type", "Work type", opts.work_types, "corrective")}
+      ${field("due_on", "Due on", `type="date" value="${today()}" required`)}</div>
+      <label class="check"><input type="checkbox" name="blocks_use"> Asset is DO NOT USE until this is completed</label>
+      <label>Instructions</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
+      const wo = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/work-orders`, d);
+      toast(`${wo.number} created`); openAsset(a.asset_tag);
+    });
+  },
   edit: (a) => modal(`<h2>Edit ${esc(a.asset_tag)}</h2>
     ${field("description", "Description", `value="${esc(a.description)}" required`)}
     <div class="grid">${field("manufacturer", "Manufacturer", `value="${esc(a.manufacturer || "")}"`)}${field("model", "Model", `value="${esc(a.model || "")}"`)}
     ${field("serial_number", "Serial number", `value="${esc(a.serial_number || "")}"`)}${field("department", "Department", `value="${esc(a.department || "")}"`)}
-    ${field("calibration_interval_days", "Calibration interval (days)", `type="number" value="${a.calibration_interval_days || ""}"`)}
-    ${field("pm_interval_days", "PM interval (days)", `type="number" value="${a.pm_interval_days || ""}"`)}</div>
+    ${a.calibration_required ? field("calibration_interval_days", "Calibration interval (days)", `type="number" value="${a.calibration_interval_days || ""}"`) : ""}</div>
     <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
     const changes = {};
     for (const k of ["description", "manufacturer", "model", "serial_number", "department"]) if ((d[k] || null) !== (a[k] || null)) changes[k] = d[k] || null;
-    for (const k of ["calibration_interval_days", "pm_interval_days"]) if (d[k] && +d[k] !== a[k]) changes[k] = +d[k];
+    if (d.calibration_interval_days && +d.calibration_interval_days !== a.calibration_interval_days) changes.calibration_interval_days = +d.calibration_interval_days;
     await api("PATCH", "/api/assets/" + encodeURIComponent(a.asset_tag), { changes, reason: d.reason, expected_version: a.version });
     toast("Saved"); openAsset(a.asset_tag);
   }),
   cal: (a) => modal(`<h2>Record calibration - ${esc(a.asset_tag)}</h2>
     ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
     <div class="grid">${select("as_found", "As found", ["pass", "fail", "not_applicable"])}${select("as_left", "As left", ["pass", "fail"])}</div>
-    ${field("standards", "Reference standards used (scan tags, comma separated)")}
+    ${field("standards", "Reference standards used (scan IDs, comma separated)")}
     ${field("certificate_ref", "External certificate reference (if calibrated by vendor)")}
     <label>Notes</label><textarea name="notes" rows="2"></textarea>${sigBlock("performed")}`, async (d) => {
     const rec = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/calibrations`, {
@@ -491,7 +700,8 @@ const ASSET_ACTIONS = {
     toast(rec.deviation_number ? `Out of tolerance: ${rec.deviation_number} opened, asset quarantined` : "Calibration recorded - awaiting QA approval", 6000);
     openAsset(a.asset_tag);
   }),
-  pm: (a) => modal(`<h2>Record maintenance - ${esc(a.asset_tag)}</h2>
+  pm: (a) => modal(`<h2>Record ad-hoc maintenance - ${esc(a.asset_tag)}</h2>
+    <p class="muted" style="margin-top:0">Planned PM is completed from its work order.</p>
     ${select("maintenance_type", "Type", ["preventive", "corrective"])}
     ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
     <label>Work performed</label><textarea name="description" rows="3" required></textarea>
@@ -501,19 +711,18 @@ const ASSET_ACTIONS = {
     toast("Maintenance recorded"); openAsset(a.asset_tag);
   }),
   status: (a) => {
-    const targets = { commissioning: ["in_service", "retired"], in_service: ["out_of_service", "quarantine", "retired"],
-      out_of_service: ["in_service", "quarantine", "retired"], quarantine: ["out_of_service", "in_service", "retired"] }[a.status] || [];
-    const allowed = targets.filter(t => can(["in_service", "retired"].includes(t) ? "asset.status.release" : "asset.status.remove"));
+    const targets = { commissioning: ["retired"], in_service: ["quarantine", "retired"],
+      out_of_service: ["quarantine", "retired"], quarantine: ["out_of_service", "retired"] }[a.status] || [];
+    const allowed = targets.filter(t => can(t === "retired" ? "asset.status.release" : "asset.status.remove"));
     if (!allowed.length) return toast("No status changes available for your role");
-    modal(`<h2>Change status - ${esc(a.asset_tag)}</h2><p>Current: ${statusPill(a.status)}</p>
+    modal(`<h2>Quarantine / retire - ${esc(a.asset_tag)}</h2><p>Current: ${statusPill(a.status)}</p>
       ${select("status", "New status", allowed)}<label>Reason (required)</label><input name="reason" required>
       <div id="sigWrap"></div>`, async (d) => {
-      const needsSig = ["in_service", "retired"].includes(d.status);
-      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: d.status, reason: d.reason, signature: needsSig ? { password: d.sig_password } : null });
+      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: d.status, reason: d.reason, signature: d.status === "retired" ? { password: d.sig_password } : null });
       toast("Status changed"); openAsset(a.asset_tag);
     });
     const sel = $(".modal select[name=status]"), wrap = $("#sigWrap");
-    const upd = () => wrap.innerHTML = sel.value === "in_service" ? sigBlock("released") : sel.value === "retired" ? sigBlock("approved") : "";
+    const upd = () => wrap.innerHTML = sel.value === "retired" ? sigBlock("approved") : "";
     sel.onchange = upd; upd();
   },
   qual: (a) => modal(`<h2>Qualification - ${esc(a.asset_tag)}</h2>
@@ -613,8 +822,13 @@ VIEWS.audit = async (c) => {
 
 // ---- Administration ----------------------------------------------------------
 VIEWS.admin = async (c) => {
-  const [users, locs] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations")]);
-  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Users</h2><button class="btn" id="newUser">Add user</button></div>
+  const [users, locs, co] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"), api("GET", "/api/company")]);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Company</h2>
+      <button class="btn secondary" id="editCompany">Edit</button></div>
+    <div class="grid"><div><label>Company</label>${esc(co.name)}</div><div><label>Site</label>${esc(co.site_name)}</div>
+      <div><label>Asset ID prefix</label><span class="mono">${esc(co.asset_prefix)}</span> <span class="muted">(next ${esc(co.asset_prefix)}-${String(co.next_asset_number).padStart(6, "0")})</span></div>
+      <div><label>Address</label>${esc(co.address || "-")}</div></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Users</h2><button class="btn" id="newUser">Add user</button></div>
     <div class="tbl"><table><tr><th>User ID</th><th>Name</th><th>Role</th><th>State</th><th></th></tr>
     ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.role)}</td>
       <td>${u.active ? (u.locked ? `<span class="pill bad">locked</span>` : `<span class="pill ok">active</span>`) : `<span class="pill">inactive</span>`}</td>
@@ -623,6 +837,12 @@ VIEWS.admin = async (c) => {
     <div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Area class</th><th></th></tr>
     ${locs.map(l => `<tr><td class="mono">${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.area_class || "")}</td><td><a class="link" data-loc="${esc(l.code)}">Label</a></td></tr>`).join("")}</table></div></div>`;
   const roles = ["viewer", "operator", "technician", "qa", "admin"];
+  $("#editCompany").onclick = () => modal(`<h2>Edit company</h2>${field("name", "Company name", `value="${esc(co.name)}" required`)}
+    ${field("site_name", "Site name", `value="${esc(co.site_name)}" required`)}<label>Address</label><textarea name="address" rows="2">${esc(co.address || "")}</textarea>
+    ${field("asset_prefix", "Asset ID prefix (applies to new assets only)", `value="${esc(co.asset_prefix)}" required maxlength="10"`)}
+    <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
+    state.company = await api("PUT", "/api/company", d); setCompanyHeader(); toast("Company updated"); openTab("admin");
+  });
   $("#newUser").onclick = () => modal(`<h2>Add user</h2>${field("username", "User ID (never re-used)", "required")}${field("full_name", "Full name (shown on e-signatures)", "required")}
     ${select("role", "Role", roles)}${field("temporary_password", "Temporary password (must be changed at first login)", 'type="password" required')}`, async (d) => {
     await api("POST", "/api/users", d); toast("User created"); openTab("admin");
@@ -668,11 +888,32 @@ $("#pwForm").onsubmit = async (e) => {
 };
 $("#logoutBtn").onclick = async () => { try { await api("POST", "/api/auth/logout"); } catch (_) {} logoutLocal("Signed out"); };
 
+$("#setupForm [name=asset_prefix]").oninput = (e) => $("#prefixPreview").textContent = (e.target.value.toUpperCase() || "ACME") + "-000001";
+$("#setupForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try { state.company = await api("PUT", "/api/company", Object.fromEntries(new FormData(e.target))); toast("Company set up"); await boot(); }
+  catch (err) { toast(err.message, 6000); }
+};
+for (const id of ["#setupLogout", "#waitLogout"]) $(id).onclick = () => $("#logoutBtn").onclick();
+
+function setCompanyHeader() {
+  $("#companyName").textContent = state.company ? `- ${state.company.name}, ${state.company.site_name}` : "";
+}
+
 async function boot() {
+  try {
+    const pub = await api("GET", "/api/company/public");
+    $("#loginCompany").textContent = pub.configured ? `${pub.name} - ${pub.site_name}` : "";
+  } catch (_) { /* server unreachable: the login attempt will report it */ }
   if (!state.token) return show("login");
   try { state.me = await api("GET", "/api/me"); } catch (_) { return logoutLocal(); }
   if (state.me.must_change_password) return show("pw");
+  state.company = await api("GET", "/api/company");
+  if (!state.company) return show(can("company.manage") ? "setup" : "wait");
+  setCompanyHeader();
   $("#who").textContent = `${state.me.full_name} (${state.me.username}) - ${state.me.role}`;
+  // People who register or maintain assets start on the register; operators start at the scan station
+  state.tab = state.tab || (can("asset.create") || can("maintenance.plan") || can("user.manage") ? "assets" : "scan");
   show("app"); openTab(state.tab);
 }
 boot();

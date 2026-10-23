@@ -68,6 +68,7 @@ def api(app):
     first = a.login("admin", ADMIN_TEMP)
     assert first["must_change_password"]
     a.ok("admin", "post", "/api/auth/change-password", json={"old_password": ADMIN_TEMP, "new_password": PASSWORDS["admin"]})
+    a.ok("admin", "put", "/api/company", json={"name": "Acme Biologics", "site_name": "Accra Plant 1", "asset_prefix": "ACME"})
     for username, role in (("qa1", "qa"), ("tech1", "technician"), ("tech2", "technician"), ("op1", "operator")):
         a.ok("admin", "post", "/api/users", status=201, json={
             "username": username, "full_name": f"{username.upper()} Person", "role": role, "temporary_password": "Temp-Pass-123"})

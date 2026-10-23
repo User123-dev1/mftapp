@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,7 +16,7 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .db import Database
 from .security import ROLE_PERMISSIONS
-from .services import AuthError, Forbidden, GMPAssetService, GMPError
+from .services import INTERVAL_UNITS, PM_EVENTS, WORK_TYPES, AuthError, Forbidden, GMPAssetService, GMPError
 
 logger = logging.getLogger("gmp_assets")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -60,8 +62,17 @@ class LocationIn(BaseModel):
     area_class: Optional[str] = None
 
 
+class CompanyIn(BaseModel):
+    name: str
+    site_name: str
+    address: Optional[str] = None
+    asset_prefix: str
+    reason: Optional[str] = None
+
+
 class AssetIn(BaseModel):
-    asset_tag: str
+    asset_tag: Optional[str] = Field(default=None, description="Leave empty to generate the next asset ID")
+    initial_state: str = Field(default="inactive", description="active | inactive")
     description: str
     category: str
     gmp_impact: str = Field(description="direct | indirect | none")
@@ -126,6 +137,43 @@ class MaintenanceIn(BaseModel):
     signature: Signature
 
 
+class PMScheduleIn(BaseModel):
+    title: str
+    instructions: Optional[str] = None
+    work_type: str = "preventive"
+    trigger_type: str = Field(default="time", description="time | event")
+    interval_value: int = Field(description="Repeat interval (time) or 'complete within' period (event)")
+    interval_unit: str = "days"
+    event: Optional[str] = None
+    lead_days: int = 0
+    blocks_use: bool = True
+    first_due_on: Optional[str] = None
+
+
+class PMScheduleUpdateIn(BaseModel):
+    changes: dict
+    reason: str
+
+
+class WorkOrderIn(BaseModel):
+    work_type: str = "preventive"
+    title: str
+    instructions: Optional[str] = None
+    due_on: str
+    blocks_use: bool = False
+
+
+class CompleteWorkOrderIn(BaseModel):
+    performed_on: str
+    notes: str
+    requalification_required: bool = False
+    signature: Signature
+
+
+class CancelIn(BaseModel):
+    reason: str
+
+
 class IssueIn(BaseModel):
     description: str
 
@@ -155,7 +203,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         logger.warning("Initial administrator 'admin' created with temporary password: %s (must be changed at first login)", generated)
         print(f"\n*** Initial administrator 'admin' temporary password: {generated} ***\n")
 
-    app = FastAPI(title="GMP Asset Management", version="1.0.0",
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def work_order_generator():
+            while True:
+                try:
+                    created = await asyncio.to_thread(service.generate_due_work_orders)
+                    if created:
+                        logger.info("Scheduled work orders raised: %s", ", ".join(created))
+                except Exception:  # keep the scheduler alive; errors are logged
+                    logger.exception("Work order generation failed")
+                await asyncio.sleep(3600)
+
+        task = asyncio.create_task(work_order_generator())
+        yield
+        task.cancel()
+
+    app = FastAPI(title="GMP Asset Management", version="1.1.0", lifespan=lifespan,
                   description="GMP-regulated equipment & instrument asset management with barcode scanning "
                               "(21 CFR Part 11 / EU Annex 11).")
     app.state.service = service
@@ -205,6 +269,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/me")
     def me(user: dict = Depends(any_user)):
         return dict(user, permissions=sorted(ROLE_PERMISSIONS.get(user["role"], ())))
+
+    # -- Company -------------------------------------------------------------
+    @app.get("/api/company/public")
+    def company_public():
+        c = service.get_company()
+        return {"configured": c is not None, "name": c["name"] if c else None, "site_name": c["site_name"] if c else None}
+
+    @app.get("/api/company")
+    def company(user: dict = Depends(any_user)):
+        return service.get_company()
+
+    @app.put("/api/company")
+    def save_company(body: CompanyIn, user: dict = Depends(current_user)):
+        return service.save_company(user, name=body.name, site_name=body.site_name, address=body.address,
+                                    asset_prefix=body.asset_prefix, reason=body.reason)
 
     # -- Users ---------------------------------------------------------------
     @app.get("/api/users")
@@ -291,6 +370,37 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/assets/{tag}/issues", status_code=201)
     def report_issue(tag: str, body: IssueIn, user: dict = Depends(current_user)):
         return service.report_issue(user, tag, body.description)
+
+    # -- PM schedules, triggers and work orders ------------------------------
+    @app.get("/api/pm/options")
+    def pm_options(user: dict = Depends(current_user)):
+        return {"events": PM_EVENTS, "work_types": WORK_TYPES, "interval_units": INTERVAL_UNITS}
+
+    @app.post("/api/assets/{tag}/pm-schedules", status_code=201)
+    def create_pm_schedule(tag: str, body: PMScheduleIn, user: dict = Depends(current_user)):
+        return service.create_pm_schedule(user, tag, body.model_dump())
+
+    @app.patch("/api/pm-schedules/{schedule_id}")
+    def update_pm_schedule(schedule_id: int, body: PMScheduleUpdateIn, user: dict = Depends(current_user)):
+        return service.update_pm_schedule(user, schedule_id, body.changes, body.reason)
+
+    @app.post("/api/assets/{tag}/work-orders", status_code=201)
+    def create_work_order(tag: str, body: WorkOrderIn, user: dict = Depends(current_user)):
+        return service.create_work_order(user, tag, work_type=body.work_type, title=body.title,
+                                         instructions=body.instructions, due_on=body.due_on, blocks_use=body.blocks_use)
+
+    @app.get("/api/work-orders")
+    def work_orders(status: Optional[str] = None, asset: Optional[str] = None, user: dict = Depends(current_user)):
+        return service.list_work_orders(user, status, asset)
+
+    @app.post("/api/work-orders/{number}/complete")
+    def complete_work_order(number: str, body: CompleteWorkOrderIn, user: dict = Depends(current_user)):
+        return service.complete_work_order(user, number, performed_on=body.performed_on, notes=body.notes,
+                                           requalification_required=body.requalification_required, password=_pw(body.signature))
+
+    @app.post("/api/work-orders/{number}/cancel")
+    def cancel_work_order(number: str, body: CancelIn, user: dict = Depends(current_user)):
+        return service.cancel_work_order(user, number, body.reason)
 
     # -- Calibrations / deviations -------------------------------------------
     @app.get("/api/calibrations")

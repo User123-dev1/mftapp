@@ -16,6 +16,7 @@ Key GMP rules enforced here (not just in the UI):
 
 from __future__ import annotations
 
+import calendar
 import csv
 import hashlib
 import io
@@ -73,7 +74,8 @@ STATUS_TRANSITIONS = {
     "quarantine": {"out_of_service", "in_service", "retired"},
     "retired": set(),
 }
-# Target status -> (permission, signature meaning or None if no e-signature needed)
+# Target status -> (permission, signature meaning or None if no e-signature needed).
+# Activating an asset with no GMP impact is an ordinary edit; see _status_rule.
 STATUS_RULES = {
     "in_service": ("asset.status.release", "released"),
     "retired": ("asset.status.release", "approved"),
@@ -87,8 +89,21 @@ GMP_IMPACTS = ("direct", "indirect", "none")
 TAG_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9\-_.]{1,39}$")
 EDITABLE_ASSET_FIELDS = (
     "description", "category", "manufacturer", "model", "serial_number", "gtin", "department", "gmp_impact",
-    "is_reference_standard", "calibration_required", "calibration_interval_days", "pm_required", "pm_interval_days",
+    "is_reference_standard", "calibration_required", "calibration_interval_days",
 )
+PREFIX_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
+WORK_TYPES = ("preventive", "inspection", "cleaning", "corrective")
+INTERVAL_UNITS = ("days", "weeks", "months")
+# Events that can trigger a work order automatically
+PM_EVENTS = {
+    "asset_activated": "Asset activated / released to service",
+    "asset_deactivated": "Asset deactivated (taken out of service)",
+    "asset_moved": "Asset moved to another location",
+    "asset_quarantined": "Asset quarantined",
+    "calibration_failed": "Calibration out of tolerance",
+    "corrective_maintenance": "Corrective maintenance (repair) recorded",
+    "deviation_closed": "Deviation closed",
+}
 
 
 def _parse_date(value: str, field: str) -> date:
@@ -102,6 +117,16 @@ def _plus_days(d: Optional[str], days: Optional[int]) -> Optional[str]:
     if not d or not days:
         return None
     return (date.fromisoformat(d) + timedelta(days=days)).isoformat()
+
+
+def _add_interval(d: date, value: int, unit: str) -> date:
+    if unit == "days":
+        return d + timedelta(days=value)
+    if unit == "weeks":
+        return d + timedelta(weeks=value)
+    month_index = d.month - 1 + value
+    year, month = d.year + month_index // 12, month_index % 12 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
 
 
 def _require_reason(reason: Optional[str]) -> str:
@@ -318,6 +343,47 @@ class GMPAssetService:
             return new
 
     # ------------------------------------------------------------------
+    # Company setup
+    # ------------------------------------------------------------------
+
+    def get_company(self) -> Optional[dict]:
+        with self.db.read() as conn:
+            return _row(conn.execute("SELECT * FROM company WHERE id = 1").fetchone())
+
+    def save_company(self, user: dict, *, name: str, site_name: str, address: Optional[str], asset_prefix: str,
+                     reason: Optional[str] = None) -> dict:
+        """First-time company setup, or a later change (which needs a reason)."""
+        self.require(user, "company.manage")
+        name, site_name = (name or "").strip(), (site_name or "").strip()
+        prefix = (asset_prefix or "").strip().upper()
+        if not name or not site_name:
+            raise ValidationFailed("Company name and site name are required")
+        if not PREFIX_PATTERN.match(prefix):
+            raise ValidationFailed("Asset ID prefix must be 1-10 letters or digits, e.g. ACME")
+        now = clock.now_iso()
+        with self.db.transaction() as conn:
+            old = _row(conn.execute("SELECT * FROM company WHERE id = 1").fetchone())
+            new = {"name": name, "site_name": site_name, "address": (address or "").strip() or None, "asset_prefix": prefix}
+            if old is None:
+                conn.execute("INSERT INTO company (id, name, site_name, address, asset_prefix, created_at, updated_at) "
+                             "VALUES (1, :name, :site_name, :address, :asset_prefix, :now, :now)", dict(new, now=now))
+                audit.record(conn, username=user["username"], action="COMPANY_SETUP", entity_type="company", entity_id=1,
+                             new=new, reason=(reason or "").strip() or "Initial company setup")
+            else:
+                reason = _require_reason(reason)
+                changed = {k: v for k, v in new.items() if old[k] != v}
+                if not changed:
+                    raise ValidationFailed("No changes")
+                if "asset_prefix" in changed:
+                    # existing asset IDs are never renumbered; restart the counter for the new prefix
+                    changed["next_asset_number"] = 1
+                conn.execute(f"UPDATE company SET {', '.join(f'{k} = ?' for k in changed)}, updated_at = ? WHERE id = 1",
+                             (*changed.values(), now))
+                audit.record(conn, username=user["username"], action="COMPANY_MODIFIED", entity_type="company", entity_id=1,
+                             old={k: old[k] for k in changed}, new=changed, reason=reason)
+            return dict(conn.execute("SELECT * FROM company WHERE id = 1").fetchone())
+
+    # ------------------------------------------------------------------
     # Electronic signatures (21 CFR 11.50 / 11.70 / 11.200)
     # ------------------------------------------------------------------
 
@@ -418,11 +484,10 @@ class GMPAssetService:
             raise ValidationFailed("Category is required")
         if data.get("gmp_impact") not in GMP_IMPACTS:
             raise ValidationFailed(f"gmp_impact must be one of {', '.join(GMP_IMPACTS)}")
-        for flag, interval in (("calibration_required", "calibration_interval_days"), ("pm_required", "pm_interval_days")):
-            if data.get(flag):
-                value = data.get(interval)
-                if not isinstance(value, int) or not 1 <= value <= 3650:
-                    raise ValidationFailed(f"{interval} (1-3650) is required when {flag} is set")
+        if data.get("calibration_required"):
+            value = data.get("calibration_interval_days")
+            if not isinstance(value, int) or not 1 <= value <= 3650:
+                raise ValidationFailed("calibration_interval_days (1-3650) is required when calibration is required")
         if data.get("is_reference_standard") and not data.get("calibration_required"):
             raise ValidationFailed("A reference standard must itself be under calibration control")
 
@@ -458,19 +523,42 @@ class GMPAssetService:
             asset["deviations"] = [dict(r) for r in conn.execute(
                 "SELECT * FROM deviations WHERE asset_id = ? ORDER BY id DESC", (asset["id"],))]
             asset["signatures"] = self._signatures(conn, "asset", asset["id"])
+            asset["pm_schedules"] = [dict(r) for r in conn.execute(
+                "SELECT * FROM pm_schedules WHERE asset_id = ? ORDER BY active DESC, id", (asset["id"],))]
+            asset["work_orders"] = [self._decorate_wo(conn, dict(r)) for r in conn.execute(
+                self._WO_SELECT + "WHERE w.asset_id = ? ORDER BY w.status = 'open' DESC, w.due_on DESC, w.id DESC", (asset["id"],))]
             return asset
 
     def create_asset(self, user: dict, data: dict) -> dict:
+        """Register an asset. The asset ID is generated from the company prefix
+        unless an existing tag is supplied (e.g. equipment already labelled)."""
         self.require(user, "asset.create")
         data = dict(data)
-        tag = (data.get("asset_tag") or "").strip().upper()
-        if not TAG_PATTERN.match(tag):
+        supplied_tag = (data.get("asset_tag") or "").strip().upper()
+        if supplied_tag and not TAG_PATTERN.match(supplied_tag):
             raise ValidationFailed("Asset tag must be 2-40 characters: A-Z, 0-9, - _ .")
         self._validate_asset_fields(data)
+        if data.get("pm_required"):
+            value = data.get("pm_interval_days")
+            if not isinstance(value, int) or not 1 <= value <= 3650:
+                raise ValidationFailed("pm_interval_days (1-3650) is required when PM is required")
+        initial_state = data.get("initial_state") or "inactive"
+        if initial_state not in ("active", "inactive"):
+            raise ValidationFailed("initial_state must be active or inactive")
+        if initial_state == "active":
+            if data["gmp_impact"] != "none":
+                raise ValidationFailed(
+                    "GMP-impacting assets must be qualified, calibrated and released by QA before use - "
+                    "register as Inactive and activate after release")
+            if data.get("calibration_required"):
+                raise ValidationFailed("Assets requiring calibration must be calibrated before activation - register as Inactive")
         gtin = self._normalise_gtin(data.get("gtin"))
-        today = clock.today().isoformat()
         now = clock.now_iso()
         with self.db.transaction() as conn:
+            company = conn.execute("SELECT * FROM company WHERE id = 1").fetchone()
+            if company is None:
+                raise Conflict("Company setup must be completed before assets can be registered")
+            tag = supplied_tag or self._next_asset_tag(conn, company)
             if conn.execute("SELECT 1 FROM assets WHERE asset_tag = ?", (tag,)).fetchone() or \
                     conn.execute("SELECT 1 FROM locations WHERE code = ?", (tag,)).fetchone():
                 raise Conflict(f"Tag {tag} is already used by an asset or location")
@@ -484,26 +572,42 @@ class GMPAssetService:
                 if loc is None:
                     raise ValidationFailed(f"Location {data['location_code']} not found")
                 location_id = loc["id"]
-            pm_interval = data.get("pm_interval_days") if data.get("pm_required") else None
+            status = "in_service" if initial_state == "active" else "commissioning"
             cur = conn.execute(
                 "INSERT INTO assets (asset_tag, description, category, gmp_impact, manufacturer, model, serial_number, gtin, "
                 "department, location_id, status, qualification_status, is_reference_standard, calibration_required, "
-                "calibration_interval_days, pm_required, pm_interval_days, pm_due_on, created_at, created_by, updated_at, updated_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'commissioning', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "calibration_interval_days, created_at, created_by, updated_at, updated_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     tag, data["description"].strip(), data["category"].strip(), data["gmp_impact"],
                     data.get("manufacturer"), data.get("model"), data.get("serial_number"), gtin, data.get("department"),
-                    location_id, "not_required" if data["gmp_impact"] == "none" else "pending",
+                    location_id, status, "not_required" if data["gmp_impact"] == "none" else "pending",
                     int(bool(data.get("is_reference_standard"))), int(bool(data.get("calibration_required"))),
                     data.get("calibration_interval_days") if data.get("calibration_required") else None,
-                    int(bool(data.get("pm_required"))), pm_interval, _plus_days(today, pm_interval),
                     now, user["username"], now, user["username"],
                 ),
             )
             asset = self._asset_core(dict(conn.execute("SELECT * FROM assets WHERE id = ?", (cur.lastrowid,)).fetchone()))
             audit.record(conn, username=user["username"], action="ASSET_CREATED", entity_type="asset", entity_id=tag,
                          new=asset, reason=data.get("reason") or "New asset registration")
+            if data.get("pm_required"):
+                self._insert_schedule(conn, user, self._asset(conn, tag), {
+                    "title": "Preventive maintenance", "work_type": "preventive", "trigger_type": "time",
+                    "interval_value": data["pm_interval_days"], "interval_unit": "days",
+                })
         return self.get_asset(user, tag)
+
+    @staticmethod
+    def _next_asset_tag(conn, company) -> str:
+        number = company["next_asset_number"]
+        while True:
+            tag = f"{company['asset_prefix']}-{number:06d}"
+            number += 1
+            if not conn.execute("SELECT 1 FROM assets WHERE asset_tag = ? UNION SELECT 1 FROM locations WHERE code = ?",
+                                (tag, tag)).fetchone():
+                break
+        conn.execute("UPDATE company SET next_asset_number = ? WHERE id = 1", (number,))
+        return tag
 
     def update_asset(self, user: dict, tag: str, changes: dict, reason: str, expected_version: Optional[int] = None) -> dict:
         self.require(user, "asset.edit")
@@ -523,7 +627,7 @@ class GMPAssetService:
             merged.update(changes)
             if "gtin" in changes:
                 merged["gtin"] = self._normalise_gtin(changes["gtin"])
-            for flag in ("is_reference_standard", "calibration_required", "pm_required"):
+            for flag in ("is_reference_standard", "calibration_required"):
                 merged[flag] = int(bool(merged[flag]))
             self._validate_asset_fields(merged)
             if not merged["calibration_required"]:
@@ -531,12 +635,6 @@ class GMPAssetService:
                 merged["calibration_due_on"] = None
             else:
                 merged["calibration_due_on"] = _plus_days(merged["last_calibrated_on"], merged["calibration_interval_days"])
-            if not merged["pm_required"]:
-                merged["pm_interval_days"] = None
-                merged["pm_due_on"] = None
-            elif merged["pm_interval_days"] != old["pm_interval_days"] or not old["pm_required"]:
-                base = merged["last_pm_on"] or clock.today().isoformat()
-                merged["pm_due_on"] = _plus_days(base, merged["pm_interval_days"])
             if merged["gmp_impact"] != old["gmp_impact"]:
                 if merged["gmp_impact"] == "none":
                     merged["qualification_status"] = "not_required"
@@ -577,16 +675,24 @@ class GMPAssetService:
                 raise ValidationFailed(f"Asset is already at {loc['code']}")
             self._set_asset_fields(conn, user, asset, {"location_id": loc["id"]}, "ASSET_MOVED",
                                    (reason or "").strip() or f"Relocated to {loc['code']} by barcode scan")
+            self._fire_event(conn, user, asset, "asset_moved", f"moved to {loc['code']}")
         return self.get_asset(user, tag)
+
+    @staticmethod
+    def _status_rule(asset: dict, new_status: str):
+        if new_status == "in_service" and asset["gmp_impact"] == "none":
+            return "asset.edit", None  # non-GMP equipment: simple activation, no QA release
+        return STATUS_RULES[new_status]
 
     def change_status(self, user: dict, tag: str, new_status: str, reason: str, password: Optional[str] = None) -> dict:
         if new_status not in STATUS_RULES:
             raise ValidationFailed(f"Status must be one of {', '.join(STATUS_RULES)}")
-        permission, meaning = STATUS_RULES[new_status]
+        with self.db.read() as conn:
+            asset = self._asset(conn, tag)
+        permission, meaning = self._status_rule(asset, new_status)
         self.require(user, permission)
         reason = _require_reason(reason)
         with self.db.read() as conn:
-            asset = self._asset(conn, tag)
             self._check_transition(conn, asset, new_status)
         if meaning:
             self._verify_signer(user, password, meaning)
@@ -596,6 +702,10 @@ class GMPAssetService:
             updated = self._set_asset_fields(conn, user, asset, {"status": new_status}, "STATUS_CHANGED", reason)
             if meaning:
                 self._apply_signature(conn, user, "asset", asset["id"], meaning, self._asset_core(updated))
+            event = {"in_service": "asset_activated", "out_of_service": "asset_deactivated",
+                     "quarantine": "asset_quarantined"}.get(new_status)
+            if event:
+                self._fire_event(conn, user, asset, event, reason)
         return self.get_asset(user, tag)
 
     def _check_transition(self, conn, asset: dict, new_status: str) -> None:
@@ -641,8 +751,14 @@ class GMPAssetService:
                 blockers.append("No approved calibration on record")
             elif date.fromisoformat(asset["calibration_due_on"]) < on:
                 blockers.append(f"Calibration overdue since {asset['calibration_due_on']}")
-        if asset["pm_required"] and asset["pm_due_on"] and date.fromisoformat(asset["pm_due_on"]) < on:
-            blockers.append(f"Preventive maintenance overdue since {asset['pm_due_on']}")
+        for sch in conn.execute(
+                "SELECT title, next_due_on FROM pm_schedules WHERE asset_id = ? AND active = 1 AND trigger_type = 'time' "
+                "AND blocks_use = 1 AND next_due_on < ? ORDER BY next_due_on", (asset["id"], on.isoformat())):
+            blockers.append(f"{sch['title']} overdue since {sch['next_due_on']}")
+        for wo in conn.execute(
+                "SELECT number, title FROM work_orders WHERE asset_id = ? AND status = 'open' AND blocks_use = 1 "
+                "AND trigger != 'schedule' ORDER BY id", (asset["id"],)):
+            blockers.append(f"Work order {wo['number']} ({wo['title']}) must be completed before use")
         open_devs = [r["number"] for r in conn.execute(
             "SELECT number FROM deviations WHERE asset_id = ? AND status = 'open'", (asset["id"],))]
         if open_devs:
@@ -713,7 +829,10 @@ class GMPAssetService:
         self.require(user, "asset.view")
         with self.db.read() as conn:
             asset = self._asset(conn, tag)
+        company = self.get_company()
         lines = [asset["description"][:48]]
+        if company:
+            lines.append(f"{company['name']} - {company['site_name']}"[:48])
         if asset["calibration_required"]:
             lines.append(f"Cal due: {asset['calibration_due_on'] or 'NOT CALIBRATED'}")
         return code128_svg(asset["asset_tag"], extra_lines=lines)
@@ -799,6 +918,8 @@ class GMPAssetService:
                 if asset["status"] not in ("quarantine", "retired"):
                     self._set_asset_fields(conn, user, asset, {"status": "quarantine"}, "STATUS_CHANGED",
                                            f"Automatic quarantine: {dev['number']} out-of-tolerance calibration")
+                    self._fire_event(conn, user, asset, "asset_quarantined", dev["number"])
+                self._fire_event(conn, user, asset, "calibration_failed", dev["number"])
         return self.get_calibration(user, cal_id)
 
     def _validate_calibration(self, conn, asset: dict, performed: date, standards: List[str]) -> None:
@@ -881,44 +1002,323 @@ class GMPAssetService:
 
     def record_maintenance(self, user: dict, tag: str, *, maintenance_type: str, performed_on: str, description: str,
                            requalification_required: bool = False, password: Optional[str] = None) -> dict:
+        """Record ad-hoc maintenance. Planned work is completed through work orders."""
         self.require(user, "maintenance.record")
         if maintenance_type not in ("preventive", "corrective"):
             raise ValidationFailed("maintenance_type must be preventive or corrective")
-        performed = _parse_date(performed_on, "performed_on")
-        if performed > clock.today():
-            raise ValidationFailed("Maintenance date cannot be in the future")
-        if not description or len(description.strip()) < 5:
-            raise ValidationFailed("A description of the work performed is required")
+        performed = self._validate_maintenance_input(performed_on, description)
         with self.db.read() as conn:
             if self._asset(conn, tag)["status"] == "retired":
                 raise Conflict("Retired assets cannot be maintained")
         self._verify_signer(user, password, "performed")
         with self.db.transaction() as conn:
             asset = self._asset(conn, tag)
-            record = {
-                "asset_id": asset["id"], "maintenance_type": maintenance_type, "performed_on": performed.isoformat(),
-                "performed_by": user["username"], "description": description.strip(),
-                "requalification_required": int(bool(requalification_required)), "recorded_at": clock.now_iso(),
-            }
-            cur = conn.execute(
-                "INSERT INTO maintenance_records (asset_id, maintenance_type, performed_on, performed_by, description, "
-                "requalification_required, recorded_at) VALUES (:asset_id, :maintenance_type, :performed_on, :performed_by, "
-                ":description, :requalification_required, :recorded_at)", record)
-            record["id"] = cur.lastrowid
-            audit.record(conn, username=user["username"], action="MAINTENANCE_RECORDED", entity_type="maintenance",
-                         entity_id=record["id"], new=dict(record, asset_tag=asset["asset_tag"]))
-            self._apply_signature(conn, user, "maintenance", record["id"], "performed", record)
-            fields: Dict[str, Any] = {}
-            if maintenance_type == "preventive" and asset["pm_required"] and \
-                    (not asset["last_pm_on"] or record["performed_on"] >= asset["last_pm_on"]):
-                fields.update(last_pm_on=record["performed_on"],
-                              pm_due_on=_plus_days(record["performed_on"], asset["pm_interval_days"]))
-            if requalification_required and asset["gmp_impact"] != "none":
-                fields["qualification_status"] = "requalification_required"
-            if fields:
-                self._set_asset_fields(conn, user, asset, fields, "MAINTENANCE_STATUS_UPDATED",
-                                       f"Maintenance record #{record['id']}")
+            self._insert_maintenance(conn, user, asset, maintenance_type, performed, description.strip(), requalification_required)
         return self.get_asset(user, tag)
+
+    @staticmethod
+    def _validate_maintenance_input(performed_on: str, description: str) -> date:
+        performed = _parse_date(performed_on, "performed_on")
+        if performed > clock.today():
+            raise ValidationFailed("Maintenance date cannot be in the future")
+        if not description or len(description.strip()) < 5:
+            raise ValidationFailed("A description of the work performed is required")
+        return performed
+
+    def _insert_maintenance(self, conn, user: dict, asset: dict, maintenance_type: str, performed: date,
+                            description: str, requalification_required: bool) -> int:
+        record = {
+            "asset_id": asset["id"], "maintenance_type": maintenance_type, "performed_on": performed.isoformat(),
+            "performed_by": user["username"], "description": description,
+            "requalification_required": int(bool(requalification_required)), "recorded_at": clock.now_iso(),
+        }
+        cur = conn.execute(
+            "INSERT INTO maintenance_records (asset_id, maintenance_type, performed_on, performed_by, description, "
+            "requalification_required, recorded_at) VALUES (:asset_id, :maintenance_type, :performed_on, :performed_by, "
+            ":description, :requalification_required, :recorded_at)", record)
+        record["id"] = cur.lastrowid
+        audit.record(conn, username=user["username"], action="MAINTENANCE_RECORDED", entity_type="maintenance",
+                     entity_id=record["id"], new=dict(record, asset_tag=asset["asset_tag"]))
+        self._apply_signature(conn, user, "maintenance", record["id"], "performed", record)
+        fields: Dict[str, Any] = {}
+        if maintenance_type == "preventive" and (not asset["last_pm_on"] or record["performed_on"] >= asset["last_pm_on"]):
+            fields["last_pm_on"] = record["performed_on"]
+        if requalification_required and asset["gmp_impact"] != "none":
+            fields["qualification_status"] = "requalification_required"
+        if fields:
+            asset = self._set_asset_fields(conn, user, asset, fields, "MAINTENANCE_STATUS_UPDATED",
+                                           f"Maintenance record #{record['id']}")
+        if maintenance_type == "corrective":
+            self._fire_event(conn, user, asset, "corrective_maintenance", f"maintenance record #{record['id']}")
+        return record["id"]
+
+    # ------------------------------------------------------------------
+    # PM schedules, event triggers and work orders
+    # ------------------------------------------------------------------
+
+    def _validate_schedule(self, data: dict) -> dict:
+        clean = {
+            "title": (data.get("title") or "").strip(),
+            "instructions": (data.get("instructions") or "").strip() or None,
+            "work_type": data.get("work_type") or "preventive",
+            "trigger_type": data.get("trigger_type") or "time",
+            "interval_value": data.get("interval_value"),
+            "interval_unit": data.get("interval_unit") or "days",
+            "event": data.get("event") or None,
+            "lead_days": data.get("lead_days") or 0,
+            "blocks_use": int(bool(data.get("blocks_use", True))),
+        }
+        if len(clean["title"]) < 3:
+            raise ValidationFailed("A title is required (e.g. 'Quarterly PM', 'Post-move verification')")
+        if clean["work_type"] not in WORK_TYPES:
+            raise ValidationFailed(f"work_type must be one of {', '.join(WORK_TYPES)}")
+        if clean["trigger_type"] not in ("time", "event"):
+            raise ValidationFailed("trigger_type must be time or event")
+        if clean["interval_unit"] not in INTERVAL_UNITS:
+            raise ValidationFailed(f"interval_unit must be one of {', '.join(INTERVAL_UNITS)}")
+        if not isinstance(clean["interval_value"], int) or not 1 <= clean["interval_value"] <= 3650:
+            raise ValidationFailed("interval_value must be a whole number from 1 to 3650")
+        if not isinstance(clean["lead_days"], int) or not 0 <= clean["lead_days"] <= 365:
+            raise ValidationFailed("lead_days must be 0-365")
+        if clean["trigger_type"] == "event":
+            if clean["event"] not in PM_EVENTS:
+                raise ValidationFailed(f"event must be one of {', '.join(PM_EVENTS)}")
+        else:
+            clean["event"] = None
+        return clean
+
+    def _insert_schedule(self, conn, user: dict, asset: dict, data: dict, first_due_on: Optional[str] = None) -> dict:
+        sch = self._validate_schedule(data)
+        if sch["trigger_type"] == "time":
+            first = _parse_date(first_due_on, "first_due_on") if first_due_on else \
+                _add_interval(clock.today(), sch["interval_value"], sch["interval_unit"])
+            sch["next_due_on"] = first.isoformat()
+        else:
+            sch["next_due_on"] = None
+        sch.update(asset_id=asset["id"], created_at=clock.now_iso(), created_by=user["username"])
+        cur = conn.execute(
+            "INSERT INTO pm_schedules (asset_id, title, instructions, work_type, trigger_type, interval_value, interval_unit, "
+            "event, lead_days, blocks_use, next_due_on, created_at, created_by) VALUES (:asset_id, :title, :instructions, "
+            ":work_type, :trigger_type, :interval_value, :interval_unit, :event, :lead_days, :blocks_use, :next_due_on, "
+            ":created_at, :created_by)", sch)
+        sch["id"] = cur.lastrowid
+        audit.record(conn, username=user["username"], action="PM_SCHEDULE_CREATED", entity_type="pm_schedule",
+                     entity_id=sch["id"], new=dict(sch, asset_tag=asset["asset_tag"]))
+        self._sync_pm_due(conn, user, asset["id"])
+        return sch
+
+    def _sync_pm_due(self, conn, user: dict, asset_id: int) -> None:
+        """Keep the asset's PM summary (pm_required / pm_due_on) in line with its time-based schedules."""
+        row = conn.execute("SELECT COUNT(*) AS n, MIN(next_due_on) AS due FROM pm_schedules "
+                           "WHERE asset_id = ? AND active = 1 AND trigger_type = 'time'", (asset_id,)).fetchone()
+        asset = dict(conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone())
+        fields = {"pm_required": int(row["n"] > 0), "pm_due_on": row["due"]}
+        changed = {k: v for k, v in fields.items() if asset[k] != v}
+        if changed:
+            self._set_asset_fields(conn, user, asset, changed, "PM_SUMMARY_UPDATED", "PM schedule change")
+
+    def create_pm_schedule(self, user: dict, tag: str, data: dict) -> dict:
+        self.require(user, "maintenance.plan")
+        with self.db.transaction() as conn:
+            asset = self._asset(conn, tag)
+            if asset["status"] == "retired":
+                raise Conflict("Retired assets cannot have maintenance plans")
+            sch = self._insert_schedule(conn, user, asset, data, data.get("first_due_on"))
+        self.generate_due_work_orders()
+        return self._schedule(sch["id"])
+
+    def update_pm_schedule(self, user: dict, schedule_id: int, changes: dict, reason: str) -> dict:
+        self.require(user, "maintenance.plan")
+        reason = _require_reason(reason)
+        allowed = {"title", "instructions", "interval_value", "interval_unit", "lead_days", "blocks_use", "active", "next_due_on"}
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ValidationFailed(f"Fields not editable: {', '.join(sorted(unknown))}")
+        with self.db.transaction() as conn:
+            old = _row(conn.execute("SELECT * FROM pm_schedules WHERE id = ?", (schedule_id,)).fetchone())
+            if old is None:
+                raise NotFound("PM schedule not found")
+            merged = dict(old, **changes)
+            self._validate_schedule(merged)
+            merged["active"] = int(bool(merged["active"]))
+            merged["blocks_use"] = int(bool(merged["blocks_use"]))
+            if merged["trigger_type"] == "time":
+                if "next_due_on" in changes:
+                    merged["next_due_on"] = _parse_date(changes["next_due_on"], "next_due_on").isoformat()
+                elif {"interval_value", "interval_unit"} & set(changes) and old["last_completed_on"]:
+                    merged["next_due_on"] = _add_interval(date.fromisoformat(old["last_completed_on"]),
+                                                          merged["interval_value"], merged["interval_unit"]).isoformat()
+            diff = {k: merged[k] for k in allowed if merged[k] != old[k]}
+            if not diff:
+                raise ValidationFailed("No changes")
+            conn.execute(f"UPDATE pm_schedules SET {', '.join(f'{k} = ?' for k in diff)} WHERE id = ?",
+                         (*diff.values(), schedule_id))
+            audit.record(conn, username=user["username"], action="PM_SCHEDULE_MODIFIED", entity_type="pm_schedule",
+                         entity_id=schedule_id, old={k: old[k] for k in diff}, new=diff, reason=reason)
+            self._sync_pm_due(conn, user, old["asset_id"])
+        return self._schedule(schedule_id)
+
+    def _schedule(self, schedule_id: int) -> dict:
+        with self.db.read() as conn:
+            row = conn.execute("SELECT s.*, a.asset_tag FROM pm_schedules s JOIN assets a ON a.id = s.asset_id "
+                               "WHERE s.id = ?", (schedule_id,)).fetchone()
+        return dict(row)
+
+    def _create_work_order(self, conn, user: dict, asset: dict, *, work_type: str, title: str, instructions: Optional[str],
+                           due_on: str, trigger: str, blocks_use: bool, schedule_id: Optional[int] = None,
+                           reason: Optional[str] = None) -> dict:
+        year = clock.today().year
+        n = conn.execute("SELECT COUNT(*) FROM work_orders WHERE number LIKE ?", (f"WO-{year}-%",)).fetchone()[0] + 1
+        wo = {
+            "number": f"WO-{year}-{n:04d}", "asset_id": asset["id"], "schedule_id": schedule_id, "work_type": work_type,
+            "title": title, "instructions": instructions, "trigger": trigger, "due_on": due_on,
+            "blocks_use": int(bool(blocks_use)), "status": "open", "created_at": clock.now_iso(),
+            "created_by": user["username"],
+        }
+        cur = conn.execute(
+            "INSERT INTO work_orders (number, asset_id, schedule_id, work_type, title, instructions, trigger, due_on, "
+            "blocks_use, status, created_at, created_by) VALUES (:number, :asset_id, :schedule_id, :work_type, :title, "
+            ":instructions, :trigger, :due_on, :blocks_use, :status, :created_at, :created_by)", wo)
+        wo["id"] = cur.lastrowid
+        audit.record(conn, username=user["username"], action="WORK_ORDER_CREATED", entity_type="work_order",
+                     entity_id=wo["number"], new=dict(wo, asset_tag=asset["asset_tag"]), reason=reason)
+        return wo
+
+    def _fire_event(self, conn, user: dict, asset: dict, event: str, detail: str = "") -> List[dict]:
+        """Create work orders for every active event-triggered schedule listening for ``event``."""
+        created = []
+        for sch in conn.execute("SELECT * FROM pm_schedules WHERE asset_id = ? AND active = 1 AND trigger_type = 'event' "
+                                "AND event = ?", (asset["id"], event)).fetchall():
+            due = _add_interval(clock.today(), sch["interval_value"], sch["interval_unit"]).isoformat()
+            created.append(self._create_work_order(
+                conn, user, asset, work_type=sch["work_type"], title=sch["title"], instructions=sch["instructions"],
+                due_on=due, trigger=f"event:{event}", blocks_use=sch["blocks_use"], schedule_id=sch["id"],
+                reason=f"Triggered by event '{PM_EVENTS[event]}'" + (f": {detail}" if detail else "")))
+        return created
+
+    def generate_due_work_orders(self) -> List[str]:
+        """Raise work orders for time-based schedules entering their lead window.
+        Safe to call repeatedly: one open work order per schedule at a time."""
+        today = clock.today()
+        system = {"username": "system", "full_name": "System"}
+        created = []
+        with self.db.transaction() as conn:
+            for sch in conn.execute(
+                    "SELECT s.* FROM pm_schedules s JOIN assets a ON a.id = s.asset_id "
+                    "WHERE s.active = 1 AND s.trigger_type = 'time' AND a.status != 'retired' "
+                    "AND NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.schedule_id = s.id AND w.status = 'open')").fetchall():
+                if date.fromisoformat(sch["next_due_on"]) - timedelta(days=sch["lead_days"]) > today:
+                    continue
+                asset = dict(conn.execute("SELECT * FROM assets WHERE id = ?", (sch["asset_id"],)).fetchone())
+                wo = self._create_work_order(
+                    conn, system, asset, work_type=sch["work_type"], title=sch["title"], instructions=sch["instructions"],
+                    due_on=sch["next_due_on"], trigger="schedule", blocks_use=sch["blocks_use"], schedule_id=sch["id"],
+                    reason=f"Scheduled every {sch['interval_value']} {sch['interval_unit']}")
+                created.append(wo["number"])
+        return created
+
+    def create_work_order(self, user: dict, tag: str, *, work_type: str, title: str, instructions: Optional[str],
+                          due_on: str, blocks_use: bool = False) -> dict:
+        self.require(user, "maintenance.plan")
+        if work_type not in WORK_TYPES:
+            raise ValidationFailed(f"work_type must be one of {', '.join(WORK_TYPES)}")
+        if not title or len(title.strip()) < 3:
+            raise ValidationFailed("A title is required")
+        due = _parse_date(due_on, "due_on")
+        with self.db.transaction() as conn:
+            asset = self._asset(conn, tag)
+            if asset["status"] == "retired":
+                raise Conflict("Retired assets cannot have work orders")
+            wo = self._create_work_order(conn, user, asset, work_type=work_type, title=title.strip(),
+                                         instructions=(instructions or "").strip() or None, due_on=due.isoformat(),
+                                         trigger="manual", blocks_use=blocks_use)
+        return self.get_work_order(user, wo["number"])
+
+    _WO_SELECT = ("SELECT w.*, a.asset_tag, a.description AS asset_description, l.code AS location_code "
+                  "FROM work_orders w JOIN assets a ON a.id = w.asset_id LEFT JOIN locations l ON l.id = a.location_id ")
+
+    def _decorate_wo(self, conn, wo: dict) -> dict:
+        wo["overdue"] = wo["status"] == "open" and wo["due_on"] < clock.today().isoformat()
+        wo["signatures"] = self._signatures(conn, "maintenance", wo["maintenance_record_id"]) if wo["maintenance_record_id"] else []
+        return wo
+
+    def get_work_order(self, user: dict, number: str) -> dict:
+        self.require(user, "asset.view")
+        with self.db.read() as conn:
+            row = conn.execute(self._WO_SELECT + "WHERE w.number = ?", (number,)).fetchone()
+            if row is None:
+                raise NotFound(f"Work order {number} not found")
+            return self._decorate_wo(conn, dict(row))
+
+    def list_work_orders(self, user: dict, status: Optional[str] = None, tag: Optional[str] = None) -> List[dict]:
+        self.require(user, "asset.view")
+        self.generate_due_work_orders()
+        sql, args = self._WO_SELECT + "WHERE 1=1 ", []
+        if status:
+            sql += "AND w.status = ? "
+            args.append(status)
+        if tag:
+            sql += "AND a.asset_tag = ? "
+            args.append(tag.upper())
+        with self.db.read() as conn:
+            return [self._decorate_wo(conn, dict(r)) for r in conn.execute(sql + "ORDER BY w.status = 'open' DESC, w.due_on, w.id", args)]
+
+    def complete_work_order(self, user: dict, number: str, *, performed_on: str, notes: str,
+                            requalification_required: bool = False, password: Optional[str] = None) -> dict:
+        self.require(user, "maintenance.record")
+        performed = self._validate_maintenance_input(performed_on, notes)
+        wo = self.get_work_order(user, number)
+        if wo["status"] != "open":
+            raise Conflict(f"Work order is already {wo['status']}")
+        self._verify_signer(user, password, "performed")
+        with self.db.transaction() as conn:
+            current = conn.execute("SELECT status FROM work_orders WHERE number = ?", (number,)).fetchone()
+            if current["status"] != "open":
+                raise Conflict(f"Work order is already {current['status']}")
+            asset = self._asset(conn, wo["asset_tag"])
+            maintenance_type = "corrective" if wo["work_type"] == "corrective" else "preventive"
+            record_id = self._insert_maintenance(conn, user, asset, maintenance_type, performed,
+                                                 f"[{number} {wo['work_type']}] {wo['title']}: {notes.strip()}",
+                                                 requalification_required)
+            now = clock.now_iso()
+            conn.execute("UPDATE work_orders SET status = 'completed', closed_at = ?, closed_by = ?, closure_notes = ?, "
+                         "maintenance_record_id = ? WHERE number = ?", (now, user["username"], notes.strip(), record_id, number))
+            audit.record(conn, username=user["username"], action="WORK_ORDER_COMPLETED", entity_type="work_order",
+                         entity_id=number, old={"status": "open"},
+                         new={"status": "completed", "closed_at": now, "maintenance_record_id": record_id})
+            if wo["schedule_id"] and wo["trigger"] == "schedule":
+                self._advance_schedule(conn, user, wo["schedule_id"], performed, f"Completed {number}", completed=True)
+        return self.get_work_order(user, number)
+
+    def _advance_schedule(self, conn, user: dict, schedule_id: int, base: date, reason: str, completed: bool) -> None:
+        sch = dict(conn.execute("SELECT * FROM pm_schedules WHERE id = ?", (schedule_id,)).fetchone())
+        next_due = _add_interval(base, sch["interval_value"], sch["interval_unit"]).isoformat()
+        fields = {"next_due_on": next_due}
+        if completed:
+            fields["last_completed_on"] = base.isoformat()
+        conn.execute(f"UPDATE pm_schedules SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*fields.values(), schedule_id))
+        audit.record(conn, username=user["username"], action="PM_SCHEDULE_ADVANCED", entity_type="pm_schedule",
+                     entity_id=schedule_id, old={k: sch[k] for k in fields}, new=fields, reason=reason)
+        self._sync_pm_due(conn, user, sch["asset_id"])
+
+    def cancel_work_order(self, user: dict, number: str, reason: str) -> dict:
+        self.require(user, "maintenance.plan")
+        reason = _require_reason(reason)
+        with self.db.transaction() as conn:
+            wo = _row(conn.execute("SELECT * FROM work_orders WHERE number = ?", (number,)).fetchone())
+            if wo is None:
+                raise NotFound(f"Work order {number} not found")
+            if wo["status"] != "open":
+                raise Conflict(f"Work order is already {wo['status']}")
+            now = clock.now_iso()
+            conn.execute("UPDATE work_orders SET status = 'cancelled', closed_at = ?, closed_by = ?, closure_notes = ? "
+                         "WHERE number = ?", (now, user["username"], reason, number))
+            audit.record(conn, username=user["username"], action="WORK_ORDER_CANCELLED", entity_type="work_order",
+                         entity_id=number, old={"status": "open"}, new={"status": "cancelled"}, reason=reason)
+            if wo["schedule_id"] and wo["trigger"] == "schedule":
+                # skipping this occurrence: the next one is one interval after the skipped due date
+                self._advance_schedule(conn, user, wo["schedule_id"], date.fromisoformat(wo["due_on"]), f"Skipped {number}: {reason}", completed=False)
+        return self.get_work_order(user, number)
 
     # ------------------------------------------------------------------
     # Deviations
@@ -969,6 +1369,8 @@ class GMPAssetService:
                          old={"status": "open"}, new={"status": "closed", "closed_at": now, "closed_by": user["username"]},
                          reason=comment)
             self._apply_signature(conn, user, "deviation", closed["id"], "approved", closed)
+            asset = dict(conn.execute("SELECT * FROM assets WHERE id = ?", (closed["asset_id"],)).fetchone())
+            self._fire_event(conn, user, asset, "deviation_closed", number)
         return next(d for d in self.list_deviations(user) if d["number"] == number)
 
     # ------------------------------------------------------------------
@@ -987,11 +1389,14 @@ class GMPAssetService:
                 out["calibration"].append({"asset_tag": a["asset_tag"], "description": a["description"],
                                            "location": a["location_code"], "status": a["status"], "due_on": a["calibration_due_on"],
                                            "overdue": a["calibration_due_on"] is None or a["calibration_due_on"] < today.isoformat()})
-            for a in conn.execute(self._ASSET_SELECT + "WHERE a.status != 'retired' AND a.pm_required = 1 "
-                                  "AND a.pm_due_on <= ? ORDER BY a.pm_due_on", (horizon,)):
-                out["maintenance"].append({"asset_tag": a["asset_tag"], "description": a["description"],
-                                           "location": a["location_code"], "status": a["status"], "due_on": a["pm_due_on"],
-                                           "overdue": a["pm_due_on"] < today.isoformat()})
+            for r in conn.execute(
+                    "SELECT s.title, s.next_due_on, a.asset_tag, a.description, a.status, l.code AS location_code "
+                    "FROM pm_schedules s JOIN assets a ON a.id = s.asset_id LEFT JOIN locations l ON l.id = a.location_id "
+                    "WHERE s.active = 1 AND s.trigger_type = 'time' AND a.status != 'retired' AND s.next_due_on <= ? "
+                    "ORDER BY s.next_due_on", (horizon,)):
+                out["maintenance"].append({"asset_tag": r["asset_tag"], "description": f"{r['title']} - {r['description']}",
+                                           "location": r["location_code"], "status": r["status"], "due_on": r["next_due_on"],
+                                           "overdue": r["next_due_on"] < today.isoformat()})
         return {"as_of": today.isoformat(), "horizon_days": days, **out}
 
     def audit_entries(self, user: dict, *, entity_type: Optional[str] = None, entity_id: Optional[str] = None,

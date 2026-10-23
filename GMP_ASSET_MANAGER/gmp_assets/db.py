@@ -149,6 +149,58 @@ CREATE TABLE IF NOT EXISTS scan_events (
     entity_id INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS company (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT NOT NULL,
+    site_name TEXT NOT NULL,
+    address TEXT,
+    asset_prefix TEXT NOT NULL,
+    next_asset_number INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Maintenance plans: time-based (every N days/weeks/months) or event-triggered
+CREATE TABLE IF NOT EXISTS pm_schedules (
+    id INTEGER PRIMARY KEY,
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    title TEXT NOT NULL,
+    instructions TEXT,
+    work_type TEXT NOT NULL CHECK (work_type IN ('preventive', 'inspection', 'cleaning', 'corrective')),
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('time', 'event')),
+    interval_value INTEGER NOT NULL,
+    interval_unit TEXT NOT NULL CHECK (interval_unit IN ('days', 'weeks', 'months')),
+    event TEXT,
+    lead_days INTEGER NOT NULL DEFAULT 0,
+    blocks_use INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1,
+    next_due_on TEXT,
+    last_completed_on TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS work_orders (
+    id INTEGER PRIMARY KEY,
+    number TEXT NOT NULL UNIQUE,
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    schedule_id INTEGER REFERENCES pm_schedules(id),
+    work_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    instructions TEXT,
+    trigger TEXT NOT NULL,
+    due_on TEXT NOT NULL,
+    blocks_use INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled')),
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    closed_at TEXT,
+    closed_by TEXT,
+    closure_notes TEXT,
+    maintenance_record_id INTEGER REFERENCES maintenance_records(id)
+);
+CREATE INDEX IF NOT EXISTS ix_work_orders_asset ON work_orders(asset_id, status);
+
 CREATE TABLE IF NOT EXISTS audit_trail (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -169,7 +221,8 @@ CREATE TRIGGER IF NOT EXISTS audit_trail_no_delete BEFORE DELETE ON audit_trail
 BEGIN SELECT RAISE(ABORT, 'audit trail is append-only'); END;
 """
 
-_NO_DELETE_TABLES = ("assets", "calibration_records", "maintenance_records", "deviations", "signatures")
+_NO_DELETE_TABLES = ("assets", "calibration_records", "maintenance_records", "deviations", "signatures",
+                     "pm_schedules", "work_orders")
 
 
 class Database:

@@ -17,14 +17,14 @@ from typing import Dict, FrozenSet, List
 ROLES = ("admin", "qa", "technician", "operator", "viewer")
 
 ROLE_PERMISSIONS: Dict[str, FrozenSet[str]] = {
-    "admin": frozenset({"user.manage", "location.manage", "asset.view", "audit.view"}),
+    "admin": frozenset({"user.manage", "location.manage", "company.manage", "asset.view", "audit.view"}),
     "qa": frozenset({
         "asset.view", "asset.edit", "audit.view", "asset.status.remove", "asset.status.release",
-        "asset.qualify", "calibration.approve", "deviation.close",
+        "asset.qualify", "calibration.approve", "deviation.close", "maintenance.plan",
     }),
     "technician": frozenset({
         "asset.view", "asset.create", "asset.edit", "asset.move", "asset.status.remove",
-        "calibration.record", "maintenance.record",
+        "calibration.record", "maintenance.record", "maintenance.plan",
     }),
     "operator": frozenset({"asset.view", "asset.move", "asset.status.remove"}),
     "viewer": frozenset({"asset.view"}),
