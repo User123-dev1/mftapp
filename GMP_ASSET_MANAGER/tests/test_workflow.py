@@ -23,10 +23,12 @@ def release(api, tag, performed_on="2026-10-14", standards=(), certificate="EXT-
         "signature": api.sig("tech1")})
     api.ok("qa1", "post", f"/api/calibrations/{cal['id']}/review",
            json={"decision": "approve", "comment": "Reviewed", "signature": api.sig("qa1")})
-    api.ok("qa1", "post", f"/api/assets/{tag}/qualification",
-           json={"qualification_status": "qualified", "reason": "IQ/OQ/PQ protocols approved", "signature": api.sig("qa1")})
-    return api.ok("qa1", "post", f"/api/assets/{tag}/status",
-                  json={"status": "in_service", "reason": "Released after qualification", "signature": api.sig("qa1")})
+    qa_id = next(p["id"] for p in api.ok("tech1", "get", "/api/people/approvers") if p["username"] == "qa1")
+    req = api.ok("tech1", "post", f"/api/assets/{tag}/induction", status=201,
+                 json={"approver_id": qa_id, "comment": "IQ/OQ/PQ protocols attached"})
+    api.ok("qa1", "post", f"/api/approvals/{req['number']}/decide",
+           json={"decision": "approve", "comment": "IQ/OQ/PQ reviewed", "signature": api.sig("qa1")})
+    return api.ok("qa1", "get", f"/api/assets/{tag}")
 
 
 def setup_site(api):

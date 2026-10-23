@@ -209,6 +209,36 @@ CREATE TABLE IF NOT EXISTS work_orders (
 );
 CREATE INDEX IF NOT EXISTS ix_work_orders_asset ON work_orders(asset_id, status);
 
+-- QA approval requests: asset induction (release to service) and work order sign-off
+CREATE TABLE IF NOT EXISTS approval_requests (
+    id INTEGER PRIMARY KEY,
+    number TEXT NOT NULL UNIQUE,
+    request_type TEXT NOT NULL CHECK (request_type IN ('asset_induction', 'work_order')),
+    asset_id INTEGER NOT NULL REFERENCES assets(id),
+    work_order_id INTEGER REFERENCES work_orders(id),
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    requested_at TEXT NOT NULL,
+    request_comment TEXT,
+    approver_id INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    decided_by INTEGER REFERENCES users(id),
+    decided_at TEXT,
+    decision_comment TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_approvals_approver ON approval_requests(approver_id, status);
+
+-- E-mail outbox: every notification is kept, sent or not
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    email TEXT,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    sent_at TEXT,
+    error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS audit_trail (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -230,7 +260,17 @@ BEGIN SELECT RAISE(ABORT, 'audit trail is append-only'); END;
 """
 
 _NO_DELETE_TABLES = ("assets", "calibration_records", "maintenance_records", "deviations", "signatures",
-                     "pm_schedules", "work_orders")
+                     "pm_schedules", "work_orders", "approval_requests")
+
+# Columns added after the first release; applied to existing databases on start-up
+_ADDED_COLUMNS = (
+    ("users", "email", "TEXT"),
+    ("pm_schedules", "default_assignee", "INTEGER REFERENCES users(id)"),
+    ("pm_schedules", "requires_approval", "INTEGER NOT NULL DEFAULT 0"),
+    ("work_orders", "assigned_to", "INTEGER REFERENCES users(id)"),
+    ("work_orders", "requires_approval", "INTEGER NOT NULL DEFAULT 0"),
+    ("work_orders", "approval_state", "TEXT"),
+)
 
 
 class Database:
@@ -238,6 +278,9 @@ class Database:
         self.path = path
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            for table, column, ddl in _ADDED_COLUMNS:
+                if column not in [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
             for table in _NO_DELETE_TABLES:
                 conn.execute(
                     f"CREATE TRIGGER IF NOT EXISTS {table}_no_delete BEFORE DELETE ON {table} "

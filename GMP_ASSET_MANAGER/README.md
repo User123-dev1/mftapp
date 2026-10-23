@@ -41,6 +41,76 @@ be changed at first login. Then:
 `python -m gmp_assets.reset_password admin`. It sets a temporary password, which must be changed at
 next sign-in. The reset is recorded in the audit trail.
 
+## Approvals, assignments and My tasks
+
+**Asset induction (QA release).**
+- A new asset is **Inactive - new** until it has been through induction.
+- Open the asset and click **Submit for QA approval**. Pick a named QA approver and add a comment (e.g. IQ/OQ references).
+- The approver sees the request under **My tasks** (and gets an e-mail if e-mail is configured). They click **Review & decide**:
+  - **Approve** (e-signature): the asset is marked qualified and becomes **Active**.
+  - **Reject** (e-signature, comment required): the asset stays inactive and can be resubmitted.
+- New GMP equipment can *only* be activated this way.
+- The approver must be a different person from the requester.
+- Requests can be reassigned to another approver, or withdrawn.
+- QA cannot approve while blockers remain (missing calibration, open deviation, blocking work order). These are shown in the review screen.
+
+**Work orders are assigned to people.**
+- Choose **Assign to** when creating a work order, or set a **default assignee** on a PM schedule or event trigger. Automatically raised work orders arrive already assigned.
+- Only the assignee can complete the work order. Planners can **Assign / Reassign**.
+- The assignee is notified.
+
+**QA sign-off of work.**
+- Tick **Completed work must be approved by QA** on a work order or PM schedule.
+- On completion the technician picks a QA approver. The work order shows *awaiting QA approval*, and still blocks use if it is a blocking task, until QA approves.
+- If QA rejects it, the work order re-opens for rework.
+
+**My tasks** (first tab, with a counter) shows:
+- approvals waiting for you
+- work orders assigned to you
+- unassigned work orders (for planners)
+- your own pending requests
+
+**Approvers** are users with the QA role.
+- Administration has an **Approvers (QA)** panel, with **Add approver**.
+- Every user has an e-mail address for notifications.
+
+### Adding people from Microsoft 365
+
+When adding a user or approver you can fill in their name and e-mail automatically:
+
+- **Import from CSV.** Works straight away.
+  1. In the Microsoft 365 admin centre, go to **Users > Active users > Export users**.
+  2. Click **Import from CSV** and pick the file. Any CSV with a name column and an e-mail column also works.
+  3. Click a person to fill in the form.
+- **Find in Microsoft 365.** Live directory search. This needs a one-time setup by your IT / Entra ID administrator:
+  1. In the Microsoft Entra admin centre, go to **App registrations > New registration** (e.g. "GMP Asset Manager").
+  2. Under **API permissions**, add **Microsoft Graph > Application permissions > User.Read.All**, then click **Grant admin consent**.
+  3. Under **Certificates & secrets**, create a **client secret**.
+  4. Start the server with these values set:
+     ```powershell
+     $env:GMP_M365_TENANT_ID = "<directory (tenant) id>"
+     $env:GMP_M365_CLIENT_ID = "<application (client) id>"
+     $env:GMP_M365_CLIENT_SECRET = "<client secret value>"
+     python run_server.py
+     ```
+
+### E-mail notifications (Office 365)
+
+Approvers and assignees are e-mailed when work lands on them, and requesters when a request is decided.
+
+- Configure SMTP before starting the server:
+  ```powershell
+  $env:GMP_SMTP_HOST = "smtp.office365.com"
+  $env:GMP_SMTP_PORT = "587"
+  $env:GMP_SMTP_USER = "gmp-notifications@yourcompany.com"
+  $env:GMP_SMTP_PASSWORD = "<mailbox password or app password>"
+  $env:GMP_SMTP_FROM = "gmp-notifications@yourcompany.com"
+  $env:GMP_BASE_URL = "http://your-server:8000"   # link used in the e-mails
+  ```
+- The sending mailbox needs **Authenticated SMTP** enabled in Exchange Online. If your tenant blocks SMTP AUTH, use your organisation's SMTP relay host instead.
+- Every message is stored in an outbox (`GET /api/notifications`, admin only). Failed sends are retried hourly.
+- Without e-mail, people still see their work under **My tasks**.
+
 ## Active / inactive
 
 **Active** means in service and usable. **Inactive** means new, or taken out of service.

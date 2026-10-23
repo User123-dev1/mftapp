@@ -9,11 +9,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Body, Depends, FastAPI, Header, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from . import __version__
+from . import directory, notifications
 from .config import Settings
 from .db import Database
 from .security import ROLE_PERMISSIONS
@@ -47,9 +48,12 @@ class UserIn(BaseModel):
     full_name: str
     role: str
     temporary_password: str
+    email: Optional[str] = None
 
 
 class UserUpdateIn(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
     unlock: bool = False
@@ -154,6 +158,8 @@ class PMScheduleIn(BaseModel):
     lead_days: int = 0
     blocks_use: bool = True
     first_due_on: Optional[str] = None
+    default_assignee: Optional[int] = None
+    requires_approval: bool = False
 
 
 class PMScheduleUpdateIn(BaseModel):
@@ -167,13 +173,37 @@ class WorkOrderIn(BaseModel):
     instructions: Optional[str] = None
     due_on: str
     blocks_use: bool = False
+    assigned_to: Optional[int] = None
+    requires_approval: bool = False
 
 
 class CompleteWorkOrderIn(BaseModel):
     performed_on: str
     notes: str
     requalification_required: bool = False
+    approver_id: Optional[int] = None
     signature: Signature
+
+
+class AssignIn(BaseModel):
+    assignee_id: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class InductionIn(BaseModel):
+    approver_id: int
+    comment: Optional[str] = None
+
+
+class DecisionIn(BaseModel):
+    decision: str
+    comment: Optional[str] = None
+    signature: Signature
+
+
+class ReassignIn(BaseModel):
+    approver_id: int
+    reason: str
 
 
 class CancelIn(BaseModel):
@@ -215,6 +245,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             while True:
                 try:
                     created = await asyncio.to_thread(service.generate_due_work_orders)
+                    await asyncio.to_thread(notifications.send_pending, service.db, settings)
                     if created:
                         logger.info("Scheduled work orders raised: %s", ", ".join(created))
                 except Exception:  # keep the scheduler alive; errors are logged
@@ -299,12 +330,45 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.post("/api/users", status_code=201)
     def create_user(body: UserIn, user: dict = Depends(current_user)):
-        return service.create_user(user, body.username, body.full_name, body.role, body.temporary_password)
+        return service.create_user(user, body.username, body.full_name, body.role, body.temporary_password, body.email)
 
     @app.patch("/api/users/{user_id}")
     def update_user(user_id: int, body: UserUpdateIn, user: dict = Depends(current_user)):
         return service.update_user(user, user_id, role=body.role, active=body.active, unlock=body.unlock,
-                                   temporary_password=body.temporary_password, reason=body.reason)
+                                   temporary_password=body.temporary_password, reason=body.reason,
+                                   email=body.email, full_name=body.full_name)
+
+    # -- Directory (Microsoft 365 / CSV) and people pick-lists ---------------
+    @app.get("/api/directory/status")
+    def directory_status(user: dict = Depends(current_user)):
+        service.require(user, "user.manage")
+        return {"m365_configured": directory.is_configured(settings), "email_configured": bool(settings.smtp_host)}
+
+    @app.get("/api/directory/search")
+    def directory_search(q: str, user: dict = Depends(current_user)):
+        service.require(user, "user.manage")
+        try:
+            return directory.search_m365(settings, q)
+        except directory.DirectoryError as exc:
+            raise GMPError(str(exc))
+
+    @app.post("/api/directory/csv")
+    def directory_csv(text: str = Body(..., media_type="text/plain"), user: dict = Depends(current_user)):
+        service.require(user, "user.manage")
+        try:
+            return directory.parse_csv(text)
+        except directory.DirectoryError as exc:
+            raise GMPError(str(exc))
+
+    @app.get("/api/people/{kind}")
+    def people(kind: str, user: dict = Depends(current_user)):
+        if kind not in ("approvers", "assignees"):
+            raise GMPError("kind must be approvers or assignees")
+        return service.list_people(user, kind)
+
+    @app.get("/api/notifications")
+    def notification_outbox(user: dict = Depends(current_user)):
+        return service.outbox(user)
 
     # -- Locations -----------------------------------------------------------
     @app.get("/api/locations")
@@ -410,7 +474,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/assets/{tag}/work-orders", status_code=201)
     def create_work_order(tag: str, body: WorkOrderIn, user: dict = Depends(current_user)):
         return service.create_work_order(user, tag, work_type=body.work_type, title=body.title,
-                                         instructions=body.instructions, due_on=body.due_on, blocks_use=body.blocks_use)
+                                         instructions=body.instructions, due_on=body.due_on, blocks_use=body.blocks_use,
+                                         assigned_to=body.assigned_to, requires_approval=body.requires_approval)
 
     @app.get("/api/work-orders")
     def work_orders(status: Optional[str] = None, asset: Optional[str] = None, user: dict = Depends(current_user)):
@@ -419,7 +484,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/work-orders/{number}/complete")
     def complete_work_order(number: str, body: CompleteWorkOrderIn, user: dict = Depends(current_user)):
         return service.complete_work_order(user, number, performed_on=body.performed_on, notes=body.notes,
-                                           requalification_required=body.requalification_required, password=_pw(body.signature))
+                                           requalification_required=body.requalification_required, password=_pw(body.signature),
+                                           approver_id=body.approver_id)
+
+    @app.post("/api/work-orders/{number}/assign")
+    def assign_work_order(number: str, body: AssignIn, user: dict = Depends(current_user)):
+        return service.assign_work_order(user, number, body.assignee_id, body.reason)
+
+    # -- Approvals and personal task list ------------------------------------
+    @app.post("/api/assets/{tag}/induction", status_code=201)
+    def submit_induction(tag: str, body: InductionIn, user: dict = Depends(current_user)):
+        return service.submit_induction(user, tag, body.approver_id, body.comment)
+
+    @app.get("/api/approvals")
+    def approvals(status: Optional[str] = None, mine: bool = False, user: dict = Depends(current_user)):
+        return service.list_approvals(user, approver_id=user["id"] if mine else None, status=status)
+
+    @app.get("/api/approvals/{number}")
+    def approval(number: str, user: dict = Depends(current_user)):
+        return service.get_approval(user, number)
+
+    @app.post("/api/approvals/{number}/decide")
+    def decide(number: str, body: DecisionIn, user: dict = Depends(current_user)):
+        return service.decide_approval(user, number, body.decision, body.comment, _pw(body.signature))
+
+    @app.post("/api/approvals/{number}/reassign")
+    def reassign(number: str, body: ReassignIn, user: dict = Depends(current_user)):
+        return service.reassign_approval(user, number, body.approver_id, body.reason)
+
+    @app.post("/api/approvals/{number}/cancel")
+    def cancel_approval(number: str, body: CancelIn, user: dict = Depends(current_user)):
+        return service.cancel_approval(user, number, body.reason)
+
+    @app.get("/api/my-tasks")
+    def my_tasks(user: dict = Depends(current_user)):
+        return service.my_tasks(user)
 
     @app.post("/api/work-orders/{number}/cancel")
     def cancel_work_order(number: str, body: CancelIn, user: dict = Depends(current_user)):

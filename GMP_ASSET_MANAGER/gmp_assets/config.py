@@ -22,3 +22,15 @@ class Settings:
     # they are configured to send a substitute. These are all treated as GS.
     gs1_separators: Tuple[str, ...] = ("\x1d", "<GS>", "{GS}", "|", "~")
     site_name: str = field(default_factory=lambda: os.environ.get("GMP_SITE_NAME", "GMP Site"))
+    # Address people use to reach the system; used for links in e-mails
+    base_url: str = field(default_factory=lambda: os.environ.get("GMP_BASE_URL", "http://127.0.0.1:8000"))
+    # E-mail notifications (Office 365: smtp.office365.com, port 587, STARTTLS). Unset host = e-mail disabled.
+    smtp_host: str = field(default_factory=lambda: os.environ.get("GMP_SMTP_HOST", ""))
+    smtp_port: int = field(default_factory=lambda: _env_int("GMP_SMTP_PORT", 587))
+    smtp_user: str = field(default_factory=lambda: os.environ.get("GMP_SMTP_USER", ""))
+    smtp_password: str = field(default_factory=lambda: os.environ.get("GMP_SMTP_PASSWORD", ""))
+    smtp_from: str = field(default_factory=lambda: os.environ.get("GMP_SMTP_FROM", ""))
+    # Microsoft 365 / Entra ID directory lookup (app registration with User.Read.All application permission)
+    m365_tenant_id: str = field(default_factory=lambda: os.environ.get("GMP_M365_TENANT_ID", ""))
+    m365_client_id: str = field(default_factory=lambda: os.environ.get("GMP_M365_CLIENT_ID", ""))
+    m365_client_secret: str = field(default_factory=lambda: os.environ.get("GMP_M365_CLIENT_SECRET", ""))

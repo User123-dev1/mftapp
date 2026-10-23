@@ -118,7 +118,7 @@ video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
 
 <div id="appView" class="hidden">
   <header>
-    <h1>GMP Asset Manager <span class="pill" title="Application version">v1.2</span> <span id="companyName" class="muted" style="font-weight:400"></span></h1>
+    <h1>GMP Asset Manager <span class="pill" title="Application version">v1.3</span> <span id="companyName" class="muted" style="font-weight:400"></span></h1>
     <span id="who" class="muted"></span>
     <button class="btn secondary" id="logoutBtn">Sign out</button>
   </header>
@@ -211,6 +211,14 @@ const deptPairs = (ds, current) => [["", "- none -"], ...ds.filter(d => d.active
   ...(current && !ds.some(d => d.name === current) ? [[current, current + " (not in list)"]] : [])];
 const locPairs = (ls) => [["", "- none -"], ...ls.filter(l => l.active).map(l => [l.code, `${l.code} - ${l.name}`])];
 
+// People pick-lists (approvers = QA, assignees = can perform maintenance)
+const peopleCache = {};
+async function people(kind) { return peopleCache[kind] || (peopleCache[kind] = await api("GET", `/api/people/${kind}`)); }
+const personLabel = (p) => `${p.full_name}${p.email ? " <" + p.email + ">" : ""}`;
+const personPairs = (ps, none) => [...(none ? [["", none]] : []), ...ps.map(p => [String(p.id), personLabel(p)])];
+const REQUEST_TYPES = { asset_induction: "Asset induction (release for use)", work_order: "Work order sign-off" };
+const aprPill = (st) => `<span class="pill ${st === "approved" ? "ok" : st === "rejected" ? "bad" : st === "pending" ? "warn" : ""}">${esc(st)}</span>`;
+
 // "Load standard list" for departments / locations, offered wherever the list is empty
 const LOADERS = {
   department: { url: "/api/departments", load: "/api/departments/load-standard", pairs: deptPairs },
@@ -231,6 +239,7 @@ function wireLoadLinks(root) {
 
 // ---- Tabs ----------------------------------------------------------------
 const TABS = [
+  ["mytasks", "My tasks", () => true],
   ["assets", "Assets", () => can("asset.view")], ["workorders", "Work orders", () => can("asset.view")],
   ["scan", "Scan", () => true],
   ["approvals", "Approvals", () => can("calibration.approve")], ["deviations", "Deviations", () => can("asset.view")],
@@ -240,7 +249,8 @@ const TABS = [
 
 function renderTabs() {
   $("#tabs").innerHTML = TABS.filter(t => t[2]()).map(([id, name]) =>
-    `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}">${name}</button>`).join("");
+    `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}">${name}${id === "mytasks" && state.taskCount
+      ? ` <span class="pill bad" style="padding:0 6px">${state.taskCount}</span>` : ""}</button>`).join("");
   for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => openTab(b.dataset.tab);
 }
 
@@ -413,7 +423,8 @@ const STATUS_LABEL = {
   quarantine: ["Quarantined", "bad"], retired: ["Retired", ""],
 };
 const statusPill = (s) => `<span class="pill ${STATUS_LABEL[s][1]}">${STATUS_LABEL[s][0]}</span>`;
-const canActivate = (a) => a.gmp_impact === "none" ? can("asset.edit") : can("asset.status.release");
+// New GMP equipment is activated only through QA induction approval
+const canActivate = (a) => a.gmp_impact === "none" ? can("asset.edit") : a.status !== "commissioning" && can("asset.status.release");
 
 function assetSummary(a) {
   return `<div class="grid" style="margin-top:8px">
@@ -536,8 +547,11 @@ async function openAsset(tag) {
   const c = $("#content");
   const f = a.fitness;
   const actions = [];
+  const pendingInduction = a.approvals.find(r => r.request_type === "asset_induction" && r.status === "pending");
   if (a.status !== "retired") {
-    if (a.status !== "in_service" && canActivate(a)) actions.push(["activate", "Activate", ""]);
+    if (a.status === "commissioning" && !pendingInduction && (can("asset.create") || can("asset.edit")))
+      actions.push(["induct", "Submit for QA approval", ""]);
+    if (a.status !== "in_service" && canActivate(a)) actions.push(["activate", "Activate", a.status === "commissioning" ? "secondary" : ""]);
     if (a.status === "in_service" && can("asset.status.remove")) actions.push(["deactivate", "Deactivate", "secondary"]);
     if (can("asset.edit")) actions.push(["edit", "Edit details", "secondary"]);
     if (can("maintenance.plan")) actions.push(["schedule", "Add PM / trigger", "secondary"], ["wo", "New work order", "secondary"]);
@@ -553,13 +567,21 @@ async function openAsset(tag) {
     <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
     ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
     ${f.warnings.length ? `<p>${f.warnings.map(x => `<span class="pill warn">${esc(x)}</span>`).join(" ")}</p>` : ""}
+    ${pendingInduction ? `<div class="sigbox" style="margin:10px 0">
+      <b>Awaiting QA induction approval</b> - ${esc(pendingInduction.number)} assigned to ${esc(pendingInduction.approver_name)}
+      ${pendingInduction.approver_email ? `&lt;${esc(pendingInduction.approver_email)}&gt;` : ""}, submitted by ${esc(pendingInduction.requested_by_name)} on ${esc(pendingInduction.requested_at)}
+      <div class="row" style="margin-top:8px">
+        ${pendingInduction.approver_id === state.me.id ? `<button class="btn" data-review-apr="${esc(pendingInduction.number)}">Review &amp; decide</button>` : ""}
+        ${[pendingInduction.requested_by, pendingInduction.approver_id].includes(state.me.id) || can("asset.status.release")
+          ? `<button class="btn secondary" data-reassign-apr="${esc(pendingInduction.number)}">Reassign approver</button>
+             <button class="btn secondary" data-withdraw-apr="${esc(pendingInduction.number)}">Withdraw</button>` : ""}</div></div>` : ""}
     ${assetSummary(a)}
     <p class="muted" style="font-size:12px">Version ${a.version} - created ${esc(a.created_at)} by ${esc(a.created_by)} - last change ${esc(a.updated_at)} by ${esc(a.updated_by)}</p>
     <div class="row">${actions.map(([k, t, cls]) => `<button class="btn ${cls}" data-act="${k}">${t}</button>`).join("")}</div>
     <div class="row" style="margin-top:12px;align-items:flex-end"><div class="label-img">${svg}</div>
       <div><button class="btn secondary" id="printLabel">Print barcode label</button><br><a class="link" id="auditLink">View audit trail</a></div></div></div>
-  <div class="panel"><h2>Work orders</h2><div class="tbl"><table><tr><th>Number</th><th>Title</th><th>Type</th><th>Raised by</th><th>Due</th><th>Status</th><th></th></tr>
-    ${a.work_orders.map(woRow).join("") || `<tr><td colspan="7" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Work orders</h2><div class="tbl"><table>${WO_HEAD(false)}
+    ${a.work_orders.map(w => woRow(w)).join("") || `<tr><td colspan="8" class="muted">None</td></tr>`}</table></div></div>
   <div class="panel"><h2>PM schedules &amp; event triggers</h2><div class="tbl"><table><tr><th>Title</th><th>Type</th><th>Trigger</th><th>Next due</th><th>Blocks use</th><th>State</th><th></th></tr>
     ${a.pm_schedules.map(s => `<tr><td>${esc(s.title)}${s.instructions ? `<div class="muted" style="font-size:12px">${esc(s.instructions)}</div>` : ""}</td>
       <td>${esc(s.work_type)}</td><td>${triggerText(s, opts.events)}</td><td>${esc(s.next_due_on || "-")}</td><td>${s.blocks_use ? "Yes" : "No"}</td>
@@ -573,6 +595,11 @@ async function openAsset(tag) {
     ${a.maintenance.map(m => `<tr><td>${esc(m.performed_on)}</td><td>${esc(m.maintenance_type)}</td><td>${esc(m.description)}${m.requalification_required ? ` <span class="pill warn">requalification</span>` : ""}</td><td>${sigList(m.signatures)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
   <div class="panel"><h2>Deviations</h2><div class="tbl"><table><tr><th>Number</th><th>Status</th><th>Description</th><th>Opened</th></tr>
     ${a.deviations.map(d => `<tr><td>${esc(d.number)}</td><td>${esc(d.status)}</td><td>${esc(d.description)}</td><td>${esc(d.opened_at)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Approvals</h2><div class="tbl"><table><tr><th>Number</th><th>Type</th><th>Requested by</th><th>Approver</th><th>Status</th><th>Decision</th></tr>
+    ${a.approvals.map(r => `<tr><td class="mono">${esc(r.number)}</td><td>${esc(REQUEST_TYPES[r.request_type])}${r.work_order_number ? " " + esc(r.work_order_number) : ""}</td>
+      <td>${esc(r.requested_by_name)}<div class="muted" style="font-size:12px">${esc(r.requested_at)}</div></td><td>${esc(r.approver_name)}</td>
+      <td>${aprPill(r.status)}</td><td>${esc(r.decision_comment || "")}${r.decided_at ? `<div class="muted" style="font-size:12px">${esc(r.decided_by_name || "")} ${esc(r.decided_at)}</div>` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="muted">None</td></tr>`}</table></div></div>
   <div class="panel"><h2>Status / qualification signatures</h2>${sigList(a.signatures) || `<span class="muted">None</span>`}</div>`;
   $("#back").onclick = () => openTab("assets");
   $("#auditLink").onclick = () => { state.auditFilter = { entity_type: "asset", entity_id: a.asset_tag }; openTab("audit"); };
@@ -580,6 +607,7 @@ async function openAsset(tag) {
   for (const b of c.querySelectorAll("[data-act]")) b.onclick = () => ASSET_ACTIONS[b.dataset.act](a);
   for (const b of c.querySelectorAll("[data-toggle-sch]")) b.onclick = () => toggleSchedule(+b.dataset.toggleSch, b.dataset.active === "1", a.asset_tag);
   wireWoButtons(c, () => openAsset(a.asset_tag));
+  wireApprovalButtons(c, () => openAsset(a.asset_tag));
 }
 
 async function pmOptions() {
@@ -587,7 +615,7 @@ async function pmOptions() {
 }
 
 async function pmScheduleForm(tag) {
-  const opts = await pmOptions();
+  const [opts, assignees] = await Promise.all([pmOptions(), people("assignees")]);
   const units = opts.interval_units;
   modal(`<h2>Add PM schedule / event trigger - ${esc(tag)}</h2>
     ${field("title", "Title", 'required placeholder="e.g. Quarterly PM, Post-move leak test"')}
@@ -600,14 +628,17 @@ async function pmScheduleForm(tag) {
       <label>When this happens</label><select name="event">${Object.entries(opts.events).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
       <div class="grid">${field("e_value", "Complete within", 'type="number" min="1" value="1"')}${select("e_unit", "Unit", units, "days")}</div>
     </div>
+    ${selectPairs("default_assignee", "Assign work orders to", personPairs(assignees, "- unassigned (planner assigns later) -"))}
     <label class="check"><input type="checkbox" name="blocks_use" checked> Asset is DO NOT USE while this work is open (event) or overdue (schedule)</label>
+    <label class="check"><input type="checkbox" name="requires_approval"> Completed work must be approved by QA</label>
     <label>Instructions / checklist</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
     const isTime = d.trigger_type === "time";
     await api("POST", `/api/assets/${encodeURIComponent(tag)}/pm-schedules`, {
       title: d.title, work_type: d.work_type, trigger_type: d.trigger_type, instructions: d.instructions || null,
       interval_value: +(isTime ? d.t_value : d.e_value), interval_unit: isTime ? d.t_unit : d.e_unit,
       event: isTime ? null : d.event, lead_days: isTime ? +(d.lead_days || 0) : 0, blocks_use: d.blocks_use,
-      first_due_on: isTime && d.first_due_on ? d.first_due_on : null });
+      first_due_on: isTime && d.first_due_on ? d.first_due_on : null,
+      default_assignee: d.default_assignee ? +d.default_assignee : null, requires_approval: d.requires_approval });
     toast(isTime ? "PM schedule created - work orders will be raised automatically" : "Event trigger created");
     openAsset(tag);
   });
@@ -623,29 +654,55 @@ function toggleSchedule(id, active, tag) {
 }
 
 // ---- Work orders -------------------------------------------------------------
+const WO_HEAD = (showAsset) => `<tr><th>Number</th>${showAsset ? "<th>Asset</th>" : ""}<th>Title</th><th>Type</th><th>Raised by</th>
+  <th>Assigned to</th><th>Due</th><th>Status</th><th></th></tr>`;
+
 function woRow(w, showAsset = false) {
   const trig = w.trigger === "schedule" ? "Schedule" : w.trigger === "manual" ? `Manual (${esc(w.created_by)})` : "Event: " + esc((state.pmOptions?.events || {})[w.trigger.slice(6)] || w.trigger.slice(6));
-  const st = w.status === "open" ? (w.overdue ? `<span class="pill bad">overdue</span>` : `<span class="pill warn">open</span>`)
+  let st = w.status === "open" ? (w.overdue ? `<span class="pill bad">overdue</span>` : `<span class="pill warn">open</span>`)
     : `<span class="pill ${w.status === "completed" ? "ok" : ""}">${w.status}</span>`;
+  if (w.approval_state === "pending") st = `<span class="pill warn">awaiting QA approval</span>`;
+  else if (w.approval_state === "approved") st += ` <span class="pill ok">QA approved</span>`;
+  else if (w.approval_state === "rejected" && w.status === "open") st += ` <span class="pill bad">rework - QA rejected</span>`;
+  const mine = !w.assigned_to || w.assigned_to === state.me.id;
   const btns = w.status !== "open" ? (w.closure_notes ? `<span class="muted" style="font-size:12px">${esc(w.closure_notes)}</span>${sigList(w.signatures)}` : "")
-    : `${can("maintenance.record") ? `<button class="btn" data-complete="${esc(w.number)}">Complete</button>` : ""}
-       ${can("maintenance.plan") ? `<button class="btn secondary" data-cancel-wo="${esc(w.number)}">Cancel</button>` : ""}`;
+      + (w.approval && w.approval.status === "pending" && w.approval_state === "pending" ? `<div class="muted" style="font-size:12px">${esc(w.approval.number)} with ${esc(w.approval.approver_name)}</div>` : "")
+    : `${can("maintenance.record") && mine ? `<button class="btn" data-complete="${esc(w.number)}" data-needs-approval="${w.requires_approval ? 1 : 0}">Complete</button>` : ""}
+       ${can("maintenance.plan") ? `<button class="btn secondary" data-assign-wo="${esc(w.number)}" data-current="${w.assigned_to || ""}">${w.assigned_to ? "Reassign" : "Assign"}</button>
+         <button class="btn secondary" data-cancel-wo="${esc(w.number)}">Cancel</button>` : ""}`;
   return `<tr><td class="mono">${esc(w.number)}</td>${showAsset ? `<td><a class="link mono" data-tag="${esc(w.asset_tag)}">${esc(w.asset_tag)}</a><div class="muted" style="font-size:12px">${esc(w.asset_description)}</div></td>` : ""}
     <td>${esc(w.title)}${w.blocks_use ? ` <span class="pill bad" title="Asset may not be used while open/overdue">blocks use</span>` : ""}
       ${w.instructions ? `<div class="muted" style="font-size:12px">${esc(w.instructions)}</div>` : ""}</td>
-    <td>${esc(w.work_type)}</td><td>${trig}</td><td>${esc(w.due_on)}</td><td>${st}</td><td>${btns}</td></tr>`;
+    <td>${esc(w.work_type)}${w.requires_approval ? `<div class="muted" style="font-size:12px">QA sign-off</div>` : ""}</td><td>${trig}</td>
+    <td>${w.assigned_to ? esc(w.assignee_name) : `<span class="muted">unassigned</span>`}</td><td class="mono">${esc(w.due_on)}</td><td>${st}</td><td>${btns}</td></tr>`;
 }
 
 function wireWoButtons(c, after) {
-  for (const b of c.querySelectorAll("[data-complete]")) b.onclick = () => modal(`<h2>Complete ${esc(b.dataset.complete)}</h2>
+  for (const b of c.querySelectorAll("[data-complete]")) b.onclick = async () => {
+    const needsApproval = b.dataset.needsApproval === "1";
+    const approvers = needsApproval ? (await people("approvers")).filter(p => p.id !== state.me.id) : [];
+    modal(`<h2>Complete ${esc(b.dataset.complete)}</h2>
     ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
     <label>Work performed / results</label><textarea name="notes" rows="3" required></textarea>
     <label class="check"><input type="checkbox" name="requalification_required"> Change affects qualified state - requalification required</label>
+    ${needsApproval ? selectPairs("approver_id", "QA approver (this work needs QA sign-off)", personPairs(approvers)) : ""}
     ${sigBlock("performed")}`, async (d) => {
-    await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.complete)}/complete`, {
-      performed_on: d.performed_on, notes: d.notes, requalification_required: d.requalification_required, signature: { password: d.sig_password } });
-    toast(`${b.dataset.complete} completed`); after();
-  });
+      const wo = await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.complete)}/complete`, {
+        performed_on: d.performed_on, notes: d.notes, requalification_required: d.requalification_required,
+        approver_id: d.approver_id ? +d.approver_id : null, signature: { password: d.sig_password } });
+      toast(wo.approval_state === "pending" ? `${b.dataset.complete} completed - sent to QA for approval` : `${b.dataset.complete} completed`); after();
+    });
+  };
+  for (const b of c.querySelectorAll("[data-assign-wo]")) b.onclick = async () => {
+    const assignees = await people("assignees");
+    modal(`<h2>Assign ${esc(b.dataset.assignWo)}</h2>
+      ${selectPairs("assignee_id", "Assign to", personPairs(assignees, "- unassigned -"), b.dataset.current)}
+      <label>Reason / note (optional)</label><input name="reason">`, async (d) => {
+      await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.assignWo)}/assign`,
+        { assignee_id: d.assignee_id ? +d.assignee_id : null, reason: d.reason || null });
+      toast(`${b.dataset.assignWo} assigned - the assignee has been notified`); after();
+    });
+  };
   for (const b of c.querySelectorAll("[data-cancel-wo]")) b.onclick = () => modal(`<h2>Cancel ${esc(b.dataset.cancelWo)}</h2>
     <p class="muted">For a scheduled work order this skips the occurrence; the next one is planned one interval later.</p>
     <label>Reason (required)</label><input name="reason" required>`, async (d) => {
@@ -662,10 +719,73 @@ VIEWS.workorders = async (c) => {
   c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Work orders</h2>
     <select id="woSt" style="width:auto">${[["open", "Open"], ["completed", "Completed"], ["cancelled", "Cancelled"], ["", "All"]].map(([v, l]) => `<option value="${v}" ${v === status ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <p class="muted">Scheduled PM work orders are raised automatically when they come due; event triggers raise them instantly.</p>
-    <div class="tbl"><table><tr><th>Number</th><th>Asset</th><th>Title</th><th>Type</th><th>Raised by</th><th>Due</th><th>Status</th><th></th></tr>
-    ${wos.map(w => woRow(w, true)).join("") || `<tr><td colspan="8" class="muted">No work orders</td></tr>`}</table></div></div>`;
+    <div class="tbl"><table>${WO_HEAD(true)}
+    ${wos.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">No work orders</td></tr>`}</table></div></div>`;
   $("#woSt").onchange = (e) => { state.woStatus = e.target.value; openTab("workorders"); };
   wireWoButtons(c, () => openTab("workorders"));
+};
+
+function wireApprovalButtons(c, after) {
+  for (const b of c.querySelectorAll("[data-review-apr]")) b.onclick = () => reviewApproval(b.dataset.reviewApr, after);
+  for (const b of c.querySelectorAll("[data-reassign-apr]")) b.onclick = async () => {
+    const approvers = await people("approvers");
+    modal(`<h2>Reassign ${esc(b.dataset.reassignApr)}</h2>${selectPairs("approver_id", "New approver", personPairs(approvers))}
+      <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+      await api("POST", `/api/approvals/${b.dataset.reassignApr}/reassign`, { approver_id: +d.approver_id, reason: d.reason });
+      toast("Approver changed and notified"); after();
+    });
+  };
+  for (const b of c.querySelectorAll("[data-withdraw-apr]")) b.onclick = () => modal(`<h2>Withdraw ${esc(b.dataset.withdrawApr)}</h2>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/approvals/${b.dataset.withdrawApr}/cancel`, d); toast("Request withdrawn"); after();
+  });
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+}
+
+async function reviewApproval(number, after) {
+  const r = await api("GET", `/api/approvals/${number}`);
+  const blockers = r.blockers || [];
+  modal(`<h2>${esc(r.number)} - ${esc(REQUEST_TYPES[r.request_type])}</h2>
+    <div class="grid"><div><label>Asset</label><b class="mono">${esc(r.asset_tag)}</b> ${esc(r.asset_description)}</div>
+      <div><label>Requested by</label>${esc(r.requested_by_name)} <span class="muted">${esc(r.requested_at)}</span></div>
+      ${r.work_order_number ? `<div><label>Work order</label>${esc(r.work_order_number)} ${esc(r.work_order_title)}</div>` : ""}</div>
+    <label>Requester's comment</label><div>${esc(r.request_comment || "-")}</div>
+    ${r.request_type === "asset_induction" ? `<p class="muted" style="font-size:13px">Approving qualifies the asset and makes it <b>Active</b> (released for use).</p>` : ""}
+    ${blockers.length ? `<div class="verdict bad" style="font-size:14px;text-align:left">Cannot be approved yet:<ul class="reasons">${blockers.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    ${select("decision", "Decision", blockers.length ? ["reject"] : ["approve", "reject"])}
+    <label>Comment (required to reject; e.g. documents reviewed)</label><textarea name="comment" rows="2"></textarea>
+    <div id="sigWrap">${sigBlock(blockers.length ? "rejected" : "approved")}</div>
+    <p><a class="link" data-open-asset>Open asset record</a></p>`, async (d) => {
+    await api("POST", `/api/approvals/${number}/decide`, { decision: d.decision, comment: d.comment || null, signature: { password: d.sig_password } });
+    toast(`${number} ${d.decision === "approve" ? "approved" : "rejected"}`);
+    state.taskCount = Math.max(0, (state.taskCount || 1) - 1); renderTabs(); after();
+  });
+  const sel = $(".modal select[name=decision]");
+  sel.onchange = () => $("#sigWrap").innerHTML = sigBlock(sel.value === "approve" ? "approved" : "rejected");
+  $(".modal [data-open-asset]").onclick = () => { $(".modal-bg").remove(); openAsset(r.asset_tag); };
+}
+
+VIEWS.mytasks = async (c) => {
+  await pmOptions();
+  const t = await api("GET", "/api/my-tasks");
+  state.taskCount = t.approvals.length + t.work_orders.length; renderTabs();
+  const aprRows = (list, review) => list.map(r => `<tr><td class="mono">${esc(r.number)}</td><td>${esc(REQUEST_TYPES[r.request_type])}${r.work_order_number ? " " + esc(r.work_order_number) : ""}</td>
+    <td><a class="link mono" data-tag="${esc(r.asset_tag)}">${esc(r.asset_tag)}</a><div class="muted" style="font-size:12px">${esc(r.asset_description)}</div></td>
+    <td>${esc(review ? r.requested_by_name : r.approver_name)}</td><td>${esc(r.request_comment || "")}</td><td>${esc(r.requested_at)}</td>
+    <td>${review ? `<button class="btn" data-review-apr="${esc(r.number)}">Review &amp; decide</button>` : aprPill(r.status)}</td></tr>`).join("");
+  c.innerHTML = `
+  <div class="panel"><h2>Approvals waiting for me (${t.approvals.length})</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Type</th><th>Asset</th><th>Requested by</th><th>Comment</th><th>Submitted</th><th></th></tr>
+    ${aprRows(t.approvals, true) || `<tr><td colspan="7" class="muted">Nothing to approve.</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Work orders assigned to me (${t.work_orders.length})</h2><div class="tbl"><table>${WO_HEAD(true)}
+    ${t.work_orders.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">No open work orders assigned to you.</td></tr>`}</table></div></div>
+  ${can("maintenance.plan") ? `<div class="panel"><h2>Unassigned work orders (${t.unassigned_work_orders.length})</h2><div class="tbl"><table>${WO_HEAD(true)}
+    ${t.unassigned_work_orders.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">Everything is assigned.</td></tr>`}</table></div></div>` : ""}
+  <div class="panel"><h2>My requests awaiting approval (${t.my_requests.length})</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Type</th><th>Asset</th><th>Approver</th><th>Comment</th><th>Submitted</th><th>Status</th></tr>
+    ${aprRows(t.my_requests, false) || `<tr><td colspan="7" class="muted">None pending.</td></tr>`}</table></div></div>`;
+  wireWoButtons(c, () => openTab("mytasks"));
+  wireApprovalButtons(c, () => openTab("mytasks"));
 };
 
 const pf = (v) => `<span class="pill ${v === "pass" ? "ok" : v === "fail" ? "bad" : ""}">${esc(v.replace(/_/g, " "))}</span>`;
@@ -680,6 +800,19 @@ function reportIssue(tag) {
 }
 
 const ASSET_ACTIONS = {
+  induct: async (a) => {
+    const approvers = (await people("approvers")).filter(p => p.id !== state.me.id);
+    if (!approvers.length) return toast("No QA approvers yet - an administrator must add a user with the QA role", 6000);
+    const open = a.fitness.reasons.filter(r => !r.startsWith("Status") && !r.startsWith("Qualification"));
+    modal(`<h2>Submit ${esc(a.asset_tag)} for QA approval</h2>
+      <p class="muted">The approver is notified. When they approve with their e-signature the asset is qualified and becomes <b>Active</b>.</p>
+      ${open.length ? `<p class="pill bad">Must be resolved before QA can approve: ${esc(open.join("; "))}</p>` : ""}
+      ${selectPairs("approver_id", "QA approver", personPairs(approvers))}
+      <label>Comment for the approver (e.g. IQ/OQ references, documents attached)</label><textarea name="comment" rows="3"></textarea>`, async (d) => {
+      const r = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/induction`, { approver_id: +d.approver_id, comment: d.comment || null });
+      toast(`${r.number} sent to ${r.approver_name}`); openAsset(a.asset_tag);
+    });
+  },
   activate: (a) => {
     const gmp = a.gmp_impact !== "none";
     modal(`<h2>Activate ${esc(a.asset_tag)}</h2>
@@ -697,13 +830,16 @@ const ASSET_ACTIONS = {
   }),
   schedule: (a) => pmScheduleForm(a.asset_tag),
   wo: async (a) => {
-    const opts = await pmOptions();
+    const [opts, assignees] = await Promise.all([pmOptions(), people("assignees")]);
     modal(`<h2>New work order - ${esc(a.asset_tag)}</h2>
       ${field("title", "Title", "required")}<div class="grid">${select("work_type", "Work type", opts.work_types, "corrective")}
       ${field("due_on", "Due on", `type="date" value="${today()}" required`)}</div>
+      ${selectPairs("assigned_to", "Assign to", personPairs(assignees, "- unassigned -"))}
       <label class="check"><input type="checkbox" name="blocks_use"> Asset is DO NOT USE until this is completed</label>
+      <label class="check"><input type="checkbox" name="requires_approval"> Completed work must be approved by QA</label>
       <label>Instructions</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
-      const wo = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/work-orders`, d);
+      const wo = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/work-orders`,
+        { ...d, assigned_to: d.assigned_to ? +d.assigned_to : null });
       toast(`${wo.number} created`); openAsset(a.asset_tag);
     });
   },
@@ -857,17 +993,73 @@ VIEWS.audit = async (c) => {
 };
 
 // ---- Administration ----------------------------------------------------------
+// Add a user or approver; details can be picked from Microsoft 365 or a CSV export of it
+function newUserForm(roles, role, dir) {
+  modal(`<h2>${role === "qa" ? "Add approver (QA)" : "Add user"}</h2>
+    <div class="row" style="margin-bottom:6px">
+      <button type="button" class="btn secondary" data-m365 ${dir.m365_configured ? "" : 'disabled title="Ask IT to configure the Microsoft 365 app registration (see README)"'}>Find in Microsoft 365</button>
+      <label class="btn secondary" style="margin:0">Import from CSV<input type="file" accept=".csv,text/csv" data-csv hidden></label>
+    </div>
+    <div data-dir class="hidden" style="margin-bottom:8px">
+      <div class="row" data-m365-search><input data-q placeholder="Name or e-mail" style="max-width:260px"><button type="button" class="btn" data-go>Search</button></div>
+      <div data-results style="max-height:220px;overflow:auto;margin-top:6px"></div>
+    </div>
+    ${field("full_name", "Full name (shown on e-signatures)", "required")}${field("email", "E-mail (for notifications)", 'type="email"')}
+    ${field("username", "User ID (never re-used)", "required")}${select("role", "Role", roles, role)}
+    ${field("temporary_password", "Temporary password (must be changed at first login)", 'type="password" required')}`, async (d) => {
+    await api("POST", "/api/users", { ...d, email: d.email || null }); toast(`${d.full_name} added`); openTab("admin");
+  });
+  const box = $(".modal [data-dir]"), results = $(".modal [data-results]");
+  const show = (list) => {
+    box.classList.remove("hidden");
+    results.innerHTML = list.length ? `<table>${list.map((p, i) => `<tr><td><a class="link" data-pick="${i}">${esc(p.full_name)}</a></td>
+      <td>${esc(p.email)}</td><td class="muted">${esc(p.department || "")}${p.job_title ? " - " + esc(p.job_title) : ""}</td></tr>`).join("")}</table>`
+      : `<span class="muted">No matches</span>`;
+    for (const a of results.querySelectorAll("[data-pick]")) a.onclick = () => {
+      const p = list[+a.dataset.pick];
+      for (const k of ["full_name", "email", "username"]) $(`.modal [name=${k}]`).value = p[k] || "";
+      box.classList.add("hidden"); $(".modal [name=temporary_password]").focus();
+    };
+  };
+  $(".modal [data-m365]").onclick = () => {
+    box.classList.remove("hidden"); results.innerHTML = "";
+    $(".modal [data-m365-search]").classList.remove("hidden");
+    const go = async () => { try { show(await api("GET", "/api/directory/search?q=" + encodeURIComponent($(".modal [data-q]").value))); } catch (e) { toast(e.message, 6000); } };
+    $(".modal [data-go]").onclick = go;
+    $(".modal [data-q]").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+    $(".modal [data-q]").focus();
+  };
+  $(".modal [data-csv]").onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const res = await fetch("/api/directory/csv", { method: "POST", body: await file.text(),
+      headers: { "Content-Type": "text/plain", Authorization: "Bearer " + state.token } });
+    const body = await res.json();
+    if (!res.ok) return toast(body.detail || "Could not read the CSV", 6000);
+    $(".modal [data-m365-search]")?.classList.add("hidden");
+    show(body);
+  };
+}
+
 VIEWS.admin = async (c) => {
-  const [users, locs, co, depts] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"),
-    api("GET", "/api/company"), api("GET", "/api/departments")]);
+  const [users, locs, co, depts, dir] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"),
+    api("GET", "/api/company"), api("GET", "/api/departments"), api("GET", "/api/directory/status")]);
+  for (const k of Object.keys(peopleCache)) delete peopleCache[k];
+  const approvers = users.filter(u => u.role === "qa" && u.active);
   c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Company</h2>
       <button class="btn secondary" id="editCompany">Edit</button></div>
     <div class="grid"><div><label>Company</label>${esc(co.name)}</div><div><label>Site</label>${esc(co.site_name)}</div>
       <div><label>Asset ID prefix</label><span class="mono">${esc(co.asset_prefix)}</span> <span class="muted">(next ${esc(co.asset_prefix)}-${String(co.next_asset_number).padStart(6, "0")})</span></div>
       <div><label>Address</label>${esc(co.address || "-")}</div></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Approvers (QA)</h2>
+      <button class="btn" id="newApprover">Add approver</button></div>
+    <p class="muted" style="margin-top:4px">Approvers review asset inductions and work order sign-offs. They are notified by e-mail
+      ${dir.email_configured ? `<span class="pill ok">e-mail on</span>` : `<span class="pill warn">e-mail not configured - tasks still appear under My tasks</span>`}</p>
+    <div class="tbl"><table><tr><th>Name</th><th>User ID</th><th>E-mail</th></tr>
+    ${approvers.map(u => `<tr><td>${esc(u.full_name)}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : `<span class="pill warn">no e-mail</span>`}</td></tr>`).join("")
+      || `<tr><td colspan="3" class="muted">No approvers yet - click "Add approver".</td></tr>`}</table></div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Users</h2><button class="btn" id="newUser">Add user</button></div>
-    <div class="tbl"><table><tr><th>User ID</th><th>Name</th><th>Role</th><th>State</th><th></th></tr>
-    ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.role)}</td>
+    <div class="tbl"><table><tr><th>User ID</th><th>Name</th><th>E-mail</th><th>Role</th><th>State</th><th></th></tr>
+    ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.email || "-")}</td><td>${esc(u.role)}</td>
       <td>${u.active ? (u.locked ? `<span class="pill bad">locked</span>` : `<span class="pill ok">active</span>`) : `<span class="pill">inactive</span>`}</td>
       <td><button class="btn secondary" data-user="${u.id}">Manage</button></td></tr>`).join("")}</table></div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Departments</h2>
@@ -891,18 +1083,19 @@ VIEWS.admin = async (c) => {
     <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
     state.company = await api("PUT", "/api/company", d); setCompanyHeader(); toast("Company updated"); openTab("admin");
   });
-  $("#newUser").onclick = () => modal(`<h2>Add user</h2>${field("username", "User ID (never re-used)", "required")}${field("full_name", "Full name (shown on e-signatures)", "required")}
-    ${select("role", "Role", roles)}${field("temporary_password", "Temporary password (must be changed at first login)", 'type="password" required')}`, async (d) => {
-    await api("POST", "/api/users", d); toast("User created"); openTab("admin");
-  });
+  $("#newUser").onclick = () => newUserForm(roles, "technician", dir);
+  $("#newApprover").onclick = () => newUserForm(roles, "qa", dir);
   for (const b of c.querySelectorAll("[data-user]")) b.onclick = () => {
     const u = users.find(x => x.id === +b.dataset.user);
-    modal(`<h2>Manage ${esc(u.username)}</h2>${select("role", "Role", roles, u.role)}
+    modal(`<h2>Manage ${esc(u.username)}</h2>
+      ${field("full_name", "Full name", `value="${esc(u.full_name)}" required`)}${field("email", "E-mail", `type="email" value="${esc(u.email || "")}"`)}
+      ${select("role", "Role", roles, u.role)}
       <label class="check"><input type="checkbox" name="active" ${u.active ? "checked" : ""}> Active</label>
       <label class="check"><input type="checkbox" name="unlock"> Unlock account / reset failed attempts</label>
       ${field("temporary_password", "Reset to temporary password (optional)", 'type="password"')}
       <label>Reason (required)</label><input name="reason" required>`, async (d) => {
       await api("PATCH", `/api/users/${u.id}`, { role: d.role !== u.role ? d.role : null, active: d.active !== !!u.active ? d.active : null,
+        full_name: d.full_name !== u.full_name ? d.full_name : null, email: (d.email || "") !== (u.email || "") ? d.email : null,
         unlock: d.unlock, temporary_password: d.temporary_password || null, reason: d.reason });
       toast("User updated"); openTab("admin");
     });
@@ -961,7 +1154,8 @@ async function boot() {
   setCompanyHeader();
   $("#who").textContent = `${state.me.full_name} (${state.me.username}) - ${state.me.role}`;
   // People who register or maintain assets start on the register; operators start at the scan station
-  state.tab = state.tab || (can("asset.create") || can("maintenance.plan") || can("user.manage") ? "assets" : "scan");
+  try { const t = await api("GET", "/api/my-tasks"); state.taskCount = t.approvals.length + t.work_orders.length; } catch (_) { state.taskCount = 0; }
+  state.tab = state.tab || (state.taskCount ? "mytasks" : can("asset.create") || can("maintenance.plan") || can("user.manage") ? "assets" : "scan");
   show("app"); openTab(state.tab);
 }
 boot();

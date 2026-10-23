@@ -27,7 +27,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import audit, clock
+from . import audit, clock, notifications
 from .barcode import code128_svg, is_valid_gs1_number, parse_barcode
 from .config import Settings
 from .db import Database
@@ -240,7 +240,7 @@ class GMPAssetService:
 
     @staticmethod
     def _public_user(user: dict) -> dict:
-        return {k: user[k] for k in ("id", "username", "full_name", "role", "active", "locked")}
+        return {k: user[k] for k in ("id", "username", "full_name", "email", "role", "active", "locked")}
 
     def session_user(self, token: str) -> dict:
         if not token:
@@ -300,8 +300,19 @@ class GMPAssetService:
         with self.db.read() as conn:
             return [self._public_user(dict(r)) for r in conn.execute("SELECT * FROM users ORDER BY username")]
 
-    def create_user(self, admin: dict, username: str, full_name: str, role: str, temporary_password: str) -> dict:
+    @staticmethod
+    def _clean_email(email: Optional[str]) -> Optional[str]:
+        email = (email or "").strip()
+        if not email:
+            return None
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) or len(email) > 254:
+            raise ValidationFailed("E-mail address is not valid")
+        return email.lower()
+
+    def create_user(self, admin: dict, username: str, full_name: str, role: str, temporary_password: str,
+                    email: Optional[str] = None) -> dict:
         self.require(admin, "user.manage")
+        email = self._clean_email(email)
         if role not in ROLES:
             raise ValidationFailed(f"Role must be one of {', '.join(ROLES)}")
         if not re.match(r"^[A-Za-z0-9._-]{3,40}$", username or ""):
@@ -317,16 +328,18 @@ class GMPAssetService:
                 raise Conflict("Username already exists (user IDs cannot be re-used)")
             now = clock.now_iso()
             cur = conn.execute(
-                "INSERT INTO users (username, full_name, role, password_hash, password_changed_at, must_change_password, created_at) "
-                "VALUES (?, ?, ?, ?, ?, 1, ?)",
-                (username, full_name.strip(), role, hash_password(temporary_password, self.settings.pbkdf2_iterations), now, now),
+                "INSERT INTO users (username, full_name, email, role, password_hash, password_changed_at, must_change_password, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+                (username, full_name.strip(), email, role, hash_password(temporary_password, self.settings.pbkdf2_iterations),
+                 now, now),
             )
             audit.record(conn, username=admin["username"], action="USER_CREATED", entity_type="user", entity_id=cur.lastrowid,
-                         new={"username": username, "full_name": full_name.strip(), "role": role})
+                         new={"username": username, "full_name": full_name.strip(), "email": email, "role": role})
             return self._public_user(dict(conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()))
 
     def update_user(self, admin: dict, user_id: int, *, role: Optional[str] = None, active: Optional[bool] = None,
-                    unlock: bool = False, temporary_password: Optional[str] = None, reason: Optional[str] = None) -> dict:
+                    unlock: bool = False, temporary_password: Optional[str] = None, reason: Optional[str] = None,
+                    email: Optional[str] = None, full_name: Optional[str] = None) -> dict:
         self.require(admin, "user.manage")
         reason = _require_reason(reason)
         with self.db.transaction() as conn:
@@ -343,6 +356,10 @@ class GMPAssetService:
                 updates["role"] = role
             if active is not None:
                 updates["active"] = int(active)
+            if email is not None and self._clean_email(email) != target["email"]:
+                updates["email"] = self._clean_email(email)
+            if full_name is not None and full_name.strip() and full_name.strip() != target["full_name"]:
+                updates["full_name"] = full_name.strip()
             if unlock:
                 updates.update(locked=0, failed_attempts=0)
             if temporary_password:
@@ -613,6 +630,8 @@ class GMPAssetService:
             asset["signatures"] = self._signatures(conn, "asset", asset["id"])
             asset["pm_schedules"] = [dict(r) for r in conn.execute(
                 "SELECT * FROM pm_schedules WHERE asset_id = ? ORDER BY active DESC, id", (asset["id"],))]
+            asset["approvals"] = [dict(r) for r in conn.execute(
+                self._APPROVAL_SELECT + "WHERE r.asset_id = ? ORDER BY r.id DESC", (asset["id"],))]
             asset["work_orders"] = [self._decorate_wo(conn, dict(r)) for r in conn.execute(
                 self._WO_SELECT + "WHERE w.asset_id = ? ORDER BY w.status = 'open' DESC, w.due_on DESC, w.id DESC", (asset["id"],))]
             return asset
@@ -802,6 +821,8 @@ class GMPAssetService:
     def _check_transition(self, conn, asset: dict, new_status: str) -> None:
         if new_status not in STATUS_TRANSITIONS[asset["status"]]:
             raise Conflict(f"Cannot change status from {asset['status']} to {new_status}")
+        if new_status == "in_service" and asset["status"] == "commissioning" and asset["gmp_impact"] != "none":
+            raise Conflict("New GMP equipment is activated through QA induction approval - use 'Submit for QA approval'")
         if new_status == "in_service":
             blockers = self._release_blockers(conn, asset)
             if blockers:
@@ -847,8 +868,8 @@ class GMPAssetService:
                 "AND blocks_use = 1 AND next_due_on < ? ORDER BY next_due_on", (asset["id"], on.isoformat())):
             blockers.append(f"{sch['title']} overdue since {sch['next_due_on']}")
         for wo in conn.execute(
-                "SELECT number, title FROM work_orders WHERE asset_id = ? AND status = 'open' AND blocks_use = 1 "
-                "AND trigger != 'schedule' ORDER BY id", (asset["id"],)):
+                "SELECT number, title FROM work_orders WHERE asset_id = ? AND blocks_use = 1 AND trigger != 'schedule' "
+                "AND (status = 'open' OR approval_state = 'pending') ORDER BY id", (asset["id"],)):
             blockers.append(f"Work order {wo['number']} ({wo['title']}) must be completed before use")
         open_devs = [r["number"] for r in conn.execute(
             "SELECT number FROM deviations WHERE asset_id = ? AND status = 'open'", (asset["id"],))]
@@ -1158,6 +1179,8 @@ class GMPAssetService:
             "event": data.get("event") or None,
             "lead_days": data.get("lead_days") or 0,
             "blocks_use": int(bool(data.get("blocks_use", True))),
+            "default_assignee": data.get("default_assignee") or None,
+            "requires_approval": int(bool(data.get("requires_approval", False))),
         }
         if len(clean["title"]) < 3:
             raise ValidationFailed("A title is required (e.g. 'Quarterly PM', 'Post-move verification')")
@@ -1180,6 +1203,8 @@ class GMPAssetService:
 
     def _insert_schedule(self, conn, user: dict, asset: dict, data: dict, first_due_on: Optional[str] = None) -> dict:
         sch = self._validate_schedule(data)
+        if sch["default_assignee"]:
+            self._check_assignee(conn, sch["default_assignee"])
         if sch["trigger_type"] == "time":
             first = _parse_date(first_due_on, "first_due_on") if first_due_on else \
                 _add_interval(clock.today(), sch["interval_value"], sch["interval_unit"])
@@ -1189,9 +1214,9 @@ class GMPAssetService:
         sch.update(asset_id=asset["id"], created_at=clock.now_iso(), created_by=user["username"])
         cur = conn.execute(
             "INSERT INTO pm_schedules (asset_id, title, instructions, work_type, trigger_type, interval_value, interval_unit, "
-            "event, lead_days, blocks_use, next_due_on, created_at, created_by) VALUES (:asset_id, :title, :instructions, "
-            ":work_type, :trigger_type, :interval_value, :interval_unit, :event, :lead_days, :blocks_use, :next_due_on, "
-            ":created_at, :created_by)", sch)
+            "event, lead_days, blocks_use, default_assignee, requires_approval, next_due_on, created_at, created_by) "
+            "VALUES (:asset_id, :title, :instructions, :work_type, :trigger_type, :interval_value, :interval_unit, :event, "
+            ":lead_days, :blocks_use, :default_assignee, :requires_approval, :next_due_on, :created_at, :created_by)", sch)
         sch["id"] = cur.lastrowid
         audit.record(conn, username=user["username"], action="PM_SCHEDULE_CREATED", entity_type="pm_schedule",
                      entity_id=sch["id"], new=dict(sch, asset_tag=asset["asset_tag"]))
@@ -1221,7 +1246,8 @@ class GMPAssetService:
     def update_pm_schedule(self, user: dict, schedule_id: int, changes: dict, reason: str) -> dict:
         self.require(user, "maintenance.plan")
         reason = _require_reason(reason)
-        allowed = {"title", "instructions", "interval_value", "interval_unit", "lead_days", "blocks_use", "active", "next_due_on"}
+        allowed = {"title", "instructions", "interval_value", "interval_unit", "lead_days", "blocks_use", "active", "next_due_on",
+                   "default_assignee", "requires_approval"}
         unknown = set(changes) - allowed
         if unknown:
             raise ValidationFailed(f"Fields not editable: {', '.join(sorted(unknown))}")
@@ -1233,6 +1259,10 @@ class GMPAssetService:
             self._validate_schedule(merged)
             merged["active"] = int(bool(merged["active"]))
             merged["blocks_use"] = int(bool(merged["blocks_use"]))
+            merged["requires_approval"] = int(bool(merged["requires_approval"]))
+            merged["default_assignee"] = merged["default_assignee"] or None
+            if merged["default_assignee"] and "default_assignee" in changes:
+                self._check_assignee(conn, merged["default_assignee"])
             if merged["trigger_type"] == "time":
                 if "next_due_on" in changes:
                     merged["next_due_on"] = _parse_date(changes["next_due_on"], "next_due_on").isoformat()
@@ -1257,23 +1287,33 @@ class GMPAssetService:
 
     def _create_work_order(self, conn, user: dict, asset: dict, *, work_type: str, title: str, instructions: Optional[str],
                            due_on: str, trigger: str, blocks_use: bool, schedule_id: Optional[int] = None,
-                           reason: Optional[str] = None) -> dict:
+                           reason: Optional[str] = None, assigned_to: Optional[int] = None,
+                           requires_approval: bool = False) -> dict:
         year = clock.today().year
         n = conn.execute("SELECT COUNT(*) FROM work_orders WHERE number LIKE ?", (f"WO-{year}-%",)).fetchone()[0] + 1
         wo = {
             "number": f"WO-{year}-{n:04d}", "asset_id": asset["id"], "schedule_id": schedule_id, "work_type": work_type,
             "title": title, "instructions": instructions, "trigger": trigger, "due_on": due_on,
             "blocks_use": int(bool(blocks_use)), "status": "open", "created_at": clock.now_iso(),
-            "created_by": user["username"],
+            "created_by": user["username"], "assigned_to": assigned_to, "requires_approval": int(bool(requires_approval)),
         }
         cur = conn.execute(
             "INSERT INTO work_orders (number, asset_id, schedule_id, work_type, title, instructions, trigger, due_on, "
-            "blocks_use, status, created_at, created_by) VALUES (:number, :asset_id, :schedule_id, :work_type, :title, "
-            ":instructions, :trigger, :due_on, :blocks_use, :status, :created_at, :created_by)", wo)
+            "blocks_use, status, created_at, created_by, assigned_to, requires_approval) VALUES (:number, :asset_id, "
+            ":schedule_id, :work_type, :title, :instructions, :trigger, :due_on, :blocks_use, :status, :created_at, "
+            ":created_by, :assigned_to, :requires_approval)", wo)
         wo["id"] = cur.lastrowid
         audit.record(conn, username=user["username"], action="WORK_ORDER_CREATED", entity_type="work_order",
                      entity_id=wo["number"], new=dict(wo, asset_tag=asset["asset_tag"]), reason=reason)
+        if assigned_to:
+            self._notify_assignment(conn, wo, asset)
         return wo
+
+    def _notify_assignment(self, conn, wo: dict, asset: dict) -> None:
+        self._notify(conn, wo["assigned_to"], f"[GMP] Work order {wo['number']} assigned to you: {wo['title']}",
+                     f"Work order {wo['number']} has been assigned to you.\n\n"
+                     f"Asset: {asset['asset_tag']} - {asset['description']}\nTask: {wo['title']} ({wo['work_type']})\n"
+                     f"Due: {wo['due_on']}\n{wo.get('instructions') or ''}\n\nOpen: {self.settings.base_url}/")
 
     def _fire_event(self, conn, user: dict, asset: dict, event: str, detail: str = "") -> List[dict]:
         """Create work orders for every active event-triggered schedule listening for ``event``."""
@@ -1284,7 +1324,8 @@ class GMPAssetService:
             created.append(self._create_work_order(
                 conn, user, asset, work_type=sch["work_type"], title=sch["title"], instructions=sch["instructions"],
                 due_on=due, trigger=f"event:{event}", blocks_use=sch["blocks_use"], schedule_id=sch["id"],
-                reason=f"Triggered by event '{PM_EVENTS[event]}'" + (f": {detail}" if detail else "")))
+                reason=f"Triggered by event '{PM_EVENTS[event]}'" + (f": {detail}" if detail else ""),
+                assigned_to=sch["default_assignee"], requires_approval=sch["requires_approval"]))
         return created
 
     def generate_due_work_orders(self) -> List[str]:
@@ -1304,12 +1345,16 @@ class GMPAssetService:
                 wo = self._create_work_order(
                     conn, system, asset, work_type=sch["work_type"], title=sch["title"], instructions=sch["instructions"],
                     due_on=sch["next_due_on"], trigger="schedule", blocks_use=sch["blocks_use"], schedule_id=sch["id"],
-                    reason=f"Scheduled every {sch['interval_value']} {sch['interval_unit']}")
+                    reason=f"Scheduled every {sch['interval_value']} {sch['interval_unit']}",
+                    assigned_to=sch["default_assignee"], requires_approval=sch["requires_approval"])
                 created.append(wo["number"])
+        if created:
+            notifications.send_in_background(self.db, self.settings)
         return created
 
     def create_work_order(self, user: dict, tag: str, *, work_type: str, title: str, instructions: Optional[str],
-                          due_on: str, blocks_use: bool = False) -> dict:
+                          due_on: str, blocks_use: bool = False, assigned_to: Optional[int] = None,
+                          requires_approval: bool = False) -> dict:
         self.require(user, "maintenance.plan")
         if work_type not in WORK_TYPES:
             raise ValidationFailed(f"work_type must be one of {', '.join(WORK_TYPES)}")
@@ -1320,17 +1365,49 @@ class GMPAssetService:
             asset = self._asset(conn, tag)
             if asset["status"] == "retired":
                 raise Conflict("Retired assets cannot have work orders")
+            if assigned_to:
+                self._check_assignee(conn, assigned_to)
             wo = self._create_work_order(conn, user, asset, work_type=work_type, title=title.strip(),
                                          instructions=(instructions or "").strip() or None, due_on=due.isoformat(),
-                                         trigger="manual", blocks_use=blocks_use)
+                                         trigger="manual", blocks_use=blocks_use, assigned_to=assigned_to or None,
+                                         requires_approval=requires_approval)
+        notifications.send_in_background(self.db, self.settings)
         return self.get_work_order(user, wo["number"])
 
-    _WO_SELECT = ("SELECT w.*, a.asset_tag, a.description AS asset_description, l.code AS location_code "
-                  "FROM work_orders w JOIN assets a ON a.id = w.asset_id LEFT JOIN locations l ON l.id = a.location_id ")
+    def assign_work_order(self, user: dict, number: str, assignee_id: Optional[int], reason: Optional[str] = None) -> dict:
+        self.require(user, "maintenance.plan")
+        with self.db.transaction() as conn:
+            wo = _row(conn.execute("SELECT * FROM work_orders WHERE number = ?", (number,)).fetchone())
+            if wo is None:
+                raise NotFound(f"Work order {number} not found")
+            if wo["status"] != "open":
+                raise Conflict(f"Work order is already {wo['status']}")
+            if assignee_id:
+                self._check_assignee(conn, assignee_id)
+            if wo["assigned_to"] == (assignee_id or None):
+                raise ValidationFailed("Work order is already assigned to this person")
+            conn.execute("UPDATE work_orders SET assigned_to = ? WHERE id = ?", (assignee_id or None, wo["id"]))
+            audit.record(conn, username=user["username"], action="WORK_ORDER_ASSIGNED", entity_type="work_order",
+                         entity_id=number, old={"assigned_to": wo["assigned_to"]}, new={"assigned_to": assignee_id or None},
+                         reason=(reason or "").strip() or None)
+            if assignee_id:
+                asset = dict(conn.execute("SELECT * FROM assets WHERE id = ?", (wo["asset_id"],)).fetchone())
+                self._notify_assignment(conn, dict(wo, assigned_to=assignee_id), asset)
+        notifications.send_in_background(self.db, self.settings)
+        return self.get_work_order(user, number)
+
+    _WO_SELECT = ("SELECT w.*, a.asset_tag, a.description AS asset_description, l.code AS location_code, "
+                  "u.full_name AS assignee_name, u.username AS assignee_username "
+                  "FROM work_orders w JOIN assets a ON a.id = w.asset_id LEFT JOIN locations l ON l.id = a.location_id "
+                  "LEFT JOIN users u ON u.id = w.assigned_to ")
 
     def _decorate_wo(self, conn, wo: dict) -> dict:
         wo["overdue"] = wo["status"] == "open" and wo["due_on"] < clock.today().isoformat()
         wo["signatures"] = self._signatures(conn, "maintenance", wo["maintenance_record_id"]) if wo["maintenance_record_id"] else []
+        approval = conn.execute(
+            "SELECT r.number, r.status, r.decision_comment, u.full_name AS approver_name FROM approval_requests r "
+            "JOIN users u ON u.id = r.approver_id WHERE r.work_order_id = ? ORDER BY r.id DESC LIMIT 1", (wo["id"],)).fetchone()
+        wo["approval"] = dict(approval) if approval else None
         return wo
 
     def get_work_order(self, user: dict, number: str) -> dict:
@@ -1341,10 +1418,14 @@ class GMPAssetService:
                 raise NotFound(f"Work order {number} not found")
             return self._decorate_wo(conn, dict(row))
 
-    def list_work_orders(self, user: dict, status: Optional[str] = None, tag: Optional[str] = None) -> List[dict]:
+    def list_work_orders(self, user: dict, status: Optional[str] = None, tag: Optional[str] = None,
+                         assigned_to: Optional[int] = None) -> List[dict]:
         self.require(user, "asset.view")
         self.generate_due_work_orders()
         sql, args = self._WO_SELECT + "WHERE 1=1 ", []
+        if assigned_to:
+            sql += "AND w.assigned_to = ? "
+            args.append(assigned_to)
         if status:
             sql += "AND w.status = ? "
             args.append(status)
@@ -1355,12 +1436,20 @@ class GMPAssetService:
             return [self._decorate_wo(conn, dict(r)) for r in conn.execute(sql + "ORDER BY w.status = 'open' DESC, w.due_on, w.id", args)]
 
     def complete_work_order(self, user: dict, number: str, *, performed_on: str, notes: str,
-                            requalification_required: bool = False, password: Optional[str] = None) -> dict:
+                            requalification_required: bool = False, password: Optional[str] = None,
+                            approver_id: Optional[int] = None) -> dict:
         self.require(user, "maintenance.record")
         performed = self._validate_maintenance_input(performed_on, notes)
         wo = self.get_work_order(user, number)
         if wo["status"] != "open":
             raise Conflict(f"Work order is already {wo['status']}")
+        if wo["assigned_to"] and wo["assigned_to"] != user["id"]:
+            raise Forbidden(f"Work order is assigned to {wo['assignee_name']} - ask a planner to reassign it")
+        if wo["requires_approval"]:
+            if not approver_id:
+                raise ValidationFailed("This work order needs QA approval - choose an approver")
+            with self.db.read() as conn:
+                self._check_approver(conn, approver_id, user["id"])
         self._verify_signer(user, password, "performed")
         with self.db.transaction() as conn:
             current = conn.execute("SELECT status FROM work_orders WHERE number = ?", (number,)).fetchone()
@@ -1379,6 +1468,13 @@ class GMPAssetService:
                          new={"status": "completed", "closed_at": now, "maintenance_record_id": record_id})
             if wo["schedule_id"] and wo["trigger"] == "schedule":
                 self._advance_schedule(conn, user, wo["schedule_id"], performed, f"Completed {number}", completed=True)
+            if wo["requires_approval"]:
+                conn.execute("UPDATE work_orders SET approval_state = 'pending' WHERE id = ?", (wo["id"],))
+                approver = self._check_approver(conn, approver_id, user["id"])
+                self._new_approval(conn, user, request_type="work_order", asset=asset, approver=approver,
+                                   comment=notes.strip(), work_order_id=wo["id"],
+                                   subject=f"{number} {wo['title']} completed - QA approval required")
+        notifications.send_in_background(self.db, self.settings)
         return self.get_work_order(user, number)
 
     def _advance_schedule(self, conn, user: dict, schedule_id: int, base: date, reason: str, completed: bool) -> None:
@@ -1410,6 +1506,230 @@ class GMPAssetService:
                 # skipping this occurrence: the next one is one interval after the skipped due date
                 self._advance_schedule(conn, user, wo["schedule_id"], date.fromisoformat(wo["due_on"]), f"Skipped {number}: {reason}", completed=False)
         return self.get_work_order(user, number)
+
+    # ------------------------------------------------------------------
+    # People, approvals and notifications
+    # ------------------------------------------------------------------
+
+    def _notify(self, conn, user_id: int, subject: str, body: str) -> None:
+        u = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.execute("INSERT INTO notifications (user_id, email, subject, body, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (user_id, u["email"] if u else None, subject, body, clock.now_iso()))
+
+    @staticmethod
+    def _active_user(conn, user_id: int) -> dict:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None or not row["active"] or row["locked"]:
+            raise ValidationFailed("Selected person is not an active user")
+        return dict(row)
+
+    def _check_assignee(self, conn, user_id: int) -> dict:
+        person = self._active_user(conn, user_id)
+        if not has_permission(person["role"], "maintenance.record"):
+            raise ValidationFailed(f"{person['full_name']} ({person['role']}) cannot perform maintenance work")
+        return person
+
+    def _check_approver(self, conn, user_id: int, requester_id: int) -> dict:
+        person = self._active_user(conn, user_id)
+        if not has_permission(person["role"], "asset.status.release"):
+            raise ValidationFailed(f"{person['full_name']} is not a QA approver")
+        if person["id"] == requester_id:
+            raise ValidationFailed("You cannot be the approver of your own request")
+        return person
+
+    def list_people(self, user: dict, kind: str) -> List[dict]:
+        """Active approvers (QA) or assignees (can perform maintenance), for pick lists."""
+        self.require(user, "asset.view")
+        permission = {"approvers": "asset.status.release", "assignees": "maintenance.record"}[kind]
+        with self.db.read() as conn:
+            rows = conn.execute("SELECT id, username, full_name, email, role FROM users WHERE active = 1 AND locked = 0 "
+                                "ORDER BY full_name").fetchall()
+        return [dict(r) for r in rows if has_permission(r["role"], permission)]
+
+    _APPROVAL_SELECT = (
+        "SELECT r.*, a.asset_tag, a.description AS asset_description, a.status AS asset_status, w.number AS work_order_number, "
+        "w.title AS work_order_title, rq.full_name AS requested_by_name, ap.full_name AS approver_name, "
+        "ap.email AS approver_email, dc.full_name AS decided_by_name "
+        "FROM approval_requests r JOIN assets a ON a.id = r.asset_id LEFT JOIN work_orders w ON w.id = r.work_order_id "
+        "JOIN users rq ON rq.id = r.requested_by JOIN users ap ON ap.id = r.approver_id "
+        "LEFT JOIN users dc ON dc.id = r.decided_by ")
+
+    def _new_approval(self, conn, user: dict, *, request_type: str, asset: dict, approver: dict, comment: Optional[str],
+                      subject: str, work_order_id: Optional[int] = None) -> dict:
+        year = clock.today().year
+        n = conn.execute("SELECT COUNT(*) FROM approval_requests WHERE number LIKE ?", (f"APR-{year}-%",)).fetchone()[0] + 1
+        req = {"number": f"APR-{year}-{n:04d}", "request_type": request_type, "asset_id": asset["id"],
+               "work_order_id": work_order_id, "requested_by": user["id"], "requested_at": clock.now_iso(),
+               "request_comment": (comment or "").strip() or None, "approver_id": approver["id"], "status": "pending"}
+        cur = conn.execute(
+            "INSERT INTO approval_requests (number, request_type, asset_id, work_order_id, requested_by, requested_at, "
+            "request_comment, approver_id, status) VALUES (:number, :request_type, :asset_id, :work_order_id, :requested_by, "
+            ":requested_at, :request_comment, :approver_id, :status)", req)
+        req["id"] = cur.lastrowid
+        audit.record(conn, username=user["username"], action="APPROVAL_REQUESTED", entity_type="approval",
+                     entity_id=req["number"], new=dict(req, asset_tag=asset["asset_tag"], approver=approver["username"]))
+        self._notify(conn, approver["id"], f"[GMP] Approval required ({req['number']}): {subject}",
+                     f"{user['full_name']} has asked you to approve {req['number']}.\n\n"
+                     f"Asset: {asset['asset_tag']} - {asset['description']}\n"
+                     f"Comment: {req['request_comment'] or '-'}\n\n"
+                     f"Review it under 'My tasks': {self.settings.base_url}/")
+        return req
+
+    def submit_induction(self, user: dict, tag: str, approver_id: int, comment: Optional[str]) -> dict:
+        """Ask a QA approver to approve a new asset for use (induction)."""
+        if not (has_permission(user["role"], "asset.create") or has_permission(user["role"], "asset.edit")):
+            raise Forbidden("You are not permitted to submit assets for approval")
+        with self.db.transaction() as conn:
+            asset = self._asset(conn, tag)
+            if asset["status"] != "commissioning":
+                raise Conflict("Only new (Inactive - new) assets go through induction approval")
+            if conn.execute("SELECT 1 FROM approval_requests WHERE asset_id = ? AND request_type = 'asset_induction' "
+                            "AND status = 'pending'", (asset["id"],)).fetchone():
+                raise Conflict("An induction approval is already pending for this asset")
+            approver = self._check_approver(conn, approver_id, user["id"])
+            req = self._new_approval(conn, user, request_type="asset_induction", asset=asset, approver=approver,
+                                     comment=comment, subject=f"induction of {asset['asset_tag']} {asset['description']}")
+        notifications.send_in_background(self.db, self.settings)
+        return self.get_approval(user, req["number"])
+
+    def get_approval(self, user: dict, number: str) -> dict:
+        self.require(user, "asset.view")
+        with self.db.read() as conn:
+            row = conn.execute(self._APPROVAL_SELECT + "WHERE r.number = ?", (number,)).fetchone()
+            if row is None:
+                raise NotFound(f"Approval request {number} not found")
+            req = dict(row)
+            req["signatures"] = self._signatures(conn, "approval", req["id"])
+            if req["request_type"] == "asset_induction" and req["status"] == "pending":
+                asset = self._asset(conn, req["asset_tag"])
+                req["blockers"] = self._release_blockers(conn, dict(asset, qualification_status="qualified"))
+            return req
+
+    def list_approvals(self, user: dict, *, approver_id: Optional[int] = None, requested_by: Optional[int] = None,
+                       status: Optional[str] = None, tag: Optional[str] = None) -> List[dict]:
+        self.require(user, "asset.view")
+        sql, args = self._APPROVAL_SELECT + "WHERE 1=1 ", []
+        for col, val in (("r.approver_id", approver_id), ("r.requested_by", requested_by), ("r.status", status),
+                         ("a.asset_tag", tag.upper() if tag else None)):
+            if val:
+                sql += f"AND {col} = ? "
+                args.append(val)
+        with self.db.read() as conn:
+            numbers = [r["number"] for r in conn.execute(sql + "ORDER BY r.status = 'pending' DESC, r.id DESC", args)]
+        return [self.get_approval(user, n) for n in numbers]
+
+    def decide_approval(self, user: dict, number: str, decision: str, comment: Optional[str], password: Optional[str]) -> dict:
+        self.require(user, "asset.status.release")
+        if decision not in ("approve", "reject"):
+            raise ValidationFailed("decision must be approve or reject")
+        if decision == "reject":
+            comment = _require_reason(comment)
+        req = self.get_approval(user, number)
+        if req["status"] != "pending":
+            raise Conflict(f"Request is already {req['status']}")
+        if req["approver_id"] != user["id"]:
+            raise Forbidden(f"This request is assigned to {req['approver_name']}")
+        if req["requested_by"] == user["id"]:
+            raise Forbidden("You cannot approve your own request")
+        if decision == "approve" and req.get("blockers"):
+            raise Conflict("Cannot approve yet: " + "; ".join(req["blockers"]))
+        meaning = "approved" if decision == "approve" else "rejected"
+        self._verify_signer(user, password, meaning)
+        with self.db.transaction() as conn:
+            current = conn.execute("SELECT status FROM approval_requests WHERE number = ?", (number,)).fetchone()
+            if current["status"] != "pending":
+                raise Conflict(f"Request is already {current['status']}")
+            new_status = "approved" if decision == "approve" else "rejected"
+            now = clock.now_iso()
+            conn.execute("UPDATE approval_requests SET status = ?, decided_by = ?, decided_at = ?, decision_comment = ? "
+                         "WHERE number = ?", (new_status, user["id"], now, (comment or "").strip() or None, number))
+            audit.record(conn, username=user["username"], action=f"APPROVAL_{new_status.upper()}", entity_type="approval",
+                         entity_id=number, old={"status": "pending"}, new={"status": new_status, "decided_at": now},
+                         reason=comment)
+            signed = dict(conn.execute("SELECT * FROM approval_requests WHERE number = ?", (number,)).fetchone())
+            self._apply_signature(conn, user, "approval", req["id"], meaning, signed)
+            asset = self._asset(conn, req["asset_tag"])
+            if req["request_type"] == "asset_induction" and new_status == "approved":
+                self._activate_after_induction(conn, user, asset, req, comment)
+            elif req["request_type"] == "work_order":
+                state = "approved" if new_status == "approved" else "rejected"
+                fields = "approval_state = 'approved'" if state == "approved" else \
+                    "approval_state = 'rejected', status = 'open', closed_at = NULL, closed_by = NULL"
+                conn.execute(f"UPDATE work_orders SET {fields} WHERE id = ?", (req["work_order_id"],))
+                audit.record(conn, username=user["username"], action=f"WORK_ORDER_{state.upper()}", entity_type="work_order",
+                             entity_id=req["work_order_number"], new={"approval_state": state,
+                                                                      **({"status": "open"} if state == "rejected" else {})},
+                             reason=comment)
+            outcome = "APPROVED" if new_status == "approved" else "REJECTED"
+            self._notify(conn, req["requested_by"], f"[GMP] {number} {outcome}: {req['asset_tag']}",
+                         f"{user['full_name']} {outcome.lower()} {number} for {req['asset_tag']} - {req['asset_description']}.\n"
+                         f"Comment: {comment or '-'}\n"
+                         + ("\nThe work order has been re-opened for rework.\n" if req["request_type"] == "work_order"
+                            and new_status == "rejected" else "")
+                         + f"\n{self.settings.base_url}/")
+        notifications.send_in_background(self.db, self.settings)
+        return self.get_approval(user, number)
+
+    def _activate_after_induction(self, conn, user: dict, asset: dict, req: dict, comment: Optional[str]) -> None:
+        if asset["status"] != "commissioning":
+            raise Conflict(f"Asset is no longer new (status {asset['status']})")
+        fields: Dict[str, Any] = {"status": "in_service"}
+        if asset["gmp_impact"] != "none" and asset["qualification_status"] != "qualified":
+            fields["qualification_status"] = "qualified"
+        reason = f"Induction approved ({req['number']})" + (f": {comment}" if comment else "")
+        updated = self._set_asset_fields(conn, user, asset, fields, "INDUCTION_APPROVED", reason)
+        self._apply_signature(conn, user, "asset", asset["id"], "released", self._asset_core(updated))
+        self._fire_event(conn, user, updated, "asset_activated", req["number"])
+
+    def reassign_approval(self, user: dict, number: str, approver_id: int, reason: str) -> dict:
+        reason = _require_reason(reason)
+        req = self.get_approval(user, number)
+        if req["status"] != "pending":
+            raise Conflict(f"Request is already {req['status']}")
+        if user["id"] not in (req["requested_by"], req["approver_id"]) and not has_permission(user["role"], "asset.status.release"):
+            raise Forbidden("Only the requester, the approver or QA can reassign a request")
+        with self.db.transaction() as conn:
+            approver = self._check_approver(conn, approver_id, req["requested_by"])
+            conn.execute("UPDATE approval_requests SET approver_id = ? WHERE number = ?", (approver["id"], number))
+            audit.record(conn, username=user["username"], action="APPROVAL_REASSIGNED", entity_type="approval",
+                         entity_id=number, old={"approver_id": req["approver_id"]}, new={"approver_id": approver["id"]},
+                         reason=reason)
+            self._notify(conn, approver["id"], f"[GMP] Approval required ({number}): {req['asset_tag']}",
+                         f"{number} for {req['asset_tag']} - {req['asset_description']} has been reassigned to you.\n"
+                         f"Reason: {reason}\n\n{self.settings.base_url}/")
+        notifications.send_in_background(self.db, self.settings)
+        return self.get_approval(user, number)
+
+    def cancel_approval(self, user: dict, number: str, reason: str) -> dict:
+        reason = _require_reason(reason)
+        req = self.get_approval(user, number)
+        if req["status"] != "pending":
+            raise Conflict(f"Request is already {req['status']}")
+        if req["request_type"] != "asset_induction":
+            raise Conflict("Work order approvals cannot be withdrawn - ask the approver to reject it")
+        if user["id"] != req["requested_by"] and not has_permission(user["role"], "asset.status.release"):
+            raise Forbidden("Only the requester or QA can withdraw a request")
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE approval_requests SET status = 'cancelled', decided_by = ?, decided_at = ?, "
+                         "decision_comment = ? WHERE number = ?", (user["id"], clock.now_iso(), reason, number))
+            audit.record(conn, username=user["username"], action="APPROVAL_CANCELLED", entity_type="approval",
+                         entity_id=number, old={"status": "pending"}, new={"status": "cancelled"}, reason=reason)
+        return self.get_approval(user, number)
+
+    def my_tasks(self, user: dict) -> dict:
+        self.require(user, "asset.view")
+        return {
+            "approvals": self.list_approvals(user, approver_id=user["id"], status="pending"),
+            "work_orders": [w for w in self.list_work_orders(user, status="open", assigned_to=user["id"])],
+            "unassigned_work_orders": [w for w in self.list_work_orders(user, status="open") if not w["assigned_to"]]
+            if has_permission(user["role"], "maintenance.plan") else [],
+            "my_requests": self.list_approvals(user, requested_by=user["id"], status="pending"),
+        }
+
+    def outbox(self, user: dict, limit: int = 100) -> List[dict]:
+        self.require(user, "user.manage")
+        with self.db.read() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT ?", (limit,))]
 
     # ------------------------------------------------------------------
     # Deviations
