@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}New request · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Submit a ticket</h1>
+  <form method="post" action="/tickets/new">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="row">
+      <label>Request type
+        <select name="category" id="category">
+          {% for c in Category %}
+          <option value="{{ c.value }}" {% if c == selected %}selected{% endif %}>{{ c.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Priority
+        <select name="priority">
+          {% for p in Priority %}
+          <option value="{{ p.value }}" {% if (form.priority or 'medium') == p.value %}selected{% endif %}>{{ p.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Short description <input name="title" maxlength="255" value="{{ form.title or '' }}" required></label>
+    <label>Details <textarea name="description" rows="6" required>{{ form.description or '' }}</textarea></label>
+
+    {% for cat, fields in category_fields.items() %}
+    <fieldset class="cat-fields" data-category="{{ cat.value }}" {% if cat != selected %}hidden{% endif %}>
+      <legend>{{ cat.label.split(' (')[0] }} information</legend>
+      {% for key, label in fields %}
+        {% set name = 'detail_' ~ cat.value ~ '_' ~ key %}
+        <label>{{ label }} <input name="{{ name }}" value="{{ form[name] or '' }}"></label>
+      {% endfor %}
+    </fieldset>
+    {% endfor %}
+
+    <button class="btn">Submit</button>
+  </form>
+</div>
+<script>
+  const select = document.getElementById('category');
+  function sync() {
+    document.querySelectorAll('.cat-fields').forEach(fs => fs.hidden = fs.dataset.category !== select.value);
+  }
+  select.addEventListener('change', sync);
+  sync();
+</script>
+{% endblock %}

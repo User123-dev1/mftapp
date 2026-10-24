@@ -1,0 +1,36 @@
+{% macro status_badge(status) -%}
+<span class="badge status-{{ status.value }}">{{ status.label }}</span>
+{%- endmacro %}
+
+{% macro priority_badge(priority) -%}
+<span class="badge prio-{{ priority.value }}">{{ priority.label }}</span>
+{%- endmacro %}
+
+{% macro ticket_table(tickets, show_requester=True, show_assignee=True) -%}
+{% if tickets %}
+<table class="grid">
+  <thead><tr>
+    <th>Number</th><th>Title</th><th>Category</th><th>Priority</th><th>Status</th>
+    {% if show_requester %}<th>Requester</th>{% endif %}
+    {% if show_assignee %}<th>Assigned to</th>{% endif %}
+    <th>Opened</th>
+  </tr></thead>
+  <tbody>
+  {% for t in tickets %}
+    <tr>
+      <td><a href="/tickets/{{ t.number }}">{{ t.number }}</a></td>
+      <td>{{ t.title }}</td>
+      <td>{{ t.category.label.split(' (')[0] }}</td>
+      <td>{{ priority_badge(t.priority) }}</td>
+      <td>{{ status_badge(t.status) }}</td>
+      {% if show_requester %}<td>{{ t.requester.full_name }}</td>{% endif %}
+      {% if show_assignee %}<td>{{ t.assignee.full_name if t.assignee else '—' }}</td>{% endif %}
+      <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No tickets.</p>
+{% endif %}
+{%- endmacro %}

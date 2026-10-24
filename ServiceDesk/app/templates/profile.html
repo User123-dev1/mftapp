@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Profile · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ user.full_name }}</h1>
+  <dl class="kv">
+    <dt>Email</dt><dd>{{ user.email }}</dd>
+    <dt>Role</dt><dd>{{ user.role.label }}</dd>
+    {% if user.department %}<dt>Department</dt><dd>{{ user.department }}</dd>{% endif %}
+  </dl>
+  <h2>Change password</h2>
+  <form method="post" action="/profile/password">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Current password <input type="password" name="current_password" required></label>
+    <label>New password <input type="password" name="new_password" minlength="8" required></label>
+    <button class="btn">Change password</button>
+  </form>
+</section>
+{% endblock %}

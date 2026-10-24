@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">{{ app_name }}</a>
+  {% if user %}
+  <nav>
+    {% if user.is_staff %}
+      <a href="/dashboard">Dashboard</a>
+      <a href="/tickets?assignee=me">My Work</a>
+      <a href="/tickets?status=new">Unassigned</a>
+      <a href="/tickets">All Open</a>
+    {% else %}
+      <a href="/">Home</a>
+      <a href="/tickets?status=all">My Tickets</a>
+    {% endif %}
+    <a href="/tickets/new" class="btn btn-small">+ New Request</a>
+    {% if user.role == Role.MANAGER %}
+      <a href="/admin/users">Users</a>
+      <a href="/admin/emails">Email Log</a>
+    {% endif %}
+  </nav>
+  <div class="who">
+    <a href="/profile">{{ user.full_name }}</a> <span class="role">{{ user.role.label }}</span>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="link">Sign out</button>
+    </form>
+  </div>
+  {% endif %}
+</header>
+<main>
+  {% for category, message in flashes %}
+    <div class="flash flash-{{ category }}">{{ message }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

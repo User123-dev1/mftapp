@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ticket_table %}
+{% block content %}
+<section class="hero">
+  <h1>How can we help, {{ user.full_name.split(' ')[0] }}?</h1>
+  <p>Choose a request type to get started.</p>
+</section>
+<section class="tiles">
+  {% for c in Category %}
+  <a class="tile" href="/tickets/new?category={{ c.value }}">
+    <strong>{{ c.label.split(' (')[0] }}</strong>
+    <span>{% if c == Category.INCIDENT %}Report something broken or not working{% elif c == Category.FIREWALL %}Open ports or allow traffic between systems{% elif c == Category.ACCOUNT %}New accounts, access, password resets{% elif c == Category.SOFTWARE %}Install, license or fix software{% elif c == Category.HARDWARE %}Laptops, monitors, peripherals{% elif c == Category.NETWORK %}Wi-Fi, wired network, VPN{% elif c == Category.EMAIL %}Mailboxes, distribution lists{% elif c == Category.GENERAL %}Questions and anything else IT{% else %}Something not listed{% endif %}</span>
+  </a>
+  {% endfor %}
+</section>
+<section class="card">
+  <h2>My open tickets</h2>
+  {{ ticket_table(tickets, show_requester=False) }}
+  <p><a href="/tickets?status=all">View all my tickets →</a></p>
+</section>
+{% endblock %}

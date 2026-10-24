@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge, priority_badge %}
+{% block title %}{{ ticket.number }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <section class="card main-col">
+    <div class="ticket-head">
+      <h1>{{ ticket.number }} — {{ ticket.title }}</h1>
+      <div>{{ status_badge(ticket.status) }} {{ priority_badge(ticket.priority) }}</div>
+    </div>
+    <p class="pre">{{ ticket.description }}</p>
+
+    {% if details %}
+    <h3>Request details</h3>
+    <dl class="kv">
+      {% for label, value in details %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
+    </dl>
+    {% endif %}
+
+    {% if ticket.resolution_notes and ticket.status in (Status.RESOLVED, Status.CLOSED) %}
+    <div class="resolution">
+      <h3>Resolution</h3>
+      <p class="pre">{{ ticket.resolution_notes }}</p>
+    </div>
+    {% endif %}
+
+    <h2>Conversation</h2>
+    {% for c in comments %}
+    <div class="comment {% if c.internal %}internal{% endif %}">
+      <div class="meta">
+        <strong>{{ c.author.full_name }}</strong>
+        {% if c.internal %}<span class="badge">Work note (internal)</span>{% endif %}
+        <span class="muted">{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      </div>
+      <p class="pre">{{ c.body }}</p>
+    </div>
+    {% else %}
+    <p class="muted">No comments yet.</p>
+    {% endfor %}
+
+    {% if ticket.status not in (Status.CLOSED, Status.CANCELLED) %}
+    <form method="post" action="/tickets/{{ ticket.number }}/comment">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Add a comment <textarea name="body" rows="3" required></textarea></label>
+      {% if user.is_staff %}
+      <label class="check"><input type="checkbox" name="internal" value="true"> Internal work note (not visible to requester)</label>
+      {% endif %}
+      <button class="btn btn-small">Post</button>
+    </form>
+    {% endif %}
+
+    {% if user.id == ticket.requester_id %}
+      {% if ticket.status == Status.RESOLVED %}
+      <form method="post" action="/tickets/{{ ticket.number }}/reopen" class="box">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Not fixed? Tell us why and reopen <textarea name="reason" rows="2" required></textarea></label>
+        <button class="btn btn-small btn-warn">Reopen ticket</button>
+      </form>
+      {% elif ticket.status.is_open %}
+      <form method="post" action="/tickets/{{ ticket.number }}/cancel" class="inline"
+            onsubmit="return confirm('Cancel this ticket?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="link danger">Cancel this ticket</button>
+      </form>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <aside class="side-col">
+    <div class="card">
+      <dl class="kv">
+        <dt>Category</dt><dd>{{ ticket.category.label }}</dd>
+        <dt>Requester</dt><dd>{{ ticket.requester.full_name }}<br><span class="muted">{{ ticket.requester.email }}</span>
+          {% if ticket.requester.department %}<br><span class="muted">{{ ticket.requester.department }}</span>{% endif %}</dd>
+        <dt>Assigned to</dt><dd>{{ ticket.assignee.full_name if ticket.assignee else 'Awaiting IT manager' }}</dd>
+        {% if ticket.assigned_by %}<dt>Assigned by</dt><dd>{{ ticket.assigned_by.full_name }}</dd>{% endif %}
+        <dt>Opened</dt><dd>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
+        {% if ticket.resolved_at %}<dt>Resolved</dt><dd>{{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>{% endif %}
+      </dl>
+    </div>
+
+    {% if user.role == Role.MANAGER and ticket.status.is_open %}
+    <div class="card">
+      <h3>{% if ticket.assignee %}Reassign{% else %}Assign{% endif %}</h3>
+      <form method="post" action="/tickets/{{ ticket.number }}/assign">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <select name="assignee_id">
+          {% for s in staff %}
+          <option value="{{ s.id }}" {% if ticket.assignee_id == s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role.label }})</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-small">Assign</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if can_work and next_statuses %}
+    <div class="card">
+      <h3>Update status</h3>
+      <form method="post" action="/tickets/{{ ticket.number }}/status">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <select name="status" id="status-select">
+          {% for s in next_statuses %}<option value="{{ s.value }}">{{ s.label }}</option>{% endfor %}
+        </select>
+        <label id="resolution-box">Resolution notes (emailed to requester)
+          <textarea name="resolution_notes" rows="4"></textarea></label>
+        <button class="btn btn-small">Save</button>
+      </form>
+      <script>
+        const ss = document.getElementById('status-select'), rb = document.getElementById('resolution-box');
+        const syncRes = () => rb.hidden = ss.value !== 'resolved';
+        ss.addEventListener('change', syncRes); syncRes();
+      </script>
+    </div>
+    {% endif %}
+
+    {% if can_work and ticket.status.is_open %}
+    <div class="card">
+      <h3>Classification</h3>
+      <form method="post" action="/tickets/{{ ticket.number }}/update">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <select name="category">
+          {% for c in Category %}<option value="{{ c.value }}" {% if c == ticket.category %}selected{% endif %}>{{ c.label.split(' (')[0] }}</option>{% endfor %}
+        </select>
+        <select name="priority">
+          {% for p in Priority %}<option value="{{ p.value }}" {% if p == ticket.priority %}selected{% endif %}>{{ p.label }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-small">Update</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if user.is_staff %}
+    <div class="card">
+      <h3>Activity</h3>
+      <ul class="activity">
+        {% for a in ticket.activities|reverse %}
+        <li><span class="muted">{{ a.created_at.strftime('%m-%d %H:%M') }}</span> {{ a.message }}{% if a.actor %} — {{ a.actor.full_name }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

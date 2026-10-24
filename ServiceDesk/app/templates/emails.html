@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Email log · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Email log</h1>
+  {% if not smtp_configured %}
+  <div class="flash flash-info">SMTP is not configured, so notifications are recorded here but not sent. Set <code>SMTP_HOST</code> (see README) to deliver real email.</div>
+  {% endif %}
+  {% for e in emails %}
+  <details class="email">
+    <summary>
+      <span class="badge email-{{ e.status }}">{{ e.status }}</span>
+      <strong>{{ e.subject }}</strong> → {{ e.to_address }}
+      <span class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+    </summary>
+    {% if e.error %}<p class="danger">Error: {{ e.error }}</p>{% endif %}
+    <pre>{{ e.body }}</pre>
+  </details>
+  {% else %}
+  <p class="muted">No emails yet.</p>
+  {% endfor %}
+</section>
+{% endblock %}

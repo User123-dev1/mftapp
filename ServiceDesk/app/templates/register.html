@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Register · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Create an account</h1>
+  <form method="post" action="/register">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Full name <input name="full_name" value="{{ form.full_name or '' }}" required></label>
+    <label>Work email <input type="email" name="email" value="{{ form.email or '' }}" required></label>
+    <label>Department <input name="department" value="{{ form.department or '' }}"></label>
+    <label>Phone <input name="phone" value="{{ form.phone or '' }}"></label>
+    <label>Password (8+ characters) <input type="password" name="password" minlength="8" required></label>
+    <button class="btn">Register</button>
+  </form>
+  <p class="muted">Already registered? <a href="/login">Sign in</a></p>
+</div>
+{% endblock %}

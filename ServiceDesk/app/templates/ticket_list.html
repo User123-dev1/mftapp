@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ticket_table %}
+{% block title %}Tickets · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{% if user.is_staff %}Tickets{% else %}My tickets{% endif %}</h1>
+  <form method="get" action="/tickets" class="filters">
+    <select name="status">
+      <option value="open" {% if filters.status == 'open' %}selected{% endif %}>All open</option>
+      <option value="all" {% if filters.status == 'all' %}selected{% endif %}>Any status</option>
+      {% for s in Status %}
+      <option value="{{ s.value }}" {% if filters.status == s.value %}selected{% endif %}>{{ s.label }}</option>
+      {% endfor %}
+    </select>
+    <select name="category">
+      <option value="">Any category</option>
+      {% for c in Category %}
+      <option value="{{ c.value }}" {% if filters.category == c.value %}selected{% endif %}>{{ c.label.split(' (')[0] }}</option>
+      {% endfor %}
+    </select>
+    {% if user.is_staff %}
+    <select name="assignee">
+      <option value="">Anyone</option>
+      <option value="me" {% if filters.assignee == 'me' %}selected{% endif %}>Assigned to me</option>
+      <option value="none" {% if filters.assignee == 'none' %}selected{% endif %}>Unassigned</option>
+      {% for s in staff %}
+      <option value="{{ s.id }}" {% if filters.assignee == s.id|string %}selected{% endif %}>{{ s.full_name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <input name="q" placeholder="Search number, title, text" value="{{ filters.q }}">
+    <button class="btn btn-small">Filter</button>
+  </form>
+  {{ ticket_table(tickets, show_requester=user.is_staff) }}
+</div>
+{% endblock %}

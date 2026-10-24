@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ticket_table %}
+{% block title %}Dashboard · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="stats">
+  {% for s in [Status.NEW, Status.ASSIGNED, Status.IN_PROGRESS, Status.ON_HOLD, Status.RESOLVED] %}
+  <a class="stat status-{{ s.value }}" href="/tickets?status={{ s.value }}">
+    <span class="num">{{ by_status.get(s, 0) }}</span><span>{{ s.label }}</span>
+  </a>
+  {% endfor %}
+</section>
+
+{% if user.role == Role.MANAGER %}
+<section class="card">
+  <h2>Awaiting assignment ({{ unassigned|length }})</h2>
+  {% if unassigned %}
+  <table class="grid">
+    <thead><tr><th>Number</th><th>Title</th><th>Category</th><th>Priority</th><th>Requester</th><th>Opened</th><th>Assign to</th></tr></thead>
+    <tbody>
+    {% for t in unassigned %}
+    <tr>
+      <td><a href="/tickets/{{ t.number }}">{{ t.number }}</a></td>
+      <td>{{ t.title }}</td>
+      <td>{{ t.category.label.split(' (')[0] }}</td>
+      <td><span class="badge prio-{{ t.priority.value }}">{{ t.priority.label }}</span></td>
+      <td>{{ t.requester.full_name }}</td>
+      <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>
+        <form method="post" action="/tickets/{{ t.number }}/assign" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <select name="assignee_id">
+            {% for a in agents %}<option value="{{ a.id }}">{{ a.full_name }} ({{ workload.get(a.id, 0) }} open)</option>{% endfor %}
+          </select>
+          <button class="btn btn-small">Assign</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Nothing waiting. 🎉</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>My work ({{ my_work|length }})</h2>
+  {{ ticket_table(my_work, show_assignee=False) }}
+</section>
+
+<div class="layout two">
+  <section class="card">
+    <h2>Open by category</h2>
+    <table class="grid compact">
+      {% for c in Category %}{% if by_category.get(c) %}
+      <tr><td><a href="/tickets?category={{ c.value }}">{{ c.label.split(' (')[0] }}</a></td><td>{{ by_category[c] }}</td></tr>
+      {% endif %}{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>Team workload</h2>
+    <table class="grid compact">
+      {% for a in agents %}
+      <tr><td><a href="/tickets?assignee={{ a.id }}">{{ a.full_name }}</a></td><td>{{ workload.get(a.id, 0) }} open</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+</div>
+{% endblock %}

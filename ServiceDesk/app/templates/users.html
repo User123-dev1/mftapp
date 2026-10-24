@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Users · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Users</h1>
+  <table class="grid">
+    <thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Active</th><th>Reset password</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.full_name }}</td>
+      <td>{{ u.email }}</td>
+      <td>{{ u.department or '' }}</td>
+      <td><select name="role" form="user-{{ u.id }}">{% for r in Role %}<option value="{{ r.value }}" {% if r == u.role %}selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></td>
+      <td><input type="checkbox" name="is_active" value="true" form="user-{{ u.id }}" {% if u.is_active %}checked{% endif %}></td>
+      <td><input type="password" name="password" placeholder="leave blank" autocomplete="new-password" form="user-{{ u.id }}"></td>
+      <td>
+        <form method="post" action="/admin/users/{{ u.id }}" id="user-{{ u.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn btn-small">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<section class="card narrow">
+  <h2>Add staff member</h2>
+  <form method="post" action="/admin/users">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Full name <input name="full_name" required></label>
+    <label>Email <input type="email" name="email" required></label>
+    <label>Department <input name="department"></label>
+    <label>Temporary password <input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
+    <label>Role
+      <select name="role">
+        <option value="agent">Service Desk Agent</option>
+        <option value="manager">IT Manager</option>
+        <option value="requester">Requester</option>
+      </select>
+    </label>
+    <button class="btn">Create user</button>
+  </form>
+</section>
+{% endblock %}
