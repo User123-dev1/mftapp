@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ticket_table %}
+{% from "_macros.html" import ticket_table with context %}
 {% block title %}Tickets · {{ app_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -31,6 +31,7 @@
     <input name="q" placeholder="Search number, title, text" value="{{ filters.q }}">
     <button class="btn btn-small">Filter</button>
   </form>
-  {{ ticket_table(tickets, show_requester=user.is_staff) }}
+  {% if user.role == Role.MANAGER %}<p class="muted small">Assign straight from the list. Numbers show each person's open tickets; ★ = suggested by the item's support group.</p>{% endif %}
+  {{ ticket_table(tickets, show_requester=user.is_staff, assign=(user.role == Role.MANAGER)) }}
 </div>
 {% endblock %}

@@ -67,6 +67,33 @@
   </section>
 
   <aside class="side-col">
+    {% if user.role == Role.MANAGER and ticket.status.is_open %}
+    <div class="card {{ 'assign-card' if not ticket.assignee }}">
+      <h3>{% if ticket.assignee %}Reassign{% else %}Assign{% endif %}</h3>
+      {% if suggestion and not ticket.assignee %}
+      <p class="suggest">Suggested: <strong>{{ suggestion.full_name }}</strong><br><span class="muted small">{{ ticket.ci.support_group.name }}, fewest open tickets</span></p>
+      {% endif %}
+      <form method="post" action="/tickets/{{ ticket.number }}/assign">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% set chosen = ticket.assignee_id or (suggestion.id if suggestion else None) %}
+        <select name="assignee_id" required>
+          {% if not chosen %}<option value="" selected disabled>Choose agent…</option>{% endif %}
+          {% if group_members %}
+          <optgroup label="{{ ticket.ci.support_group.name }}">
+            {% for s in group_members %}<option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="Everyone else">
+          {% endif %}
+          {% for s in staff %}
+          <option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role.label }})</option>
+          {% endfor %}
+          {% if group_members %}</optgroup>{% endif %}
+        </select>
+        <button class="btn btn-small">Assign</button>
+      </form>
+    </div>
+    {% endif %}
+
     <div class="card">
       <dl class="kv">
         <dt>Category</dt><dd>{{ ticket.category.label }}</dd>
@@ -124,31 +151,6 @@
     </div>
     {% endif %}
 
-    {% if user.role == Role.MANAGER and ticket.status.is_open %}
-    <div class="card">
-      <h3>{% if ticket.assignee %}Reassign{% else %}Assign{% endif %}</h3>
-      {% if suggestion and not ticket.assignee %}
-      <p class="suggest">Suggested: <strong>{{ suggestion.full_name }}</strong><br><span class="muted small">{{ ticket.ci.support_group.name }}, fewest open tickets</span></p>
-      {% endif %}
-      <form method="post" action="/tickets/{{ ticket.number }}/assign">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {% set chosen = ticket.assignee_id or (suggestion.id if suggestion else None) %}
-        <select name="assignee_id">
-          {% if group_members %}
-          <optgroup label="{{ ticket.ci.support_group.name }}">
-            {% for s in group_members %}<option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }}</option>{% endfor %}
-          </optgroup>
-          <optgroup label="Everyone else">
-          {% endif %}
-          {% for s in staff %}
-          <option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role.label }})</option>
-          {% endfor %}
-          {% if group_members %}</optgroup>{% endif %}
-        </select>
-        <button class="btn btn-small">Assign</button>
-      </form>
-    </div>
-    {% endif %}
 
     {% if can_work and next_statuses %}
     <div class="card">

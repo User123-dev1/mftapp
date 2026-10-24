@@ -6,7 +6,7 @@
 <span class="badge prio-{{ priority.value }}">{{ priority.label }}</span>
 {%- endmacro %}
 
-{% macro ticket_table(tickets, show_requester=True, show_assignee=True) -%}
+{% macro ticket_table(tickets, show_requester=True, show_assignee=True, assign=False) -%}
 {% if tickets %}
 <table class="grid">
   <thead><tr>
@@ -14,6 +14,7 @@
     {% if show_requester %}<th>Requester</th>{% endif %}
     {% if show_assignee %}<th>Assigned to</th>{% endif %}
     <th>Opened</th>
+    {% if assign %}<th>Assign</th>{% endif %}
   </tr></thead>
   <tbody>
   {% for t in tickets %}
@@ -26,6 +27,23 @@
       {% if show_requester %}<td>{{ t.requester.full_name }}</td>{% endif %}
       {% if show_assignee %}<td>{{ t.assignee.full_name if t.assignee else '—' }}</td>{% endif %}
       <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      {% if assign %}
+      <td>
+        {% if t.status.is_open %}
+        <form method="post" action="/tickets/{{ t.number }}/assign" class="inline assign-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="{{ here }}">
+          {% set sug = suggestions.get(t.id) %}
+          {% set chosen = t.assignee_id or (sug.id if sug else None) %}
+          <select name="assignee_id" aria-label="Assign {{ t.number }} to" required>
+            {% if not chosen %}<option value="" selected disabled>Choose agent…</option>{% endif %}
+            {% for a in staff %}<option value="{{ a.id }}" {% if chosen == a.id %}selected{% endif %}>{{ a.full_name }} ({{ workload.get(a.id, 0) }}){% if sug and sug.id == a.id and not t.assignee_id %} ★{% endif %}</option>{% endfor %}
+          </select>
+          <button class="btn btn-small">{{ 'Reassign' if t.assignee_id else 'Assign' }}</button>
+        </form>
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
   {% endfor %}
   </tbody>

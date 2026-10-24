@@ -170,3 +170,23 @@ def test_smtp_delivery(client, manager, monkeypatch):
     assert ("starttls",) in sent and ("login", "svc") in sent
     assert any(s[0] == "send" and s[1] == "rita@example.com" for s in sent)
     assert all(e.status == "sent" for e in emails_to("rita@example.com"))
+
+
+def test_manager_assigns_from_ticket_list(client, manager):
+    agent_id = make_agent(manager)
+    requester = register(client, "Rita", "rita@example.com")
+    requester.post("/tickets/new", {"category": "general", "priority": "low", "title": "Question", "description": "Hi"})
+    number = get_ticket()[0]
+
+    page = manager.get("/tickets?status=new").text
+    assert f'action="/tickets/{number}/assign"' in page and "Choose agent" in page
+    r = manager.post(f"/tickets/{number}/assign", {"assignee_id": agent_id, "next": "/tickets?status=new"},
+                     follow=False)
+    assert r.headers["location"] == "/tickets?status=new"  # back to the list, not the ticket
+    assert get_ticket()[2] == agent_id
+    # Unsafe redirect targets are ignored.
+    r = manager.post(f"/tickets/{number}/assign", {"assignee_id": agent_id, "next": "//evil.example"}, follow=False)
+    assert r.headers["location"] == "/"
+    # Agents and requesters don't get the assign column.
+    agent = client().login("agent@example.com", "Password1!")
+    assert "assign-form" not in agent.get("/tickets").text

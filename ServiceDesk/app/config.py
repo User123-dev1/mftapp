@@ -18,7 +18,9 @@ def _bool(name: str, default: bool) -> bool:
 @dataclass
 class Settings:
     app_name: str = field(default_factory=lambda: os.getenv("SD_APP_NAME", "IT Service Desk"))
-    base_url: str = field(default_factory=lambda: os.getenv("SD_BASE_URL", "http://localhost:8000"))
+    base_url: str = field(
+        default_factory=lambda: os.getenv("SD_BASE_URL", f"http://localhost:{os.getenv('SD_PORT', '8085')}")
+    )
     database_url: str = field(default_factory=lambda: os.getenv("SD_DATABASE_URL", "sqlite:///./servicedesk.db"))
     secret_key: str = field(default_factory=lambda: os.getenv("SD_SECRET_KEY", "change-me-in-production"))
 

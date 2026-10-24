@@ -7,39 +7,22 @@
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+{% set here = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
+{% macro nav(href, label, prefix=None, badge=0, icon='') -%}
+  {% set active = here == href or (prefix and request.url.path.startswith(prefix)) %}
+  <a href="{{ href }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>
+    <span class="ico" aria-hidden="true">{{ icon }}</span><span class="lbl">{{ label }}</span>
+    {%- if badge %} <span class="count" title="Waiting for you">{{ badge }}</span>{% endif %}
+  </a>
+{%- endmacro %}
+<body class="{{ 'with-sidebar' if user }}">
 <header class="topbar">
+  {% if user %}<button class="menu-toggle" type="button" aria-label="Menu" onclick="document.body.classList.toggle('nav-open')">☰</button>{% endif %}
   <a class="brand" href="/">{{ app_name }}</a>
   {% if user %}
-  <nav>
-    {% if user.is_staff %}
-      <a href="/dashboard">Dashboard</a>
-      <a href="/tickets?assignee=me">My Work</a>
-      <a href="/tickets?status=new">Unassigned</a>
-      <a href="/tickets">All Open</a>
-      <a href="/changes">Changes{% if my_approvals %} <span class="count" title="Waiting for your approval">{{ my_approvals }}</span>{% endif %}</a>
-      <a href="/cmdb">CMDB</a>
-      <a href="/reports">Reports</a>
-    {% else %}
-      <a href="/">Home</a>
-      <a href="/tickets?status=all">My Tickets</a>
-    {% endif %}
-    <a href="/tickets/new" class="btn btn-small">+ New Request</a>
-    {% if user.role == Role.MANAGER %}
-      <details class="menu">
-        <summary>Admin</summary>
-        <div class="menu-items">
-          <a href="/admin/users">Users</a>
-          <a href="/admin/groups">Support Groups</a>
-          <a href="/admin/change-settings">Change Policy</a>
-          <a href="/cmdb/sync">Entra Sync</a>
-          <a href="/admin/emails">Email Log</a>
-        </div>
-      </details>
-    {% endif %}
-  </nav>
   <div class="who">
-    <a href="/profile">{{ user.full_name }}</a> <span class="role">{{ user.role.label }}</span>
+    <a class="btn btn-small" href="/tickets/new">+ New Request</a>
+    <a href="/profile" class="who-name">{{ user.full_name }}</a> <span class="role">{{ user.role.label }}</span>
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button class="link">Sign out</button>
@@ -47,11 +30,63 @@
   </div>
   {% endif %}
 </header>
-<main>
-  {% for category, message in flashes %}
-    <div class="flash flash-{{ category }}">{{ message }}</div>
-  {% endfor %}
-  {% block content %}{% endblock %}
-</main>
+<div class="shell">
+  {% if user %}
+  <aside class="sidebar" aria-label="Main navigation">
+    {% if user.is_staff %}
+      <div class="nav-group">
+        <div class="nav-title">Service Desk</div>
+        {{ nav('/dashboard', 'Dashboard', icon='▦') }}
+        {{ nav('/tickets?assignee=me', 'My Work', icon='☑') }}
+        {{ nav('/tickets?status=new', 'Unassigned', icon='⧗') }}
+        {{ nav('/tickets', 'All Open', icon='☰') }}
+        {{ nav('/tickets?status=all', 'All Tickets', icon='⌕') }}
+        {{ nav('/tickets/new', 'New Request', icon='+') }}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Change</div>
+        {{ nav('/changes', 'Active Changes', prefix='/changes/CHG', icon='⇄') }}
+        {{ nav('/changes?view=approvals', 'My Approvals', badge=my_approvals, icon='✓') }}
+        {{ nav('/changes?view=schedule', 'Schedule', icon='▤') }}
+        {{ nav('/changes/new', 'New Change', icon='+') }}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">CMDB</div>
+        {{ nav('/cmdb', 'Items', icon='▣') }}
+        {% if user.role == Role.MANAGER %}
+        {{ nav('/cmdb/import', 'Import CSV', icon='⇪') }}
+        {{ nav('/cmdb/sync', 'Entra Sync', icon='⟳') }}
+        {% endif %}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Insights</div>
+        {{ nav('/reports', 'Reports', icon='▥') }}
+      </div>
+      {% if user.role == Role.MANAGER %}
+      <div class="nav-group">
+        <div class="nav-title">Admin</div>
+        {{ nav('/admin/users', 'Users', icon='☺') }}
+        {{ nav('/admin/groups', 'Support Groups', icon='⚇') }}
+        {{ nav('/admin/change-settings', 'Change Policy', icon='⚖') }}
+        {{ nav('/admin/emails', 'Email Log', icon='✉') }}
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="nav-group">
+        {{ nav('/', 'Home', icon='⌂') }}
+        {{ nav('/tickets/new', 'New Request', icon='+') }}
+        {{ nav('/tickets?status=all', 'My Tickets', icon='☰') }}
+        {{ nav('/profile', 'My Profile', icon='☺') }}
+      </div>
+    {% endif %}
+  </aside>
+  {% endif %}
+  <main>
+    {% for category, message in flashes %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
 </body>
 </html>

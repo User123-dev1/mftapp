@@ -34,7 +34,8 @@ account system/access level). Incidents are numbered `INC…`, everything else `
 cd ServiceDesk
 python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python run.py                                          # http://localhost:8000
+python run.py                                          # http://localhost:8085
+python run.py --port 9000                              # if 8085 is taken (or set SD_PORT)
 ```
 
 On first start an IT Manager account is created: **manager@example.com / ChangeMe123!**
@@ -251,7 +252,7 @@ gets a "Sign in with …" button on the login page.
    - Name: `IT Service Desk`
    - Supported account types: **Accounts in this organizational directory only (Single tenant)**
    - Redirect URI: platform **Web**, `https://<your-host>/auth/entra/callback`
-     (`http://localhost:8000/auth/entra/callback` works for local testing)
+     (`http://localhost:8085/auth/entra/callback` works for local testing)
 2. From **Overview**, copy the *Application (client) ID* and the *Directory (tenant) ID*.
 3. **Certificates & secrets → New client secret**, then copy the secret **Value**.
 4. *(Recommended)* **Token configuration → Add optional claim → ID → `email`**. Without it, the
@@ -328,7 +329,8 @@ wrong-tenant tokens and forged `state`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SD_BASE_URL` | `http://localhost:8000` | Used for links in emails |
+| `SD_PORT` | `8085` | Port the web server listens on (`python run.py --port N` also works) |
+| `SD_BASE_URL` | `http://localhost:<port>` | Public address, used for links in emails and SSO redirect URIs. Set it when users reach the app by server name, e.g. `http://servicedesk.yourco.local:8085` |
 | `SD_SECRET_KEY` | `change-me-in-production` | Signs session cookies — **set this** |
 | `SD_DATABASE_URL` | `sqlite:///./servicedesk.db` | Any SQLAlchemy URL |
 | `SD_APP_NAME` | `IT Service Desk` | Shown in header and emails |

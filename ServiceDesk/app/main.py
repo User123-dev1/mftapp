@@ -435,6 +435,10 @@ def list_tickets(
         if user.is_staff
         else []
     )
+    workload, suggestions = {}, {}
+    if user.role == Role.MANAGER:
+        workload = cmdb.open_ticket_counts(db)
+        suggestions = {t.id: cmdb.suggested_assignee(t, workload) for t in tickets if not t.assignee_id}
     return render(
         request,
         "ticket_list.html",
@@ -442,6 +446,9 @@ def list_tickets(
             "tickets": tickets,
             "filters": {"status": status, "category": category, "assignee": assignee, "q": q},
             "staff": staff,
+            "workload": workload,
+            "suggestions": suggestions,
+            "here": str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""),
         },
         user=user,
     )
@@ -495,7 +502,8 @@ def ticket_detail(
     )
 
 
-def _ticket_action(request: Request, background: BackgroundTasks, db: Session, ticket: Ticket, action, ok: str):
+def _ticket_action(request: Request, background: BackgroundTasks, db: Session, ticket: Ticket, action, ok: str,
+                   next_url: str = ""):
     try:
         action()
     except services.WorkflowError as exc:
@@ -505,7 +513,7 @@ def _ticket_action(request: Request, background: BackgroundTasks, db: Session, t
         db.commit()
         background.add_task(deliver_pending)
         flash(request, ok)
-    return redirect(f"/tickets/{ticket.number}")
+    return redirect(_safe_next(next_url) if next_url else f"/tickets/{ticket.number}")
 
 
 @app.post("/tickets/{number}/assign")
@@ -514,6 +522,7 @@ def assign(
     number: str,
     background: BackgroundTasks,
     assignee_id: int = Form(...),
+    next: str = Form(""),
     user: User = Depends(require_manager),
     db: Session = Depends(database.get_db),
     _: None = Depends(verify_csrf),
@@ -525,7 +534,8 @@ def assign(
     return _ticket_action(
         request, background, db, ticket,
         lambda: services.assign_ticket(db, ticket, agent, user),
-        f"Assigned to {agent.full_name}.",
+        f"{ticket.number} assigned to {agent.full_name}.",
+        next_url=next,
     )
 
 
