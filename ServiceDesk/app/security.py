@@ -13,6 +13,9 @@ from .models import Role, User
 
 _ITERATIONS = 260_000
 
+# Stored instead of a hash for accounts that sign in only through SSO.
+NO_PASSWORD = "!sso-only"
+
 
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)

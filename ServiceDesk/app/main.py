@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
+from authlib.integrations.starlette_client import OAuthError
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,11 +16,12 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import database, services
+from . import database, services, sso
 from .config import settings
 from .emailer import deliver_pending
 from .models import Category, EmailLog, Priority, Role, Status, Ticket, User
 from .security import (
+    NO_PASSWORD,
     Forbidden,
     LoginRequired,
     csrf_token,
@@ -70,6 +72,7 @@ def ensure_admin() -> None:
 async def lifespan(app: FastAPI):
     database.init_db()
     ensure_admin()
+    sso.reset()
     yield
 
 
@@ -103,6 +106,8 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "Category": Category,
         "Priority": Priority,
         "Role": Role,
+        "sso_providers": sso.providers(),
+        "local_login": settings.local_login,
     }
     ctx.update(context or {})
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
@@ -139,8 +144,8 @@ def _get_ticket(db: Session, number: str, user: User) -> Ticket:
 # --- Auth -------------------------------------------------------------------
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/"):
-    return render(request, "login.html", {"next": _safe_next(next)})
+def login_page(request: Request, next: str = "/", local: bool = False):
+    return render(request, "login.html", {"next": _safe_next(next), "show_password": settings.local_login or local})
 
 
 @app.post("/login")
@@ -153,15 +158,76 @@ def login(
     _: None = Depends(verify_csrf),
 ):
     user = db.scalar(select(User).where(User.email == email.strip().lower()))
-    if user is None or not user.is_active or not verify_password(password, user.password_hash):
+    ok = user is not None and user.is_active and verify_password(password, user.password_hash)
+    # With password login turned off, only IT managers may use it (break-glass access).
+    if ok and not settings.local_login and user.role != Role.MANAGER:
+        ok = False
+    if not ok:
         flash(request, "Invalid email or password.", "error")
-        return render(request, "login.html", {"next": _safe_next(next), "email": email}, status_code=400)
+        return render(
+            request, "login.html", {"next": _safe_next(next), "email": email, "show_password": True}, status_code=400
+        )
     login_user(request, user)
     return redirect(_safe_next(next))
 
 
+# --- Single sign-on ------------------------------------------------------------
+
+def _sso_redirect_uri(key: str) -> str:
+    # Built from SD_BASE_URL (not the request) so it matches the URI registered with the IdP
+    # even behind a reverse proxy.
+    return f"{settings.base_url.rstrip('/')}/auth/{key}/callback"
+
+
+@app.get("/auth/{key}/login")
+async def sso_login(request: Request, key: str, next: str = "/"):
+    provider, client = sso.get(key)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Sign-in method not configured")
+    request.session["sso_next"] = _safe_next(next)
+    try:
+        return await client.authorize_redirect(request, _sso_redirect_uri(key))
+    except Exception:
+        logger.exception("Could not start %s sign-in", key)
+        flash(request, f"{provider.display_name} sign-in is unavailable right now.", "error")
+        return redirect("/login")
+
+
+@app.get("/auth/{key}/callback")
+async def sso_callback(request: Request, key: str, db: Session = Depends(database.get_db)):
+    provider, client = sso.get(key)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Sign-in method not configured")
+    next_url = request.session.pop("sso_next", "/")
+    try:
+        token = await client.authorize_access_token(request)
+        claims = token.get("userinfo") or {}
+        if not claims.get("sub"):
+            raise OAuthError(description="No ID token returned")
+        user = sso.resolve_user(db, provider, dict(claims))
+    except sso.SSOError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect("/login")
+    except OAuthError as exc:
+        db.rollback()
+        logger.warning("%s sign-in failed: %s", key, exc)
+        flash(request, f"{provider.display_name} sign-in failed: {exc.description or exc.error}", "error")
+        return redirect("/login")
+    except Exception:
+        db.rollback()
+        logger.exception("%s sign-in error", key)
+        flash(request, f"{provider.display_name} sign-in failed. Please try again.", "error")
+        return redirect("/login")
+    db.commit()
+    login_user(request, user)
+    return redirect(next_url)
+
+
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
+    if not settings.local_login:
+        return redirect("/login")
     return render(request, "register.html", {"form": {}})
 
 
@@ -176,6 +242,8 @@ def register(
     db: Session = Depends(database.get_db),
     _: None = Depends(verify_csrf),
 ):
+    if not settings.local_login:
+        raise Forbidden()
     form = {"full_name": full_name, "email": email, "department": department, "phone": phone}
     email = email.strip().lower()
     error = None
@@ -555,7 +623,7 @@ def create_user(
     request: Request,
     full_name: str = Form(...),
     email: str = Form(...),
-    password: str = Form(...),
+    password: str = Form(""),
     role: str = Form("agent"),
     department: str = Form(""),
     user: User = Depends(require_manager),
@@ -567,7 +635,8 @@ def create_user(
         new_role = Role(role)
     except ValueError:
         new_role = Role.AGENT
-    if "@" not in email or not full_name.strip() or len(password) < 8:
+    sso_only = not password and bool(sso.providers())
+    if "@" not in email or not full_name.strip() or (len(password) < 8 and not sso_only):
         flash(request, "Name, valid email and a password of 8+ characters are required.", "error")
     elif db.scalar(select(User).where(User.email == email)):
         flash(request, "A user with that email already exists.", "error")
@@ -577,12 +646,12 @@ def create_user(
                 email=email,
                 full_name=full_name.strip(),
                 department=department.strip() or None,
-                password_hash=hash_password(password),
+                password_hash=NO_PASSWORD if sso_only else hash_password(password),
                 role=new_role,
             )
         )
         db.commit()
-        flash(request, f"Created {new_role.label} {full_name}.")
+        flash(request, f"Created {new_role.label} {full_name}." + (" They can sign in with SSO." if sso_only else ""))
     return redirect("/admin/users")
 
 
@@ -641,7 +710,9 @@ def change_password(
     db: Session = Depends(database.get_db),
     _: None = Depends(verify_csrf),
 ):
-    if not verify_password(current_password, user.password_hash):
+    if not user.has_password:
+        flash(request, "Your account signs in through single sign-on and has no password here.", "error")
+    elif not verify_password(current_password, user.password_hash):
         flash(request, "Current password is incorrect.", "error")
     elif len(new_password) < 8:
         flash(request, "New password must be at least 8 characters.", "error")

@@ -49,6 +49,102 @@ at `/register`.
 4. Sign in as the agent → **My Work** → open the ticket → set status *Resolved* with notes.
 5. Manager → **Email Log** shows every notification (manager alert, assignment, resolution…).
 
+## Single sign-on (SSO)
+
+Sign-in through **Microsoft Entra ID** (Azure AD) plus any other **OpenID Connect** provider:
+Okta, Google Workspace, Ping, Keycloak, ADFS and so on. Both can be on at the same time, and each
+gets a "Sign in with …" button on the login page.
+
+- **Just-in-time accounts:** the first SSO sign-in creates a Requester account (turn this off with
+  `SSO_AUTO_PROVISION=false`).
+- **Role mapping:** Entra app roles or security groups can map to IT Manager or Service Desk Agent.
+  The role is synced at every sign-in.
+- **Pre-created staff:** in **Users**, a manager can add someone by email with a blank password.
+  When that person signs in with Entra, the account links to them and keeps the role that was set.
+- **Existing password accounts** link automatically on first SSO sign-in. Entra is always trusted
+  for this; other providers only when the token says `email_verified: true`.
+- **SSO-only mode:** `SD_LOCAL_LOGIN=false` hides password login and self-registration. IT
+  managers keep a break-glass password login at `/login?local=1`.
+
+### Microsoft Entra ID setup
+
+1. **Entra admin center → Identity → Applications → App registrations → New registration**
+   - Name: `IT Service Desk`
+   - Supported account types: **Accounts in this organizational directory only (Single tenant)**
+   - Redirect URI: platform **Web**, `https://<your-host>/auth/entra/callback`
+     (`http://localhost:8000/auth/entra/callback` works for local testing)
+2. From **Overview**, copy the *Application (client) ID* and the *Directory (tenant) ID*.
+3. **Certificates & secrets → New client secret**, then copy the secret **Value**.
+4. *(Recommended)* **Token configuration → Add optional claim → ID → `email`**. Without it, the
+   user's UPN (`preferred_username`) is used as their email.
+5. *(Optional, roles)* **App roles → Create app role** twice, for example:
+   - value `ServiceDesk.Manager`
+   - value `ServiceDesk.Agent`
+
+   Allowed member types: Users/Groups. Then go to **Enterprise applications → IT Service Desk →
+   Users and groups** and assign people or groups to the roles. Anyone not assigned a role becomes
+   a Requester.
+6. *(Optional)* **Enterprise applications → IT Service Desk → Properties → Assignment required =
+   Yes** to allow only assigned users and groups to sign in.
+
+```bash
+export SD_BASE_URL=https://servicedesk.contoso.com
+export ENTRA_TENANT_ID=<directory-tenant-id>
+export ENTRA_CLIENT_ID=<application-client-id>
+export ENTRA_CLIENT_SECRET=<secret-value>
+# optional role mapping (app role values, or security-group object IDs)
+export SSO_MANAGER_GROUPS=ServiceDesk.Manager
+export SSO_AGENT_GROUPS=ServiceDesk.Agent
+```
+
+App roles are preferred over groups. If you use groups (**Token configuration → Add groups
+claim**), put the group *object IDs* in the variables above. A user in more than 200 groups gets
+no group list in the token (Entra "group overage"); their role is then left unchanged and a warning
+is logged.
+
+Only single-tenant setups are accepted. `common`, `organizations` and `consumers` are refused so
+that accounts from other organizations can't sign in.
+
+### Okta / Google / other OpenID Connect providers
+
+Create a "Web" OIDC app at the provider with redirect URI `https://<your-host>/auth/oidc/callback`, then:
+
+```bash
+export OIDC_DISCOVERY_URL=https://yourco.okta.com/.well-known/openid-configuration
+#   Google:   https://accounts.google.com/.well-known/openid-configuration
+#   Keycloak: https://kc.example.com/realms/<realm>/.well-known/openid-configuration
+#   ADFS:     https://adfs.example.com/adfs/.well-known/openid-configuration
+export OIDC_CLIENT_ID=...
+export OIDC_CLIENT_SECRET=...
+export OIDC_DISPLAY_NAME=Okta          # button label
+export OIDC_SCOPES="openid email profile groups"   # add "groups" if your IdP needs it for role mapping
+```
+
+To limit sign-in to your organization's domains with a provider like Google, also set
+`SSO_ALLOWED_DOMAINS`.
+
+### SSO settings
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID` / `ENTRA_CLIENT_SECRET` | | Enables "Sign in with Microsoft" |
+| `ENTRA_DISPLAY_NAME` | `Microsoft` | Button label |
+| `ENTRA_AUTHORITY` | `https://login.microsoftonline.com` | e.g. `https://login.microsoftonline.us` for US Government |
+| `OIDC_DISCOVERY_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | Enables a generic OIDC provider |
+| `OIDC_DISPLAY_NAME` / `OIDC_SCOPES` | `Single Sign-On` / `openid email profile` | |
+| `SSO_AUTO_PROVISION` | `true` | Create accounts on first sign-in |
+| `SSO_ALLOWED_DOMAINS` | *(any)* | Comma-separated email domains allowed to sign in |
+| `SSO_MANAGER_GROUPS` / `SSO_AGENT_GROUPS` | *(off)* | Comma-separated app role values or group IDs. When set, the role is synced from the IdP at every sign-in (anyone in neither list becomes a Requester) |
+| `SD_LOCAL_LOGIN` | `true` | `false` = SSO only (plus manager break-glass at `/login?local=1`) |
+
+**Important:** when role mapping is on, a manager who signs in with SSO is demoted unless they are
+in the manager role or group. Set up the Entra roles *before* turning mapping on. The break-glass
+password login always stays available for the initial manager account.
+
+The SSO tests (`tests/test_sso.py`) run against a local fake OpenID provider that signs real RS256
+tokens. The full redirect, code exchange and token validation path is exercised, including
+wrong-tenant tokens and forged `state`.
+
 ## Configuration (environment variables)
 
 | Variable | Default | Purpose |
@@ -90,6 +186,7 @@ app/
   models.py      User, Ticket, Comment, Activity, EmailLog
   emailer.py     email queue + SMTP delivery
   security.py    password hashing, sessions, CSRF, role checks
+  sso.py         OpenID Connect sign-in (Entra ID, Okta, Google...) and claim-to-user mapping
   config.py      environment settings
   templates/     Jinja2 HTML pages
   static/        CSS

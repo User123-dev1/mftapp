@@ -11,7 +11,7 @@ from app import database  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 
-CSRF_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
+CSRF_RE = re.compile(r'<meta name="csrf-token" content="([^"]+)"')
 
 
 class Browser:

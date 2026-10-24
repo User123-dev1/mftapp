@@ -87,7 +87,10 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # SSO-only accounts store an unusable marker (see security.NO_PASSWORD).
     password_hash: Mapped[str] = mapped_column(String(255))
+    sso_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    sso_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.REQUESTER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -95,6 +98,10 @@ class User(Base):
     @property
     def is_staff(self) -> bool:
         return self.role in (Role.AGENT, Role.MANAGER)
+
+    @property
+    def has_password(self) -> bool:
+        return not self.password_hash.startswith("!")
 
 
 class Ticket(Base):

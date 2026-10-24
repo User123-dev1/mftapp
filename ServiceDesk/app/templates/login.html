@@ -3,13 +3,35 @@
 {% block content %}
 <div class="card narrow">
   <h1>Sign in</h1>
+  {% if sso_providers %}
+  <div class="sso">
+    {% for p in sso_providers %}
+    <a class="btn btn-sso sso-{{ p.key }}" href="/auth/{{ p.key }}/login?next={{ next|urlencode }}">
+      {% if p.key == 'entra' %}<svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true"><rect width="10" height="10" fill="#f25022"/><rect x="11" width="10" height="10" fill="#7fba00"/><rect y="11" width="10" height="10" fill="#00a4ef"/><rect x="11" y="11" width="10" height="10" fill="#ffb900"/></svg>{% endif %}
+      Sign in with {{ p.display_name }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if show_password %}
+  {% if sso_providers %}<div class="divider"><span>or use a password</span></div>{% endif %}
   <form method="post" action="/login">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="next" value="{{ next }}">
-    <label>Email <input type="email" name="email" value="{{ email or '' }}" required autofocus></label>
+    <label>Email <input type="email" name="email" value="{{ email or '' }}" required {% if not sso_providers %}autofocus{% endif %}></label>
     <label>Password <input type="password" name="password" required></label>
     <button class="btn">Sign in</button>
   </form>
+  {% endif %}
+
+  {% if local_login %}
   <p class="muted">No account? <a href="/register">Register to submit requests</a></p>
+  {% elif not show_password %}
+  <p class="muted small"><a href="/login?local=1&next={{ next|urlencode }}">Administrator sign-in</a></p>
+  {% endif %}
+  {% if not sso_providers and not show_password %}
+  <p class="danger">No sign-in method is configured. Contact IT.</p>
+  {% endif %}
 </div>
 {% endblock %}

@@ -80,3 +80,9 @@ dl.kv dd { margin: 0; }
 .filters input { min-width: 220px; }
 details.email { border-bottom: 1px solid var(--border); padding: 8px 0; }
 details.email pre { white-space: pre-wrap; background: #f7fafc; padding: 10px; border-radius: 6px; }
+.sso { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.btn-sso { display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: var(--text) !important; border: 1px solid var(--border); }
+.btn-sso:hover { background: #f7fafc; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 14px 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.small { font-size: 13px; }

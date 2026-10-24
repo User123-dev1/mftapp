@@ -8,6 +8,8 @@
     <dt>Role</dt><dd>{{ user.role.label }}</dd>
     {% if user.department %}<dt>Department</dt><dd>{{ user.department }}</dd>{% endif %}
   </dl>
+  {% if user.sso_provider %}<p class="muted">Signs in with single sign-on.</p>{% endif %}
+  {% if user.has_password %}
   <h2>Change password</h2>
   <form method="post" action="/profile/password">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -15,5 +17,6 @@
     <label>New password <input type="password" name="new_password" minlength="8" required></label>
     <button class="btn">Change password</button>
   </form>
+  {% endif %}
 </section>
 {% endblock %}

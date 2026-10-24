@@ -9,7 +9,7 @@
     {% for u in users %}
     <tr>
       <td>{{ u.full_name }}</td>
-      <td>{{ u.email }}</td>
+      <td>{{ u.email }}{% if u.sso_provider %} <span class="badge">SSO</span>{% endif %}</td>
       <td>{{ u.department or '' }}</td>
       <td><select name="role" form="user-{{ u.id }}">{% for r in Role %}<option value="{{ r.value }}" {% if r == u.role %}selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></td>
       <td><input type="checkbox" name="is_active" value="true" form="user-{{ u.id }}" {% if u.is_active %}checked{% endif %}></td>
@@ -32,7 +32,12 @@
     <label>Full name <input name="full_name" required></label>
     <label>Email <input type="email" name="email" required></label>
     <label>Department <input name="department"></label>
+    {% if sso_providers %}
+    <label>Temporary password <input type="password" name="password" minlength="8" autocomplete="new-password">
+      <span class="muted small">Leave blank for SSO-only staff - they sign in with {{ sso_providers[0].display_name }} using this email.</span></label>
+    {% else %}
     <label>Temporary password <input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
+    {% endif %}
     <label>Role
       <select name="role">
         <option value="agent">Service Desk Agent</option>
