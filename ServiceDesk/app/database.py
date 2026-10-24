@@ -36,6 +36,7 @@ def init_db() -> None:
 # Columns added after the first release; create_all() does not alter existing tables.
 _NEW_COLUMNS = {
     "users": {"sso_provider": "VARCHAR(50)", "sso_subject": "VARCHAR(255)"},
+    "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},
 }
 
 

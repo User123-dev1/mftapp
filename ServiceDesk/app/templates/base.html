@@ -17,6 +17,7 @@
       <a href="/tickets?assignee=me">My Work</a>
       <a href="/tickets?status=new">Unassigned</a>
       <a href="/tickets">All Open</a>
+      <a href="/cmdb">CMDB</a>
     {% else %}
       <a href="/">Home</a>
       <a href="/tickets?status=all">My Tickets</a>
@@ -24,6 +25,7 @@
     <a href="/tickets/new" class="btn btn-small">+ New Request</a>
     {% if user.role == Role.MANAGER %}
       <a href="/admin/users">Users</a>
+      <a href="/admin/groups">Groups</a>
       <a href="/admin/emails">Email Log</a>
     {% endif %}
   </nav>

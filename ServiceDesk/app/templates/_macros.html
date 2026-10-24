@@ -19,7 +19,7 @@
   {% for t in tickets %}
     <tr>
       <td><a href="/tickets/{{ t.number }}">{{ t.number }}</a></td>
-      <td>{{ t.title }}</td>
+      <td>{{ t.title }}{% if t.ci %}<br><span class="muted small">{{ t.ci.display_name }}</span>{% endif %}</td>
       <td>{{ t.category.label.split(' (')[0] }}</td>
       <td>{{ priority_badge(t.priority) }}</td>
       <td>{{ status_badge(t.status) }}</td>

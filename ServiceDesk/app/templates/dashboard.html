@@ -15,7 +15,7 @@
   <h2>Awaiting assignment ({{ unassigned|length }})</h2>
   {% if unassigned %}
   <table class="grid">
-    <thead><tr><th>Number</th><th>Title</th><th>Category</th><th>Priority</th><th>Requester</th><th>Opened</th><th>Assign to</th></tr></thead>
+    <thead><tr><th>Number</th><th>Title</th><th>Category</th><th>Priority</th><th>Affected item</th><th>Requester</th><th>Opened</th><th>Assign to</th></tr></thead>
     <tbody>
     {% for t in unassigned %}
     <tr>
@@ -23,13 +23,15 @@
       <td>{{ t.title }}</td>
       <td>{{ t.category.label.split(' (')[0] }}</td>
       <td><span class="badge prio-{{ t.priority.value }}">{{ t.priority.label }}</span></td>
+      <td>{{ t.ci.display_name if t.ci else '—' }}</td>
       <td>{{ t.requester.full_name }}</td>
       <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
       <td>
         <form method="post" action="/tickets/{{ t.number }}/assign" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <select name="assignee_id">
-            {% for a in agents %}<option value="{{ a.id }}">{{ a.full_name }} ({{ workload.get(a.id, 0) }} open)</option>{% endfor %}
+            {% set sug = suggestions.get(t.id) %}
+            {% for a in agents %}<option value="{{ a.id }}" {% if sug and sug.id == a.id %}selected{% endif %}>{{ a.full_name }} ({{ workload.get(a.id, 0) }} open){% if sug and sug.id == a.id %} ★ suggested{% endif %}</option>{% endfor %}
           </select>
           <button class="btn btn-small">Assign</button>
         </form>

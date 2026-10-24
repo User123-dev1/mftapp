@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Import CMDB · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p class="muted small"><a href="/cmdb">← CMDB</a></p>
+  <h1>Import configuration items</h1>
+  {% if result %}
+  <div class="flash {{ 'flash-error' if result.errors and not (result.created or result.updated) else 'flash-success' }}">
+    Created {{ result.created }}, updated {{ result.updated }} item{{ '' if result.updated == 1 else 's' }}.
+    {% if result.groups_created %}New support groups: {{ result.groups_created }}.{% endif %}
+    {% if result.users_created %}New SSO user accounts: {{ result.users_created }}.{% endif %}
+    {% if result.errors %}{{ result.errors|length }} row(s) skipped.{% endif %}
+  </div>
+  {% if result.errors %}<h3>Skipped rows</h3><ul class="errors">{% for e in result.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+  {% if result.warnings %}<h3>Warnings</h3><ul class="warnings">{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+  {% endif %}
+
+  <form method="post" action="/cmdb/import" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>CSV file (max 5 MB) <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <button class="btn">Import</button>
+    <a href="/cmdb/template.csv">Download template</a>
+  </form>
+
+  <h3>How it works</h3>
+  <ul>
+    <li>Columns: <code>{{ columns|join(', ') }}</code>. Only <code>name</code> and <code>type</code> are required.</li>
+    <li><code>type</code>: {% for t in CIType %}<code>{{ t.value }}</code>{{ ', ' if not loop.last }}{% endfor %}.
+        <code>status</code>: {% for s in CIStatus %}<code>{{ s.value }}</code>{{ ', ' if not loop.last }}{% endfor %} (default in_use).</li>
+    <li>Rows update an existing item when the <code>asset_tag</code> matches, otherwise the <code>serial_number</code>;
+        applications and services without either match on name. Everything else is created new.</li>
+    <li>Blank cells never erase existing values, so you can re-import a partial sheet safely.</li>
+    <li><code>assigned_to_email</code> links the device to a user so it appears under their <em>My devices</em>.
+      {% if sso_providers %}Unknown emails get an SSO account that links when the person first signs in.{% else %}Unknown emails are reported and left unassigned.{% endif %}</li>
+    <li><code>support_group</code> is matched by name and created if it doesn't exist. Add members under <a href="/admin/groups">Groups</a>.</li>
+    <li>Dates: <code>YYYY-MM-DD</code> (also accepts <code>MM/DD/YYYY</code>). Exports from Excel (UTF-8 or Windows encoding) work.</li>
+  </ul>
+</section>
+{% endblock %}

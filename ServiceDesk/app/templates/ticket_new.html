@@ -21,6 +21,21 @@
         </select>
       </label>
     </div>
+    <label>Affected device / application
+      {% if ci_choices %}
+      <input type="search" id="ci-filter" placeholder="Type to filter the list…" class="ci-filter">
+      {% endif %}
+      <select name="ci_id" id="ci-select">
+        <option value="">— Not listed / I don't know —</option>
+        {% for group, items in ci_choices.items() %}
+        <optgroup label="{{ group }}">
+          {% for ci in items %}
+          <option value="{{ ci.id }}" {% if form.ci_id == ci.id|string %}selected{% endif %}>{{ ci.display_name }}{% if ci.model %} · {{ ci.model }}{% endif %} ({{ ci.ci_type.label }})</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+    </label>
     <label>Short description <input name="title" maxlength="255" value="{{ form.title or '' }}" required></label>
     <label>Details <textarea name="description" rows="6" required>{{ form.description or '' }}</textarea></label>
 
@@ -44,5 +59,17 @@
   }
   select.addEventListener('change', sync);
   sync();
+
+  const filter = document.getElementById('ci-filter'), ciSelect = document.getElementById('ci-select');
+  if (filter) filter.addEventListener('input', () => {
+    const q = filter.value.toLowerCase();
+    ciSelect.querySelectorAll('optgroup').forEach(g => {
+      let any = false;
+      g.querySelectorAll('option').forEach(o => { const hit = o.textContent.toLowerCase().includes(q); o.hidden = !hit; any = any || hit; });
+      g.hidden = !any;
+    });
+    const first = ciSelect.querySelector('optgroup:not([hidden]) option:not([hidden])');
+    if (q && first) ciSelect.value = first.value;
+  });
 </script>
 {% endblock %}

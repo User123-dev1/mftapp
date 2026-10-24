@@ -49,6 +49,51 @@ at `/register`.
 4. Sign in as the agent → **My Work** → open the ticket → set status *Resolved* with notes.
 5. Manager → **Email Log** shows every notification (manager alert, assignment, resolution…).
 
+## CMDB (configuration items)
+
+The CMDB lists the devices, applications and services people can need help with. Requesters
+choose the affected item when they submit a ticket. The form offers:
+- **My devices**: items assigned to them
+- **Applications & services**: shared items anyone can choose
+- **Shared printers**
+- **"Not listed / I don't know"**, so a missing item never blocks a ticket
+
+The list has a type-to-filter box. Requesters can't choose someone else's device or a retired item.
+
+| Who | What they get |
+|-----|---------------|
+| Requester | *My devices* on the home page with a **Get help** button that pre-fills the form |
+| Agent / Manager | **CMDB** menu: search and filter, add or edit items, export CSV, and a panel on each ticket with model, serial, owner, location, warranty (expired is shown in red) and the item's ticket history |
+| IT Manager | **Import CSV**, plus **Groups** for support groups (Network, Desktop Support, Business Apps…) |
+
+**Assignment suggestion:** each item can belong to a support group. When a ticket names an item, the
+manager sees the group's least-busy member as the suggested assignee. It is preselected in the
+assign dropdown and starred on the dashboard. Assignment still happens manually.
+
+### Importing your inventory
+
+**CMDB → Import CSV**. Download the template from that page. Columns:
+
+```
+name,type,status,asset_tag,serial_number,manufacturer,model,version,ip_address,location,vendor,
+warranty_expires,assigned_to_email,support_group,notes
+```
+
+- Only `name` and `type` are required. Types: `laptop, desktop, mobile, monitor, peripheral, printer,
+  server, network, application, service, other`.
+- A row updates an existing item when its `asset_tag` matches, otherwise its `serial_number`.
+  Applications and services with neither match on name. Re-importing is safe, and blank cells never
+  erase data. **Export CSV → edit in Excel → import** works for bulk changes.
+- `assigned_to_email` puts the device under that person's *My devices*. With SSO configured, unknown
+  emails get an account that links when the person first signs in; otherwise they are reported.
+- `support_group` is matched by name and created if missing. Add members under **Groups**.
+- Bad rows are skipped and listed; the rest of the file still imports.
+
+**Where to get the data without Intune:** an export from your current asset spreadsheet,
+procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), network scanners such
+as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
+registered owners).
+
 ## Single sign-on (SSO)
 
 Sign-in through **Microsoft Entra ID** (Azure AD) plus any other **OpenID Connect** provider:
@@ -183,9 +228,12 @@ python -m pytest -q
 app/
   main.py        routes / pages
   services.py    ticket workflow rules and notification content
-  models.py      User, Ticket, Comment, Activity, EmailLog
+  models.py      User, Ticket, Comment, Activity, EmailLog, ConfigItem, SupportGroup
   emailer.py     email queue + SMTP delivery
   security.py    password hashing, sessions, CSRF, role checks
+  cmdb.py        CMDB rules: item choices, assignee suggestion, CSV import/export
+  cmdb_routes.py CMDB and support-group pages
+  web.py         shared page rendering helpers
   sso.py         OpenID Connect sign-in (Entra ID, Okta, Google...) and claim-to-user mapping
   config.py      environment settings
   templates/     Jinja2 HTML pages

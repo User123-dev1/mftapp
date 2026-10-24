@@ -13,6 +13,19 @@
   </a>
   {% endfor %}
 </section>
+{% if devices %}
+<section class="card">
+  <h2>My devices</h2>
+  <div class="devices">
+    {% for d in devices %}
+    <div class="device">
+      <div><strong>{{ d.name }}</strong><br><span class="muted small">{{ d.ci_type.label }}{% if d.model %} · {{ d.manufacturer or '' }} {{ d.model }}{% endif %}{% if d.asset_tag %} · {{ d.asset_tag }}{% endif %}</span></div>
+      <a class="btn btn-small" href="/tickets/new?ci={{ d.id }}">Get help</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 <section class="card">
   <h2>My open tickets</h2>
   {{ ticket_table(tickets, show_requester=False) }}

@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .emailer import queue_email
-from .models import Activity, Category, Comment, Priority, Role, Status, Ticket, User, utcnow
+from . import cmdb
+from .models import Activity, Category, CIStatus, Comment, ConfigItem, Priority, Role, Status, Ticket, User, utcnow
 
 
 class WorkflowError(ValueError):
@@ -71,11 +72,13 @@ def _signature() -> str:
 
 
 def _summary(ticket: Ticket) -> str:
+    affected = f"Affected:  {ticket.ci.display_name} ({ticket.ci.ci_type.label})\n" if ticket.ci else ""
     return (
         f"Ticket:    {ticket.number}\n"
         f"Title:     {ticket.title}\n"
         f"Category:  {ticket.category.label}\n"
         f"Priority:  {ticket.priority.label}\n"
+        f"{affected}"
         f"Requester: {ticket.requester.full_name} <{ticket.requester.email}>\n"
         f"Link:      {ticket_url(ticket)}"
     )
@@ -103,10 +106,13 @@ def create_ticket(
     category: Category,
     priority: Priority,
     details: Optional[dict] = None,
+    ci: Optional[ConfigItem] = None,
 ) -> Ticket:
     title, description = title.strip(), description.strip()
     if not title or not description:
         raise WorkflowError("Title and description are required.")
+    if ci is not None and not cmdb.can_select(requester, ci):
+        raise WorkflowError("You cannot raise a ticket against that item.")
 
     clean_details = {k: v.strip() for k, v in (details or {}).items() if v and v.strip()}
     ticket = Ticket(
@@ -116,6 +122,7 @@ def create_ticket(
         priority=priority,
         status=Status.NEW,
         requester=requester,
+        ci=ci,
         details=json.dumps(clean_details) if clean_details else None,
     )
     db.add(ticket)
@@ -248,9 +255,22 @@ def change_status(
         )
 
 
-def update_fields(db: Session, ticket: Ticket, actor: User, category: Category, priority: Priority) -> None:
+def update_fields(
+    db: Session,
+    ticket: Ticket,
+    actor: User,
+    category: Category,
+    priority: Priority,
+    ci: Optional[ConfigItem] = None,
+) -> None:
     if not can_work(actor, ticket):
         raise WorkflowError("You are not allowed to update this ticket.")
+    if ci is not None and ci.id != ticket.ci_id and ci.status == CIStatus.RETIRED:
+        raise WorkflowError("That item is retired.")
+    if (ci.id if ci else None) != ticket.ci_id:
+        old = ticket.ci.display_name if ticket.ci else "none"
+        _log(db, ticket, actor, f"Affected item changed from {old} to {ci.display_name if ci else 'none'}")
+        ticket.ci = ci
     if category != ticket.category:
         _log(db, ticket, actor, f"Category changed from {ticket.category.label} to {category.label}")
         ticket.category = category

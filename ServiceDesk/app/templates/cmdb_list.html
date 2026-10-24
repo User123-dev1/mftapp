@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}CMDB · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="ticket-head">
+    <h1>Configuration items</h1>
+    <div class="actions">
+      <a class="btn btn-small" href="/cmdb/new">+ Add item</a>
+      {% if user.role == Role.MANAGER %}<a href="/cmdb/import">Import CSV</a>{% endif %}
+      <a href="/cmdb/export.csv">Export CSV</a>
+    </div>
+  </div>
+  <form method="get" action="/cmdb" class="filters">
+    <select name="type">
+      <option value="">Any type</option>
+      {% for t in CIType %}<option value="{{ t.value }}" {% if filters.type == t.value %}selected{% endif %}>{{ t.label }}</option>{% endfor %}
+    </select>
+    <select name="status">
+      <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Not retired</option>
+      <option value="all" {% if filters.status == 'all' %}selected{% endif %}>Any status</option>
+      {% for s in CIStatus %}<option value="{{ s.value }}" {% if filters.status == s.value %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+    </select>
+    <select name="group">
+      <option value="">Any support group</option>
+      <option value="none" {% if filters.group == 'none' %}selected{% endif %}>No group</option>
+      {% for g in groups %}<option value="{{ g.id }}" {% if filters.group == g.id|string %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+    </select>
+    <input name="q" placeholder="Name, asset tag, serial, IP, owner" value="{{ filters.q }}">
+    <button class="btn btn-small">Filter</button>
+  </form>
+  {% if items %}
+  <table class="grid">
+    <thead><tr><th>Name</th><th>Type</th><th>Asset tag</th><th>Model</th><th>Owner</th><th>Location</th><th>Support group</th><th>Status</th><th>Tickets</th></tr></thead>
+    <tbody>
+    {% for ci in items %}
+    <tr>
+      <td><a href="/cmdb/{{ ci.id }}">{{ ci.name }}</a></td>
+      <td>{{ ci.ci_type.label }}</td>
+      <td>{{ ci.asset_tag or '' }}</td>
+      <td>{{ ci.manufacturer or '' }} {{ ci.model or '' }}</td>
+      <td>{{ ci.assigned_user.full_name if ci.assigned_user else '' }}</td>
+      <td>{{ ci.location or '' }}</td>
+      <td>{{ ci.support_group.name if ci.support_group else '' }}</td>
+      <td><span class="badge ci-{{ ci.status.value }}">{{ ci.status.label }}</span></td>
+      <td>{% if totals.get(ci.id) %}{{ open_counts.get(ci.id, 0) }} open / {{ totals[ci.id] }}{% else %}<span class="muted">0</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No items found. {% if user.role == Role.MANAGER %}<a href="/cmdb/import">Import a CSV</a> or <a href="/cmdb/new">add one</a>.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

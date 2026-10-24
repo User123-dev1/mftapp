@@ -79,15 +79,48 @@
       </dl>
     </div>
 
+    {% if ticket.ci %}
+    {% set ci = ticket.ci %}
+    <div class="card">
+      <h3>Affected item</h3>
+      <dl class="kv">
+        <dt>Item</dt><dd>{% if user.is_staff %}<a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a>{% else %}{{ ci.display_name }}{% endif %}</dd>
+        <dt>Type</dt><dd>{{ ci.ci_type.label }}{% if ci.status != CIStatus.IN_USE %} · <span class="badge">{{ ci.status.label }}</span>{% endif %}</dd>
+        {% if ci.manufacturer or ci.model %}<dt>Model</dt><dd>{{ ci.manufacturer or '' }} {{ ci.model or '' }}</dd>{% endif %}
+        {% if ci.version %}<dt>Version / OS</dt><dd>{{ ci.version }}</dd>{% endif %}
+        {% if user.is_staff %}
+          {% if ci.serial_number %}<dt>Serial</dt><dd>{{ ci.serial_number }}</dd>{% endif %}
+          {% if ci.ip_address %}<dt>IP</dt><dd>{{ ci.ip_address }}</dd>{% endif %}
+          {% if ci.assigned_user %}<dt>Owner</dt><dd>{{ ci.assigned_user.full_name }}</dd>{% endif %}
+          {% if ci.location %}<dt>Location</dt><dd>{{ ci.location }}</dd>{% endif %}
+          {% if ci.support_group %}<dt>Support group</dt><dd>{{ ci.support_group.name }}</dd>{% endif %}
+          {% if ci.warranty_expires %}<dt>Warranty</dt><dd class="{{ 'danger' if ci.warranty_expired }}">{{ ci.warranty_expires }}{% if ci.warranty_expired %} (expired){% endif %}</dd>{% endif %}
+          <dt>History</dt><dd><a href="/cmdb/{{ ci.id }}#tickets">{{ ci_ticket_count }} other ticket{{ '' if ci_ticket_count == 1 else 's' }}</a></dd>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+
     {% if user.role == Role.MANAGER and ticket.status.is_open %}
     <div class="card">
       <h3>{% if ticket.assignee %}Reassign{% else %}Assign{% endif %}</h3>
+      {% if suggestion and not ticket.assignee %}
+      <p class="suggest">Suggested: <strong>{{ suggestion.full_name }}</strong><br><span class="muted small">{{ ticket.ci.support_group.name }}, fewest open tickets</span></p>
+      {% endif %}
       <form method="post" action="/tickets/{{ ticket.number }}/assign">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% set chosen = ticket.assignee_id or (suggestion.id if suggestion else None) %}
         <select name="assignee_id">
+          {% if group_members %}
+          <optgroup label="{{ ticket.ci.support_group.name }}">
+            {% for s in group_members %}<option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="Everyone else">
+          {% endif %}
           {% for s in staff %}
-          <option value="{{ s.id }}" {% if ticket.assignee_id == s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role.label }})</option>
+          <option value="{{ s.id }}" {% if chosen == s.id %}selected{% endif %}>{{ s.full_name }} ({{ s.role.label }})</option>
           {% endfor %}
+          {% if group_members %}</optgroup>{% endif %}
         </select>
         <button class="btn btn-small">Assign</button>
       </form>
@@ -99,7 +132,8 @@
       <h3>Update status</h3>
       <form method="post" action="/tickets/{{ ticket.number }}/status">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <select name="status" id="status-select">
+        <select name="status" id="status-select" required>
+          <option value="" selected disabled>— choose new status —</option>
           {% for s in next_statuses %}<option value="{{ s.value }}">{{ s.label }}</option>{% endfor %}
         </select>
         <label id="resolution-box">Resolution notes (emailed to requester)
@@ -124,6 +158,15 @@
         </select>
         <select name="priority">
           {% for p in Priority %}<option value="{{ p.value }}" {% if p == ticket.priority %}selected{% endif %}>{{ p.label }}</option>{% endfor %}
+        </select>
+        <select name="ci_id" title="Affected item">
+          <option value="">— No affected item —</option>
+          {% if ticket.ci and ticket.ci.status == CIStatus.RETIRED %}<option value="{{ ticket.ci.id }}" selected>{{ ticket.ci.display_name }} (retired)</option>{% endif %}
+          {% for group, items in ci_choices.items() %}
+          <optgroup label="{{ group }}{% if group == 'My devices' %} (requester){% endif %}">
+            {% for c in items %}<option value="{{ c.id }}" {% if c.id == ticket.ci_id %}selected{% endif %}>{{ c.display_name }} ({{ c.ci_type.label }})</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
         </select>
         <button class="btn btn-small">Update</button>
       </form>

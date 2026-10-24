@@ -1,10 +1,10 @@
 """ORM models: users, tickets, comments, activity history and email log."""
 
 import enum
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -104,6 +104,112 @@ class User(Base):
         return not self.password_hash.startswith("!")
 
 
+class CIType(str, enum.Enum):
+    LAPTOP = "laptop"
+    DESKTOP = "desktop"
+    MOBILE = "mobile"
+    MONITOR = "monitor"
+    PERIPHERAL = "peripheral"
+    PRINTER = "printer"
+    SERVER = "server"
+    NETWORK = "network"
+    APPLICATION = "application"
+    SERVICE = "service"
+    OTHER = "other"
+
+    @property
+    def label(self) -> str:
+        return {
+            "laptop": "Laptop",
+            "desktop": "Desktop",
+            "mobile": "Mobile Device",
+            "monitor": "Monitor",
+            "peripheral": "Peripheral",
+            "printer": "Printer",
+            "server": "Server",
+            "network": "Network Device",
+            "application": "Application",
+            "service": "Business Service",
+            "other": "Other",
+        }[self.value]
+
+    @property
+    def is_shared_offering(self) -> bool:
+        """Applications and services any requester can raise tickets against."""
+        return self in (CIType.APPLICATION, CIType.SERVICE)
+
+
+class CIStatus(str, enum.Enum):
+    IN_USE = "in_use"
+    IN_STOCK = "in_stock"
+    MAINTENANCE = "maintenance"
+    RETIRED = "retired"
+
+    @property
+    def label(self) -> str:
+        return {"in_use": "In Use", "in_stock": "In Stock", "maintenance": "In Maintenance", "retired": "Retired"}[
+            self.value
+        ]
+
+
+support_group_members = Table(
+    "support_group_members",
+    Base.metadata,
+    Column("group_id", ForeignKey("support_groups.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class SupportGroup(Base):
+    """A team responsible for a set of configuration items (e.g. Network, Apps, Desktop Support)."""
+
+    __tablename__ = "support_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    members: Mapped[list[User]] = relationship(secondary=support_group_members, order_by=User.full_name)
+
+
+class ConfigItem(Base):
+    """A CMDB configuration item: a device, application or service people can need help with."""
+
+    __tablename__ = "config_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    ci_type: Mapped[CIType] = mapped_column(Enum(CIType), index=True)
+    status: Mapped[CIStatus] = mapped_column(Enum(CIStatus), default=CIStatus.IN_USE, index=True)
+    asset_tag: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True)
+    serial_number: Mapped[Optional[str]] = mapped_column(String(100), index=True, nullable=True)
+    manufacturer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # OS or software version
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    warranty_expires: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    assigned_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    support_group_id: Mapped[Optional[int]] = mapped_column(ForeignKey("support_groups.id"), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    assigned_user: Mapped[Optional[User]] = relationship()
+    support_group: Mapped[Optional[SupportGroup]] = relationship()
+
+    @property
+    def display_name(self) -> str:
+        return f"{self.name} [{self.asset_tag}]" if self.asset_tag else self.name
+
+    @property
+    def warranty_expired(self) -> bool:
+        return self.warranty_expires is not None and self.warranty_expires < date.today()
+
+
 class Ticket(Base):
     __tablename__ = "tickets"
 
@@ -121,6 +227,8 @@ class Ticket(Base):
     requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     assigned_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # The affected product / device from the CMDB, if the requester picked one.
+    ci_id: Mapped[Optional[int]] = mapped_column(ForeignKey("config_items.id"), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -130,6 +238,7 @@ class Ticket(Base):
     requester: Mapped[User] = relationship(foreign_keys=[requester_id])
     assignee: Mapped[Optional[User]] = relationship(foreign_keys=[assignee_id])
     assigned_by: Mapped[Optional[User]] = relationship(foreign_keys=[assigned_by_id])
+    ci: Mapped[Optional[ConfigItem]] = relationship()
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="ticket", order_by="Comment.created_at", cascade="all, delete-orphan"
     )

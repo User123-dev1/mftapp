@@ -25,7 +25,7 @@ fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 0 0 12px
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .btn { display: inline-block; background: var(--brand-2); color: #fff !important; border: 0; border-radius: 6px; padding: 9px 16px; font: inherit; cursor: pointer; }
 .btn:hover { filter: brightness(1.1); text-decoration: none; }
-.btn-small { padding: 5px 12px; font-size: 14px; }
+.btn-small { padding: 5px 12px; font-size: 14px; white-space: nowrap; }
 .btn-warn { background: var(--warn); }
 .topbar .btn { background: #fff; color: var(--brand) !important; }
 button.link { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
@@ -86,3 +86,16 @@ details.email pre { white-space: pre-wrap; background: #f7fafc; padding: 10px; b
 .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 14px 0; }
 .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 .small { font-size: 13px; }
+.ci-filter { margin-bottom: 6px; }
+.suggest { background: #fffbea; border: 1px solid #f6e05e; border-radius: 6px; padding: 8px 10px; margin: 0 0 10px; }
+.devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.device { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 14px; }
+.grid-form .wide { grid-column: 1 / -1; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.members { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; margin: 6px 0 12px; }
+.members label { font-weight: 400; display: flex; gap: 6px; align-items: center; margin: 0; }
+.errors li { color: var(--bad); }
+.warnings li { color: var(--warn); }
+.ci-in_use { background: #e6f4ea; color: #276749; } .ci-in_stock { background: #ebf4ff; color: #2b6cb0; }
+.ci-maintenance { background: #fefcbf; color: #975a16; } .ci-retired { background: #e2e8f0; color: #4a5568; }

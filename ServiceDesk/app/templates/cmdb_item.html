@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ticket_table %}
+{% block title %}{{ ci.name if ci else 'New item' }} · {{ app_name }}{% endblock %}
+{% block content %}
+{% macro val(field) -%}{{ form[field] if form.get(field) is not none else ((ci[field] or '') if ci else '') }}{%- endmacro %}
+<section class="card">
+  <p class="muted small"><a href="/cmdb">← CMDB</a></p>
+  <h1>{{ ci.display_name if ci else 'Add configuration item' }}</h1>
+  <form method="post" action="{{ '/cmdb/%d' % ci.id if ci else '/cmdb/new' }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="grid-form">
+      <label class="wide">Name <input name="name" value="{{ val('name') }}" required></label>
+      <label>Type
+        <select name="ci_type">
+          {% set cur_type = form.ci_type or (ci.ci_type.value if ci else 'laptop') %}
+          {% for t in CIType %}<option value="{{ t.value }}" {% if cur_type == t.value %}selected{% endif %}>{{ t.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Status
+        <select name="status">
+          {% set cur_status = form.status or (ci.status.value if ci else 'in_use') %}
+          {% for s in CIStatus %}<option value="{{ s.value }}" {% if cur_status == s.value %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Asset tag <input name="asset_tag" value="{{ val('asset_tag') }}"></label>
+      <label>Serial number <input name="serial_number" value="{{ val('serial_number') }}"></label>
+      <label>Manufacturer <input name="manufacturer" value="{{ val('manufacturer') }}"></label>
+      <label>Model <input name="model" value="{{ val('model') }}"></label>
+      <label>Version / OS <input name="version" value="{{ val('version') }}"></label>
+      <label>IP address <input name="ip_address" value="{{ val('ip_address') }}"></label>
+      <label>Location <input name="location" value="{{ val('location') }}"></label>
+      <label>Vendor <input name="vendor" value="{{ val('vendor') }}"></label>
+      <label>Warranty expires
+        <input type="date" name="warranty_expires" value="{{ form.warranty_expires or (ci.warranty_expires.isoformat() if ci and ci.warranty_expires else '') }}">
+      </label>
+      <label>Assigned to (email)
+        <input name="assigned_to_email" list="user-emails" value="{{ form.assigned_to_email or (ci.assigned_user.email if ci and ci.assigned_user else '') }}" placeholder="leave blank for shared items">
+        <datalist id="user-emails">{% for u in users %}<option value="{{ u.email }}">{{ u.full_name }}</option>{% endfor %}</datalist>
+      </label>
+      <label>Support group
+        <select name="support_group_id">
+          <option value="">— None —</option>
+          {% set cur_group = form.support_group_id or (ci.support_group_id|string if ci and ci.support_group_id else '') %}
+          {% for g in groups %}<option value="{{ g.id }}" {% if cur_group == g.id|string %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="wide">Notes <textarea name="notes" rows="3">{{ val('notes') }}</textarea></label>
+    </div>
+    <button class="btn">{{ 'Save' if ci else 'Add item' }}</button>
+    {% if ci %}<span class="muted small">Last updated {{ ci.updated_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>{% endif %}
+  </form>
+</section>
+{% if ci %}
+<section class="card" id="tickets">
+  <h2>Ticket history ({{ tickets|length }})</h2>
+  {{ ticket_table(tickets) }}
+</section>
+{% endif %}
+{% endblock %}

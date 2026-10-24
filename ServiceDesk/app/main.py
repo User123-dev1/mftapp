@@ -2,7 +2,6 @@
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -10,37 +9,33 @@ from authlib.integrations.starlette_client import OAuthError
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import database, services, sso
+from . import cmdb, cmdb_routes, database, services, sso
 from .config import settings
 from .emailer import deliver_pending
-from .models import Category, EmailLog, Priority, Role, Status, Ticket, User
+from .models import Category, CIStatus, CIType, ConfigItem, EmailLog, Priority, Role, Status, Ticket, User
 from .security import (
     NO_PASSWORD,
     Forbidden,
     LoginRequired,
-    csrf_token,
     flash,
     get_current_user,
     get_optional_user,
     hash_password,
     login_user,
     logout_user,
-    pop_flashes,
     require_manager,
     require_staff,
     verify_csrf,
     verify_password,
 )
+from .web import BASE_DIR, redirect, render
 
 logger = logging.getLogger(__name__)
-BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # Sort key putting Critical first (enum values sort alphabetically in the database).
 PRIORITY_RANK = case(
@@ -79,6 +74,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", max_age=60 * 60 * 12)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.include_router(cmdb_routes.router)
 
 
 @app.exception_handler(LoginRequired)
@@ -94,38 +90,6 @@ async def _http_error(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Forbidden)
 async def _forbidden(request: Request, exc: Forbidden):
     return render(request, "error.html", {"message": "You do not have permission to do that."}, status_code=403)
-
-
-def render(request: Request, name: str, context: Optional[dict] = None, status_code: int = 200, user=None):
-    ctx = {
-        "app_name": settings.app_name,
-        "user": user if user is not None else _session_user(request),
-        "csrf_token": csrf_token(request),
-        "flashes": pop_flashes(request),
-        "Status": Status,
-        "Category": Category,
-        "Priority": Priority,
-        "Role": Role,
-        "sso_providers": sso.providers(),
-        "local_login": settings.local_login,
-    }
-    ctx.update(context or {})
-    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
-
-
-def _session_user(request: Request) -> Optional[User]:
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return None
-    db = database.SessionLocal()
-    try:
-        return db.get(User, user_id)
-    finally:
-        db.close()
-
-
-def redirect(url: str) -> RedirectResponse:
-    return RedirectResponse(url, status_code=303)
 
 
 def _safe_next(next_url: str) -> str:
@@ -292,7 +256,12 @@ def home(request: Request, user: Optional[User] = Depends(get_optional_user), db
         .order_by(Ticket.created_at.desc())
         .limit(10)
     ).all()
-    return render(request, "portal.html", {"tickets": my_open}, user=user)
+    my_devices = db.scalars(
+        select(ConfigItem)
+        .where(ConfigItem.assigned_user_id == user.id, ConfigItem.status != CIStatus.RETIRED)
+        .order_by(ConfigItem.name)
+    ).all()
+    return render(request, "portal.html", {"tickets": my_open, "devices": my_devices}, user=user)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -313,13 +282,8 @@ def dashboard(request: Request, user: User = Depends(require_staff), db: Session
         .order_by(PRIORITY_RANK, Ticket.created_at)
     ).all()
     agents = services.active_users_with_role(db, Role.AGENT) + services.active_users_with_role(db, Role.MANAGER)
-    workload = dict(
-        db.execute(
-            select(Ticket.assignee_id, func.count())
-            .where(Ticket.status.in_(open_statuses), Ticket.assignee_id.is_not(None))
-            .group_by(Ticket.assignee_id)
-        ).all()
-    )
+    workload = cmdb.open_ticket_counts(db)
+    suggestions = {t.id: cmdb.suggested_assignee(t, workload) for t in unassigned}
     return render(
         request,
         "dashboard.html",
@@ -330,6 +294,7 @@ def dashboard(request: Request, user: User = Depends(require_staff), db: Session
             "my_work": my_work,
             "agents": agents,
             "workload": workload,
+            "suggestions": suggestions,
         },
         user=user,
     )
@@ -337,18 +302,41 @@ def dashboard(request: Request, user: User = Depends(require_staff), db: Session
 
 # --- Tickets ----------------------------------------------------------------
 
+# Default request type when a requester starts from one of their devices.
+_CATEGORY_FOR_CI = {
+    CIType.APPLICATION: Category.SOFTWARE,
+    CIType.NETWORK: Category.NETWORK,
+    CIType.SERVICE: Category.GENERAL,
+    CIType.OTHER: Category.GENERAL,
+}
+
+
+def _new_ticket_context(db: Session, user: User, selected: Category, form: dict) -> dict:
+    return {
+        "selected": selected,
+        "category_fields": services.CATEGORY_FIELDS,
+        "form": form,
+        "ci_choices": cmdb.requester_choices(db, user),
+    }
+
+
 @app.get("/tickets/new", response_class=HTMLResponse)
-def new_ticket_page(request: Request, category: str = "general", user: User = Depends(get_current_user)):
+def new_ticket_page(
+    request: Request,
+    category: str = "",
+    ci: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    item = db.get(ConfigItem, ci) if ci else None
+    if item is not None and not cmdb.can_select(user, item):
+        item = None
     try:
         selected = Category(category)
     except ValueError:
-        selected = Category.GENERAL
-    return render(
-        request,
-        "ticket_new.html",
-        {"selected": selected, "category_fields": services.CATEGORY_FIELDS, "form": {}},
-        user=user,
-    )
+        selected = _CATEGORY_FOR_CI.get(item.ci_type, Category.HARDWARE) if item else Category.GENERAL
+    form = {"ci_id": str(item.id)} if item else {}
+    return render(request, "ticket_new.html", _new_ticket_context(db, user, selected, form), user=user)
 
 
 @app.post("/tickets/new")
@@ -371,6 +359,8 @@ async def create_ticket(
         key: str(form.get(f"detail_{category.value}_{key}", ""))
         for key, _label in services.CATEGORY_FIELDS.get(category, [])
     }
+    ci_id = str(form.get("ci_id", ""))
+    item = db.get(ConfigItem, int(ci_id)) if ci_id.isdigit() else None
     try:
         ticket = services.create_ticket(
             db,
@@ -380,16 +370,13 @@ async def create_ticket(
             category=category,
             priority=priority,
             details=details,
+            ci=item,
         )
     except services.WorkflowError as exc:
         db.rollback()
         flash(request, str(exc), "error")
         return render(
-            request,
-            "ticket_new.html",
-            {"selected": category, "category_fields": services.CATEGORY_FIELDS, "form": dict(form)},
-            status_code=400,
-            user=user,
+            request, "ticket_new.html", _new_ticket_context(db, user, category, dict(form)), status_code=400, user=user
         )
     db.commit()
     background.add_task(deliver_pending)
@@ -458,14 +445,35 @@ def ticket_detail(
 ):
     ticket = _get_ticket(db, number, user)
     comments = [c for c in ticket.comments if user.is_staff or not c.internal]
-    staff = []
+    staff, suggestion, group_members = [], None, []
     if user.role == Role.MANAGER:
         staff = services.active_users_with_role(db, Role.AGENT) + services.active_users_with_role(db, Role.MANAGER)
+        suggestion = cmdb.suggested_assignee(ticket, cmdb.open_ticket_counts(db))
+        if ticket.ci and ticket.ci.support_group:
+            member_ids = {m.id for m in ticket.ci.support_group.members}
+            group_members = [s for s in staff if s.id in member_ids]
+            staff = [s for s in staff if s.id not in member_ids]
+    ci_choices, ci_ticket_count = {}, 0
+    if user.is_staff:
+        ci_choices = cmdb.requester_choices(db, ticket.requester)
+        seen = {c.id for items in ci_choices.values() for c in items}
+        others = [c for c in db.scalars(select(ConfigItem).where(ConfigItem.status != CIStatus.RETIRED)
+                                        .order_by(ConfigItem.name)) if c.id not in seen]
+        if others:
+            ci_choices["All other items"] = others
+        if ticket.ci:
+            ci_ticket_count = db.scalar(
+                select(func.count()).select_from(Ticket).where(Ticket.ci_id == ticket.ci_id, Ticket.id != ticket.id)
+            )
     return render(
         request,
         "ticket_detail.html",
         {
             "ticket": ticket,
+            "suggestion": suggestion,
+            "group_members": group_members,
+            "ci_choices": ci_choices,
+            "ci_ticket_count": ci_ticket_count,
             "details": services.parse_details(ticket),
             "comments": comments,
             "staff": staff,
@@ -540,6 +548,7 @@ def update_ticket(
     background: BackgroundTasks,
     category: str = Form(...),
     priority: str = Form(...),
+    ci_id: str = Form(""),
     user: User = Depends(require_staff),
     db: Session = Depends(database.get_db),
     _: None = Depends(verify_csrf),
@@ -549,9 +558,12 @@ def update_ticket(
         new_category, new_priority = Category(category), Priority(priority)
     except ValueError:
         raise HTTPException(status_code=400, detail="Unknown category or priority")
+    item = db.get(ConfigItem, int(ci_id)) if ci_id.isdigit() else None
+    if ci_id.isdigit() and item is None:
+        raise HTTPException(status_code=400, detail="Unknown item")
     return _ticket_action(
         request, background, db, ticket,
-        lambda: services.update_fields(db, ticket, user, new_category, new_priority),
+        lambda: services.update_fields(db, ticket, user, new_category, new_priority, item),
         "Ticket updated.",
     )
 
