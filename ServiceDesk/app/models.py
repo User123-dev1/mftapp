@@ -66,6 +66,7 @@ class Status(str, enum.Enum):
     ASSIGNED = "assigned"
     IN_PROGRESS = "in_progress"
     ON_HOLD = "on_hold"
+    PENDING_CHANGE = "pending_change"  # waiting on a change request (set automatically)
     RESOLVED = "resolved"
     CLOSED = "closed"
     CANCELLED = "cancelled"
@@ -93,7 +94,13 @@ class User(Base):
     sso_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.REQUESTER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Member of the change advisory board (IT managers can always approve changes).
+    is_change_approver: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    @property
+    def can_approve_changes(self) -> bool:
+        return self.is_active and (self.role == Role.MANAGER or (self.is_staff and self.is_change_approver))
 
     @property
     def is_staff(self) -> bool:
@@ -193,6 +200,8 @@ class ConfigItem(Base):
     vendor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     warranty_expires: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Tickets against this item can't be resolved without an approved, completed change.
+    change_controlled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Set for devices synced from Entra ID (the device's directory object ID).
     entra_object_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
@@ -246,6 +255,7 @@ class Ticket(Base):
     assignee: Mapped[Optional[User]] = relationship(foreign_keys=[assignee_id])
     assigned_by: Mapped[Optional[User]] = relationship(foreign_keys=[assigned_by_id])
     ci: Mapped[Optional[ConfigItem]] = relationship()
+    changes: Mapped[list["ChangeRequest"]] = relationship(back_populates="ticket", order_by="ChangeRequest.id")
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="ticket", order_by="Comment.created_at", cascade="all, delete-orphan"
     )
@@ -313,3 +323,148 @@ class SyncRun(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")  # running | success | failed
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AppSetting(Base):
+    """Small key/value store for settings managers edit in the UI."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class CIRelationship(Base):
+    """'source depends on target', e.g. Payroll app -> SQL01 server -> Core switch."""
+
+    __tablename__ = "ci_relationships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("config_items.id", ondelete="CASCADE"), index=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("config_items.id", ondelete="CASCADE"), index=True)
+
+    source: Mapped[ConfigItem] = relationship(foreign_keys=[source_id])
+    target: Mapped[ConfigItem] = relationship(foreign_keys=[target_id])
+
+
+class ChangeType(str, enum.Enum):
+    STANDARD = "standard"    # pre-approved, routine
+    NORMAL = "normal"        # needs approval
+    EMERGENCY = "emergency"  # expedited: one approval
+
+    @property
+    def label(self) -> str:
+        return self.value.title()
+
+
+class ChangeState(str, enum.Enum):
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"        # scheduled, waiting for the window
+    REJECTED = "rejected"
+    IN_PROGRESS = "in_progress"  # being implemented
+    COMPLETED = "completed"      # implemented successfully
+    FAILED = "failed"            # implementation failed / backed out
+    CANCELLED = "cancelled"
+
+    @property
+    def label(self) -> str:
+        return self.value.replace("_", " ").title()
+
+    @property
+    def is_active(self) -> bool:
+        return self in (ChangeState.DRAFT, ChangeState.PENDING_APPROVAL, ChangeState.APPROVED, ChangeState.IN_PROGRESS)
+
+
+class Level(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+    @property
+    def label(self) -> str:
+        return self.value.title()
+
+
+change_items = Table(
+    "change_items",
+    Base.metadata,
+    Column("change_id", ForeignKey("change_requests.id", ondelete="CASCADE"), primary_key=True),
+    Column("ci_id", ForeignKey("config_items.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class ChangeRequest(Base):
+    __tablename__ = "change_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    number: Mapped[str] = mapped_column(String(20), unique=True, index=True, default="")
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+    justification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    change_type: Mapped[ChangeType] = mapped_column(Enum(ChangeType), default=ChangeType.NORMAL)
+    state: Mapped[ChangeState] = mapped_column(Enum(ChangeState), default=ChangeState.DRAFT, index=True)
+    risk: Mapped[Level] = mapped_column(Enum(Level), default=Level.MEDIUM)
+    impact: Mapped[Level] = mapped_column(Enum(Level), default=Level.MEDIUM)
+    implementation_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    backout_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    test_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Wall-clock times in the organisation's local time zone, as entered.
+    planned_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    planned_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    actual_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    actual_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approvals_required: Mapped[int] = mapped_column(Integer, default=1)
+    close_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    ticket_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tickets.id"), nullable=True, index=True)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    implementer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    ticket: Mapped[Optional[Ticket]] = relationship(back_populates="changes")
+    requested_by: Mapped[User] = relationship(foreign_keys=[requested_by_id])
+    implementer: Mapped[Optional[User]] = relationship(foreign_keys=[implementer_id])
+    items: Mapped[list[ConfigItem]] = relationship(secondary=change_items, order_by=ConfigItem.name)
+    approvals: Mapped[list["ChangeApproval"]] = relationship(
+        back_populates="change", order_by="ChangeApproval.created_at", cascade="all, delete-orphan"
+    )
+    activities: Mapped[list["ChangeActivity"]] = relationship(
+        back_populates="change", order_by="ChangeActivity.created_at", cascade="all, delete-orphan"
+    )
+
+    @property
+    def approve_count(self) -> int:
+        return sum(1 for a in self.approvals if a.approved and a.current)
+
+
+class ChangeApproval(Base):
+    __tablename__ = "change_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id", ondelete="CASCADE"), index=True)
+    approver_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    approved: Mapped[bool] = mapped_column(Boolean)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # False once the change is sent back to draft and resubmitted (votes don't carry over).
+    current: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    change: Mapped[ChangeRequest] = relationship(back_populates="approvals")
+    approver: Mapped[User] = relationship()
+
+
+class ChangeActivity(Base):
+    __tablename__ = "change_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id", ondelete="CASCADE"), index=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    message: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    change: Mapped[ChangeRequest] = relationship(back_populates="activities")
+    actor: Mapped[Optional[User]] = relationship()

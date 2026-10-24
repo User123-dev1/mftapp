@@ -17,6 +17,7 @@
       <a href="/tickets?assignee=me">My Work</a>
       <a href="/tickets?status=new">Unassigned</a>
       <a href="/tickets">All Open</a>
+      <a href="/changes">Changes{% if my_approvals %} <span class="count" title="Waiting for your approval">{{ my_approvals }}</span>{% endif %}</a>
       <a href="/cmdb">CMDB</a>
       <a href="/reports">Reports</a>
     {% else %}
@@ -25,9 +26,16 @@
     {% endif %}
     <a href="/tickets/new" class="btn btn-small">+ New Request</a>
     {% if user.role == Role.MANAGER %}
-      <a href="/admin/users">Users</a>
-      <a href="/admin/groups">Groups</a>
-      <a href="/admin/emails">Email Log</a>
+      <details class="menu">
+        <summary>Admin</summary>
+        <div class="menu-items">
+          <a href="/admin/users">Users</a>
+          <a href="/admin/groups">Support Groups</a>
+          <a href="/admin/change-settings">Change Policy</a>
+          <a href="/cmdb/sync">Entra Sync</a>
+          <a href="/admin/emails">Email Log</a>
+        </div>
+      </details>
     {% endif %}
   </nav>
   <div class="who">

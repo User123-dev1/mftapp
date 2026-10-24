@@ -44,6 +44,11 @@ def test_csrf_enforced(client):
 
 
 def test_full_ticket_lifecycle(client, manager):
+    # This test covers the basic flow; change control (on for firewall by default) is in test_changes.py.
+    from app import changes
+    with database.SessionLocal() as db:
+        changes.set_setting(db, "change.categories", "[]")
+        db.commit()
     agent_id = make_agent(manager)
     requester = register(client, "Rita Requester", "rita@example.com")
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import cmdb, cmdb_routes, database, entra_sync, reports, services, sso
+from . import change_routes, changes, cmdb, cmdb_routes, database, entra_sync, reports, services, sso
 from .config import settings
 from .emailer import deliver_pending
 from .models import Category, CIStatus, CIType, ConfigItem, EmailLog, Priority, Role, Status, Ticket, User
@@ -82,6 +82,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site=
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(cmdb_routes.router)
 app.include_router(reports.router)
+app.include_router(change_routes.router)
 
 
 @app.exception_handler(LoginRequired)
@@ -481,6 +482,9 @@ def ticket_detail(
             "group_members": group_members,
             "ci_choices": ci_choices,
             "ci_ticket_count": ci_ticket_count,
+            "change_reason": changes.requires_change(db, ticket),
+            "change_block": services.change_block(ticket),
+            "change_override": services.change_override_allowed(ticket),
             "details": services.parse_details(ticket),
             "comments": comments,
             "staff": staff,
@@ -532,6 +536,7 @@ def update_status(
     background: BackgroundTasks,
     status: str = Form(...),
     resolution_notes: str = Form(""),
+    no_change_reason: str = Form(""),
     user: User = Depends(require_staff),
     db: Session = Depends(database.get_db),
     _: None = Depends(verify_csrf),
@@ -543,7 +548,7 @@ def update_status(
         raise HTTPException(status_code=400, detail="Unknown status")
     return _ticket_action(
         request, background, db, ticket,
-        lambda: services.change_status(db, ticket, new_status, user, resolution_notes),
+        lambda: services.change_status(db, ticket, new_status, user, resolution_notes, no_change_reason),
         f"Status updated to {new_status.label}.",
     )
 
@@ -680,6 +685,7 @@ def edit_user(
     user_id: int,
     role: str = Form(...),
     is_active: bool = Form(False),
+    is_change_approver: bool = Form(False),
     password: str = Form(""),
     user: User = Depends(require_manager),
     db: Session = Depends(database.get_db),
@@ -700,6 +706,7 @@ def edit_user(
         return redirect("/admin/users")
     target.role = new_role
     target.is_active = is_active
+    target.is_change_approver = is_change_approver and new_role != Role.REQUESTER
     if password:
         target.password_hash = hash_password(password)
     db.commit()

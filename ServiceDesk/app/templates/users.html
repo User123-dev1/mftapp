@@ -4,7 +4,7 @@
 <section class="card">
   <h1>Users</h1>
   <table class="grid">
-    <thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Active</th><th>Reset password</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Active</th><th title="Can approve change requests">Change approver</th><th>Reset password</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
     <tr>
@@ -13,6 +13,7 @@
       <td>{{ u.department or '' }}</td>
       <td><select name="role" form="user-{{ u.id }}">{% for r in Role %}<option value="{{ r.value }}" {% if r == u.role %}selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></td>
       <td><input type="checkbox" name="is_active" value="true" form="user-{{ u.id }}" {% if u.is_active %}checked{% endif %}></td>
+      <td>{% if u.role == Role.MANAGER %}<span class="muted small" title="IT managers can always approve">always</span>{% else %}<input type="checkbox" name="is_change_approver" value="true" form="user-{{ u.id }}" {% if u.is_change_approver %}checked{% endif %}>{% endif %}</td>
       <td><input type="password" name="password" placeholder="leave blank" autocomplete="new-password" form="user-{{ u.id }}"></td>
       <td>
         <form method="post" action="/admin/users/{{ u.id }}" id="user-{{ u.id }}">

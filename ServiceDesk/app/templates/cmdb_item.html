@@ -45,6 +45,9 @@
         </select>
       </label>
       <label class="wide">Notes <textarea name="notes" rows="3">{{ val('notes') }}</textarea></label>
+      <label class="check wide"><input type="checkbox" name="change_controlled" value="true"
+        {% if (form.change_controlled if form else (ci.change_controlled if ci else False)) %}checked{% endif %}>
+        Change-controlled: tickets for this item need an approved change before they can be resolved</label>
     </div>
     <button class="btn">{{ 'Save' if ci else 'Add item' }}</button>
     {% if ci %}<span class="muted small">Last updated {{ ci.updated_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>{% endif %}
@@ -56,6 +59,48 @@
   </form>
 </section>
 {% if ci %}
+<section class="card" id="relationships">
+  <h2>Relationships</h2>
+  <div class="layout two">
+    <div>
+      <h3>{{ ci.name }} depends on</h3>
+      <ul class="rels">
+        {% for rel in depends_on %}
+        <li><a href="/cmdb/{{ rel.target.id }}">{{ rel.target.display_name }}</a> <span class="muted small">{{ rel.target.ci_type.label }}</span>
+          <form method="post" action="/cmdb/{{ ci.id }}/relationships/{{ rel.id }}/delete" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link danger small" title="Remove">remove</button></form></li>
+        {% else %}<li class="muted">Nothing recorded.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Used by (impacted if {{ ci.name }} changes)</h3>
+      <ul class="rels">
+        {% for rel in used_by %}
+        <li><a href="/cmdb/{{ rel.source.id }}">{{ rel.source.display_name }}</a> <span class="muted small">{{ rel.source.ci_type.label }}</span>
+          <form method="post" action="/cmdb/{{ ci.id }}/relationships/{{ rel.id }}/delete" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link danger small" title="Remove">remove</button></form></li>
+        {% else %}<li class="muted">Nothing recorded.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+  <form method="post" action="/cmdb/{{ ci.id }}/relationships" class="filters">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <select name="direction"><option value="depends_on">{{ ci.name }} depends on…</option><option value="used_by">{{ ci.name }} is used by…</option></select>
+    <select name="other_id">{% for o in other_items %}<option value="{{ o.id }}">{{ o.display_name }} ({{ o.ci_type.label }})</option>{% endfor %}</select>
+    <button class="btn btn-small">Add</button>
+  </form>
+</section>
+
+{% if changes_for_ci %}
+<section class="card">
+  <h2>Changes ({{ changes_for_ci|length }})</h2>
+  <table class="grid compact">
+    {% for c in changes_for_ci %}
+    <tr><td><a href="/changes/{{ c.number }}">{{ c.number }}</a></td><td>{{ c.title }}</td><td><span class="badge chg-{{ c.state.value }}">{{ c.state.label }}</span></td>
+      <td>{{ c.planned_start.strftime('%Y-%m-%d %H:%M') if c.planned_start else '' }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
 <section class="card" id="tickets">
   <h2>Ticket history ({{ tickets|length }})</h2>
   {{ ticket_table(tickets) }}

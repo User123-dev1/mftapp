@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ change.number }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <section class="card main-col">
+    <p class="muted small"><a href="/changes">← Changes</a></p>
+    <div class="ticket-head">
+      <h1>{{ change.number }} — {{ change.title }}</h1>
+      <div><span class="badge chg-{{ change.state.value }}">{{ change.state.label }}</span>
+        <span class="badge">{{ change.change_type.label }}</span></div>
+    </div>
+    {% if change.ticket %}<p>From ticket <a href="/tickets/{{ change.ticket.number }}">{{ change.ticket.number }}</a> — {{ change.ticket.title }}</p>{% endif %}
+
+    {% if conflicts %}
+    <div class="flash flash-error">⚠ Schedule conflict - overlapping window with:
+      <ul>{% for x in conflicts %}<li><a href="/changes/{{ x.change.number }}">{{ x.change.number }}</a> {{ x.change.title }}
+        ({{ x.change.state.label }}, {{ x.change.planned_start.strftime('%m-%d %H:%M') }}) — {{ x.reason }}</li>{% endfor %}</ul>
+      Coordinate the windows before approving.</div>
+    {% endif %}
+
+    <p class="pre">{{ change.description }}</p>
+    {% for label, field in [('Business justification', 'justification'), ('Implementation plan', 'implementation_plan'), ('Backout plan', 'backout_plan'), ('Test / verification plan', 'test_plan'), ('Closure notes', 'close_notes')] %}
+      {% if change[field] %}<h3>{{ label }}</h3><p class="pre">{{ change[field] }}</p>{% endif %}
+    {% endfor %}
+
+    <h2>Affected items</h2>
+    {% if change.items %}
+    <ul class="rels">
+      {% for ci in change.items %}<li><a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a> <span class="muted small">{{ ci.ci_type.label }}</span></li>{% endfor %}
+    </ul>
+    {% else %}<p class="muted">None selected.</p>{% endif %}
+    {% if impacted %}
+    <h3>Potentially impacted (depends on the items above)</h3>
+    <ul class="rels">
+      {% for ci, via in impacted %}<li><a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a> <span class="muted small">{{ ci.ci_type.label }} · via {{ via.name }}</span></li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <h2>Approvals</h2>
+    {% if change.change_type == ChangeType.STANDARD %}<p class="muted">Standard change - pre-approved.</p>
+    {% elif change.state != ChangeState.DRAFT or current_votes %}
+    <p>{{ change.approve_count }} of {{ change.approvals_required }} required approval(s).</p>
+    {% endif %}
+    {% for a in current_votes %}
+    <div class="comment"><div class="meta"><strong>{{ a.approver.full_name }}</strong>
+      <span class="badge {{ 'status-resolved' if a.approved else 'prio-critical' }}">{{ 'Approved' if a.approved else 'Rejected' }}</span>
+      <span class="muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</span></div>
+      {% if a.comment %}<p class="pre">{{ a.comment }}</p>{% endif %}</div>
+    {% endfor %}
+    {% if old_votes %}<details><summary class="muted small">Earlier votes (before resubmission)</summary>
+      {% for a in old_votes %}<p class="small">{{ a.approver.full_name }}: {{ 'approved' if a.approved else 'rejected' }}{% if a.comment %} — {{ a.comment }}{% endif %}</p>{% endfor %}
+    </details>{% endif %}
+    {% if change.state == ChangeState.PENDING_APPROVAL %}
+    <p class="muted small">Can approve: {{ approvers|map(attribute='full_name')|join(', ') or 'nobody' }}</p>
+    {% endif %}
+
+    {% if can_vote %}
+    <form method="post" action="/changes/{{ change.number }}/decide" class="box">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Comment (required to reject) <textarea name="comment" rows="2"></textarea></label>
+      <div class="actions">
+        <button class="btn" name="decision" value="approve">Approve</button>
+        <button class="btn btn-warn" name="decision" value="reject">Reject</button>
+      </div>
+    </form>
+    {% elif change.state == ChangeState.PENDING_APPROVAL and user.id == change.requested_by_id %}
+    <p class="muted small">You requested this change, so someone else must approve it.</p>
+    {% endif %}
+  </section>
+
+  <aside class="side-col">
+    <div class="card">
+      <dl class="kv">
+        <dt>Risk</dt><dd><span class="badge lvl-{{ change.risk.value }}">{{ change.risk.label }}</span></dd>
+        <dt>Impact</dt><dd>{{ change.impact.label }}</dd>
+        <dt>Planned</dt><dd>{% if change.planned_start %}{{ change.planned_start.strftime('%Y-%m-%d %H:%M') }}<br>to {{ change.planned_end.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</dd>
+        {% if change.actual_start %}<dt>Actual</dt><dd>{{ change.actual_start.strftime('%Y-%m-%d %H:%M') }}{% if change.actual_end %}<br>to {{ change.actual_end.strftime('%Y-%m-%d %H:%M') }}{% endif %}</dd>{% endif %}
+        <dt>Requested by</dt><dd>{{ change.requested_by.full_name }}</dd>
+        <dt>Implementer</dt><dd>{{ change.implementer.full_name if change.implementer else '—' }}</dd>
+      </dl>
+    </div>
+
+    {% if can_edit %}
+    <div class="card">
+      <h3>Actions</h3>
+      {% if change.state == ChangeState.DRAFT %}
+        <p><a class="btn btn-small btn-secondary" href="/changes/{{ change.number }}/edit">Edit</a></p>
+        <form method="post" action="/changes/{{ change.number }}/submit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn btn-small">Submit for approval</button></form>
+      {% elif change.state == ChangeState.REJECTED %}
+        <form method="post" action="/changes/{{ change.number }}/revise"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn btn-small">Revise &amp; resubmit</button></form>
+      {% elif change.state == ChangeState.APPROVED %}
+        <form method="post" action="/changes/{{ change.number }}/start"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn btn-small">Start implementation</button></form>
+      {% elif change.state == ChangeState.IN_PROGRESS %}
+        <form method="post" action="/changes/{{ change.number }}/finish">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Closure notes <textarea name="notes" rows="3" required></textarea></label>
+          <div class="actions">
+            <button class="btn btn-small" name="outcome" value="completed">Completed successfully</button>
+            <button class="btn btn-small btn-warn" name="outcome" value="failed">Failed / backed out</button>
+          </div>
+        </form>
+      {% endif %}
+      {% if change.state in (ChangeState.DRAFT, ChangeState.PENDING_APPROVAL, ChangeState.APPROVED, ChangeState.REJECTED) %}
+        <details class="small"><summary class="danger">Cancel change</summary>
+          <form method="post" action="/changes/{{ change.number }}/cancel"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>Reason <input name="reason" required></label><button class="btn btn-small btn-warn">Cancel change</button></form>
+        </details>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h3>History</h3>
+      <ul class="activity">
+        {% for a in change.activities|reverse %}
+        <li><span class="muted">{{ a.created_at.strftime('%m-%d %H:%M') }}</span> {{ a.message }}{% if a.actor %} — {{ a.actor.full_name }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </aside>
+</div>
+{% endblock %}

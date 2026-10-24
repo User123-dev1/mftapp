@@ -49,7 +49,8 @@ python seed_demo.py     # on an empty database, then: python run.py
 ```
 
 This creates agents, requesters, support groups (Desktop Support has auto-assign on), CMDB items
-and sample tickets in different states. Sign in as:
+with dependencies, sample tickets, and two change requests waiting for the manager's approval (Sam
+is a change approver). Sign in as:
 - **IT manager:** `manager@example.com` / `ChangeMe123!`
 - **Agents:** `alice.agent@example.com`, `sam.network@example.com`
 - **Requesters:** `rita@example.com`, `omar@example.com`
@@ -108,6 +109,58 @@ warranty_expires,assigned_to_email,support_group,notes
 procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), network scanners such
 as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
 registered owners).
+
+## Phase 3: Change management
+
+Some requests must go through IT change control: review, approval, a scheduled window, then
+implementation. In the app, the requests needing this are set by the **Admin → Change Policy**
+page:
+- **Request types** that always need a change (Firewall Change Request by default). This is a hard
+  rule: the ticket **cannot be resolved** until a linked change is approved and completed.
+- **Change-controlled CMDB items** (tick the box on the item, or use the `change_controlled` CSV
+  column), such as the core firewall, servers and payroll. For tickets on these items the agent must
+  either complete a change, or record **why no change was needed** (for example a user-side fix).
+  That reason is logged on the ticket for audit.
+
+### Flow
+
+```
+Ticket (e.g. firewall request) ──► agent clicks "Raise change request" (pre-filled from the ticket)
+   status: Pending Change            │
+                                     ▼
+Change CHG… Draft ──submit──► Pending approval ──approvers notified by email
+                                     │  approve (enough votes)          │ reject (reason required)
+                                     ▼                                  ▼
+                        Approved / scheduled                 Rejected ──revise──► Draft
+                  (ticket requester emailed the date)        (ticket back to the agent; requester told why)
+                                     │ start
+                                     ▼
+                              In progress ──► Completed ─► ticket back to agent, now resolvable
+                                         └──► Failed (backed out) ─► ticket back to agent
+```
+
+| Change type | Approvals | Use for |
+|-------------|-----------|---------|
+| Standard | none (pre-approved) | routine, low-risk, repeatable work |
+| Normal | 1, or 2 for **high risk** (configurable) | most changes |
+| Emergency | 1 | urgent fixes |
+
+- **Approvers:** IT managers, plus anyone ticked as *Change approver* on **Admin → Users**.
+  **Nobody can approve their own change.** Any rejection rejects the change. Resubmitting after a
+  rejection clears earlier votes. Approvers see a red counter on **Changes**, and an *Awaiting my
+  approval* tab.
+- **Each change records:** type, risk and impact, justification, implementation, backout and test
+  plans, planned window (local time), implementer and affected items. Before submitting, a normal or
+  emergency change must have the window, both plans and at least one item.
+- **Impact:** on an item's CMDB page, record what it depends on (for example *Payroll → SQL01 →
+  Core Firewall 1*). A change then lists everything downstream as *potentially impacted*.
+- **Conflicts:** changes with overlapping windows that touch the same item, or items that depend on
+  each other, are flagged on the change, in the list and on the **Schedule** tab.
+- **Schedule:** upcoming approved, pending and in-progress changes, grouped by day.
+- **History:** every step is logged on the change and on its ticket.
+
+**Before go-live:** make sure at least two people can approve changes. Otherwise a change raised by
+your only approver can't be approved by anyone.
 
 ## Phase 2: Entra device sync, auto-assignment, reports
 
@@ -316,6 +369,8 @@ app/
   cmdb_routes.py CMDB and support-group pages
   entra_sync.py  Entra ID device sync via Microsoft Graph (+ daily scheduler, CLI)
   reports.py     reporting page
+  changes.py     change management: policy, approvals, impact, conflicts
+  change_routes.py change pages, change policy, CI relationships
   web.py         shared page rendering helpers
   sso.py         OpenID Connect sign-in (Entra ID, Okta, Google...) and claim-to-user mapping
   config.py      environment settings

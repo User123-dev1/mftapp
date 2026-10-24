@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from .config import settings
 from .emailer import queue_email
@@ -229,21 +229,50 @@ STAFF_TRANSITIONS = {
     Status.ASSIGNED: {Status.IN_PROGRESS, Status.ON_HOLD, Status.RESOLVED, Status.CANCELLED},
     Status.IN_PROGRESS: {Status.ON_HOLD, Status.RESOLVED, Status.CANCELLED},
     Status.ON_HOLD: {Status.IN_PROGRESS, Status.RESOLVED, Status.CANCELLED},
+    Status.PENDING_CHANGE: {Status.IN_PROGRESS, Status.CANCELLED},
     Status.RESOLVED: {Status.IN_PROGRESS, Status.CLOSED},
     Status.CLOSED: set(),
     Status.CANCELLED: set(),
 }
 
 
+def change_block(ticket: Ticket) -> Optional[str]:
+    """Why the ticket can't be resolved yet because of change control, or None."""
+    from . import changes
+
+    reason = changes.requires_change(object_session(ticket), ticket)
+    if reason and not changes.has_completed_change(ticket):
+        if changes.change_is_mandatory(object_session(ticket), ticket):
+            return f"{reason} Raise a change request and complete it before resolving this ticket."
+        return (f"{reason} If resolving it changed the item, raise a change request; otherwise explain "
+                f"why no change was needed.")
+    return None
+
+
+def change_override_allowed(ticket: Ticket) -> bool:
+    from . import changes
+
+    return bool(change_block(ticket)) and not changes.change_is_mandatory(object_session(ticket), ticket)
+
+
 def allowed_statuses(user: User, ticket: Ticket) -> list[Status]:
     if not can_work(user, ticket):
         return []
-    return [s for s in Status if s in STAFF_TRANSITIONS[ticket.status]]
+    allowed = [s for s in Status if s in STAFF_TRANSITIONS[ticket.status]]
+    if Status.RESOLVED in allowed and change_block(ticket) and not change_override_allowed(ticket):
+        allowed.remove(Status.RESOLVED)
+    return allowed
 
 
 def change_status(
-    db: Session, ticket: Ticket, new_status: Status, actor: User, resolution_notes: str = ""
+    db: Session, ticket: Ticket, new_status: Status, actor: User, resolution_notes: str = "",
+    no_change_reason: str = "",
 ) -> None:
+    no_change_reason = (no_change_reason or "").strip()
+    if new_status == Status.RESOLVED and (block := change_block(ticket)):
+        if not (change_override_allowed(ticket) and no_change_reason):
+            raise WorkflowError(block)
+        _log(db, ticket, actor, f"Resolved without a change request: {no_change_reason}"[:500])
     if new_status not in allowed_statuses(actor, ticket):
         raise WorkflowError(f"Cannot move ticket from {ticket.status.label} to {new_status.label}.")
 

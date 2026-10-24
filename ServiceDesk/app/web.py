@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import database, sso
 from .config import settings
-from .models import Category, CIStatus, CIType, Priority, Role, Status, User
+from .models import Category, ChangeState, ChangeType, CIStatus, CIType, Priority, Role, Status, User
 from .security import csrf_token, pop_flashes
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,9 +28,11 @@ templates.env.filters["duration"] = _duration
 
 
 def render(request: Request, name: str, context: Optional[dict] = None, status_code: int = 200, user=None):
+    user = user if user is not None else _session_user(request)
     ctx = {
         "app_name": settings.app_name,
-        "user": user if user is not None else _session_user(request),
+        "user": user,
+        "my_approvals": _approval_count(user),
         "csrf_token": csrf_token(request),
         "flashes": pop_flashes(request),
         "Status": Status,
@@ -39,11 +41,25 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "Role": Role,
         "CIType": CIType,
         "CIStatus": CIStatus,
+        "ChangeState": ChangeState,
+        "ChangeType": ChangeType,
         "sso_providers": sso.providers(),
         "local_login": settings.local_login,
     }
     ctx.update(context or {})
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+
+
+def _approval_count(user: Optional[User]) -> int:
+    if user is None or not user.can_approve_changes:
+        return 0
+    from .changes import pending_for
+
+    db = database.SessionLocal()
+    try:
+        return len(pending_for(db, db.get(User, user.id)))
+    finally:
+        db.close()
 
 
 def _session_user(request: Request) -> Optional[User]:

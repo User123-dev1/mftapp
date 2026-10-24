@@ -3,7 +3,7 @@
 {% block title %}Dashboard · {{ app_name }}{% endblock %}
 {% block content %}
 <section class="stats">
-  {% for s in [Status.NEW, Status.ASSIGNED, Status.IN_PROGRESS, Status.ON_HOLD, Status.RESOLVED] %}
+  {% for s in [Status.NEW, Status.ASSIGNED, Status.IN_PROGRESS, Status.ON_HOLD, Status.PENDING_CHANGE, Status.RESOLVED] %}
   <a class="stat status-{{ s.value }}" href="/tickets?status={{ s.value }}">
     <span class="num">{{ by_status.get(s, 0) }}</span><span>{{ s.label }}</span>
   </a>

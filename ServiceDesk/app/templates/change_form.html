@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ change.number if change else 'New change' }} · {{ app_name }}{% endblock %}
+{% macro v(field) -%}{{ form.get(field) if form.get(field) is not none else ((change[field] or '') if change else '') }}{%- endmacro %}
+{% macro dt(field) -%}{% if form.get(field) %}{{ form.get(field) }}{% elif change and change[field] %}{{ change[field].strftime('%Y-%m-%dT%H:%M') }}{% endif %}{%- endmacro %}
+{% macro sel(field, value) -%}{% set cur = form.get(field) or (change[field].value if change else '') %}{{ 'selected' if cur == value }}{%- endmacro %}
+{% block content %}
+<section class="card">
+  <p class="muted small"><a href="/changes">← Changes</a></p>
+  <h1>{{ 'Edit ' ~ change.number if change else 'New change request' }}</h1>
+  {% if ticket %}<p>For ticket <a href="/tickets/{{ ticket.number }}">{{ ticket.number }}</a> — {{ ticket.title }} ({{ ticket.requester.full_name }})</p>{% endif %}
+  <form method="post" action="{{ '/changes/%s/edit' % change.number if change else '/changes/new' }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if ticket and not change %}<input type="hidden" name="ticket" value="{{ ticket.number }}">{% endif %}
+    <label>Title <input name="title" value="{{ v('title') }}" maxlength="255" required></label>
+    <label>Description <textarea name="description" rows="5" required>{{ v('description') }}</textarea></label>
+    <div class="row">
+      <label>Type
+        <select name="change_type">
+          {% for t in ChangeType %}<option value="{{ t.value }}" {{ sel('change_type', t.value) }}>{{ t.label }}</option>{% endfor %}
+        </select>
+        <span class="muted small">Standard = routine & pre-approved · Normal = needs approval · Emergency = urgent, one approval</span>
+      </label>
+      <label>Risk
+        <select name="risk">{% for l in Level %}<option value="{{ l.value }}" {{ sel('risk', l.value) }}>{{ l.label }}</option>{% endfor %}</select>
+        <span class="muted small">High risk needs more approvals.</span>
+      </label>
+      <label>Impact
+        <select name="impact">{% for l in Level %}<option value="{{ l.value }}" {{ sel('impact', l.value) }}>{{ l.label }}</option>{% endfor %}</select>
+      </label>
+      <label>Implementer
+        <select name="implementer_id">
+          <option value="">— choose —</option>
+          {% set cur_impl = form.get('implementer_id') or (change.implementer_id|string if change and change.implementer_id else '') %}
+          {% for s in staff %}<option value="{{ s.id }}" {{ 'selected' if cur_impl == s.id|string }}>{{ s.full_name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Planned start (local time) <input type="datetime-local" name="planned_start" value="{{ dt('planned_start') }}"></label>
+      <label>Planned end (local time) <input type="datetime-local" name="planned_end" value="{{ dt('planned_end') }}"></label>
+    </div>
+    <label>Business justification <textarea name="justification" rows="2">{{ v('justification') }}</textarea></label>
+    <label>Implementation plan <textarea name="implementation_plan" rows="4" placeholder="Step-by-step">{{ v('implementation_plan') }}</textarea></label>
+    <label>Backout plan <textarea name="backout_plan" rows="3" placeholder="How to undo it if it goes wrong">{{ v('backout_plan') }}</textarea></label>
+    <label>Test / verification plan <textarea name="test_plan" rows="2">{{ v('test_plan') }}</textarea></label>
+
+    <fieldset>
+      <legend>Affected items</legend>
+      <input type="search" id="item-filter" placeholder="Filter items…" class="ci-filter">
+      <div class="item-list">
+        {% for ci in all_items %}
+        <label class="check item" data-text="{{ (ci.display_name ~ ' ' ~ ci.ci_type.label)|lower }}">
+          <input type="checkbox" name="item_ids" value="{{ ci.id }}" {% if ci.id in selected_items %}checked{% endif %}>
+          {{ ci.display_name }} <span class="muted small">{{ ci.ci_type.label }}{% if ci.change_controlled %} · change-controlled{% endif %}</span>
+        </label>
+        {% else %}<p class="muted">No items in the CMDB yet.</p>{% endfor %}
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" name="action" value="submit">Save & submit for approval</button>
+      <button class="btn btn-secondary" name="action" value="save">Save as draft</button>
+    </div>
+  </form>
+</section>
+<script>
+  const f = document.getElementById('item-filter');
+  f.addEventListener('input', () => {
+    const q = f.value.toLowerCase();
+    document.querySelectorAll('.item-list .item').forEach(el => el.hidden = !el.dataset.text.includes(q));
+  });
+</script>
+{% endblock %}

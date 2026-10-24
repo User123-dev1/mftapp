@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Changes · {{ app_name }}{% endblock %}
+{% macro state_badge(c) %}<span class="badge chg-{{ c.state.value }}">{{ c.state.label }}</span>{% endmacro %}
+{% block content %}
+<section class="card">
+  <div class="ticket-head">
+    <h1>Change requests</h1>
+    <a class="btn btn-small" href="/changes/new">+ New change</a>
+  </div>
+  <nav class="tabs">
+    {% for key, label in [('active', 'Active'), ('approvals', 'Awaiting my approval'), ('schedule', 'Schedule'), ('mine', 'Mine'), ('all', 'All')] %}
+    <a href="/changes?view={{ key }}" class="{{ 'on' if view == key }}">{{ label }}{% if key == 'approvals' and my_approvals %} <span class="count">{{ my_approvals }}</span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  {% if view not in ('approvals', 'schedule') %}
+  <form method="get" action="/changes" class="filters">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input name="q" placeholder="Number or title" value="{{ q }}">
+    <button class="btn btn-small">Search</button>
+  </form>
+  {% endif %}
+
+  {% if view == 'schedule' %}
+    <p class="muted small">Approved, in-progress and pending changes, in planned order. Times are local.</p>
+    {% for day, items in by_day.items() %}
+    <h3 class="day">{{ day.strftime('%A %d %B %Y') if day else 'Not scheduled' }}</h3>
+    <table class="grid compact">
+      {% for c in items %}
+      <tr>
+        <td class="nowrap">{{ c.planned_start.strftime('%H:%M') }}–{{ c.planned_end.strftime('%H:%M' if c.planned_end.date() == c.planned_start.date() else '%m-%d %H:%M') }}</td>
+        <td><a href="/changes/{{ c.number }}">{{ c.number }}</a> {{ c.title }}
+          {% if conflicts.get(c.id) %}<span class="badge prio-critical" title="{% for x in conflicts[c.id] %}{{ x.change.number }}: {{ x.reason }}{{ '; ' if not loop.last }}{% endfor %}">conflict</span>{% endif %}</td>
+        <td>{{ c.items|map(attribute='name')|join(', ') }}</td>
+        <td>{{ c.implementer.full_name if c.implementer else '' }}</td>
+        <td>{{ state_badge(c) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Nothing scheduled.</p>{% endfor %}
+  {% elif changes %}
+  <table class="grid">
+    <thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Risk</th><th>Planned</th><th>Requested by</th><th>State</th></tr></thead>
+    <tbody>
+    {% for c in changes %}
+    <tr>
+      <td><a href="/changes/{{ c.number }}">{{ c.number }}</a></td>
+      <td>{{ c.title }}{% if c.ticket %}<br><span class="muted small">from {{ c.ticket.number }}</span>{% endif %}
+        {% if conflicts.get(c.id) %}<span class="badge prio-critical">conflict</span>{% endif %}</td>
+      <td>{{ c.change_type.label }}</td>
+      <td><span class="badge lvl-{{ c.risk.value }}">{{ c.risk.label }}</span></td>
+      <td class="nowrap">{{ c.planned_start.strftime('%Y-%m-%d %H:%M') if c.planned_start else '—' }}</td>
+      <td>{{ c.requested_by.full_name }}</td>
+      <td>{{ state_badge(c) }}{% if c.state == ChangeState.PENDING_APPROVAL %}<br><span class="muted small">{{ c.approve_count }}/{{ c.approvals_required }} approvals</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">{% if view == 'approvals' %}Nothing is waiting for your approval.{% else %}No changes.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

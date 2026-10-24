@@ -35,10 +35,15 @@ def init_db() -> None:
 
 # Columns added after the first release; create_all() does not alter existing tables.
 _NEW_COLUMNS = {
-    "users": {"sso_provider": "VARCHAR(50)", "sso_subject": "VARCHAR(255)"},
+    "users": {
+        "sso_provider": "VARCHAR(50)",
+        "sso_subject": "VARCHAR(255)",
+        "is_change_approver": "BOOLEAN NOT NULL DEFAULT 0",
+    },
     "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},
     "support_groups": {"auto_assign": "BOOLEAN NOT NULL DEFAULT 0"},
     "config_items": {
+        "change_controlled": "BOOLEAN NOT NULL DEFAULT 0",
         "entra_object_id": "VARCHAR(64)",
         "entra_last_sign_in": "DATETIME",
         "entra_synced_at": "DATETIME",

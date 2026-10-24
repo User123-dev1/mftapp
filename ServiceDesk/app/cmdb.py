@@ -16,6 +16,7 @@ from .security import NO_PASSWORD
 CSV_COLUMNS = [
     "name", "type", "status", "asset_tag", "serial_number", "manufacturer", "model", "version",
     "ip_address", "location", "vendor", "warranty_expires", "assigned_to_email", "support_group", "notes",
+    "change_controlled",
 ]
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 
@@ -186,6 +187,8 @@ def _apply_row(db, row, ci_type, status, warranty, groups, allow_sso_placeholder
         ci.status = status
     if warranty:
         ci.warranty_expires = warranty
+    if row.get("change_controlled"):
+        ci.change_controlled = row["change_controlled"].strip().lower() in ("1", "true", "yes", "y")
     for attr in ("asset_tag", "serial_number", "manufacturer", "model", "version", "ip_address", "location",
                  "vendor", "notes"):
         if row.get(attr):
@@ -235,7 +238,7 @@ def export_csv(db: Session) -> str:
             ci.manufacturer or "", ci.model or "", ci.version or "", ci.ip_address or "", ci.location or "",
             ci.vendor or "", ci.warranty_expires.isoformat() if ci.warranty_expires else "",
             ci.assigned_user.email if ci.assigned_user else "", ci.support_group.name if ci.support_group else "",
-            ci.notes or "",
+            ci.notes or "", "yes" if ci.change_controlled else "",
         ])
     return out.getvalue()
 
@@ -245,9 +248,9 @@ def template_csv() -> str:
     writer = csv.writer(out)
     writer.writerow(CSV_COLUMNS)
     writer.writerow(["LT-0042", "laptop", "in_use", "LT-0042", "5CG1234XYZ", "Dell", "Latitude 7440", "Windows 11",
-                     "", "HQ Floor 2", "Dell", "2027-06-30", "jane.doe@yourco.com", "Desktop Support", ""])
+                     "", "HQ Floor 2", "Dell", "2027-06-30", "jane.doe@yourco.com", "Desktop Support", "", ""])
     writer.writerow(["Payroll (ADP)", "application", "in_use", "", "", "", "", "", "", "", "ADP", "", "",
-                     "Business Apps", "Payroll system"])
+                     "Business Apps", "Payroll system", "yes"])
     writer.writerow(["Core Firewall 1", "network", "in_use", "FW-01", "FGT60F0000", "Fortinet", "FortiGate 60F",
-                     "7.2", "10.0.0.1", "Data Center", "Fortinet", "", "", "Network", ""])
+                     "7.2", "10.0.0.1", "Data Center", "Fortinet", "", "", "Network", "", "yes"])
     return out.getvalue()

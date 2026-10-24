@@ -8,9 +8,9 @@ from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from . import cmdb, database, entra_sync, sso
+from . import changes, cmdb, database, entra_sync, sso
 from .config import settings
-from .models import CIStatus, CIType, ConfigItem, Status, SupportGroup, Ticket, User
+from .models import ChangeRequest, CIStatus, CIType, ConfigItem, Status, SupportGroup, Ticket, User
 from .security import Forbidden, flash, require_manager, require_staff, verify_csrf
 from .web import redirect, render
 
@@ -68,6 +68,7 @@ def _apply_form(db: Session, ci: ConfigItem, form) -> Optional[str]:
     for f, v in values.items():
         setattr(ci, f, v)
     ci.assigned_user, ci.support_group = owner, group
+    ci.change_controlled = form.get("change_controlled") == "true"
     return None
 
 
@@ -155,8 +156,15 @@ def item_detail(request: Request, ci_id: int, user: User = Depends(require_staff
         raise HTTPException(status_code=404, detail="Item not found")
     users, groups = _staff_and_groups(db)
     tickets = db.scalars(select(Ticket).where(Ticket.ci_id == ci.id).order_by(Ticket.created_at.desc())).all()
-    return render(request, "cmdb_item.html", {"ci": ci, "form": {}, "users": users, "groups": groups,
-                                              "tickets": tickets}, user=user)
+    others = db.scalars(select(ConfigItem).where(ConfigItem.id != ci.id, ConfigItem.status != CIStatus.RETIRED)
+                        .order_by(ConfigItem.name)).all()
+    ci_changes = db.scalars(select(ChangeRequest).where(ChangeRequest.items.any(ConfigItem.id == ci.id))
+                            .order_by(ChangeRequest.id.desc())).all()
+    return render(request, "cmdb_item.html", {
+        "ci": ci, "form": {}, "users": users, "groups": groups, "tickets": tickets,
+        "depends_on": changes.depends_on(db, ci), "used_by": changes.used_by(db, ci),
+        "other_items": others, "changes_for_ci": ci_changes,
+    }, user=user)
 
 
 @router.post("/cmdb/{ci_id:int}")

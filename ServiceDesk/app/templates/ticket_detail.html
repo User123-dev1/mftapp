@@ -102,6 +102,28 @@
     </div>
     {% endif %}
 
+    {% if change_reason or ticket.changes %}
+    <div class="card change-panel">
+      <h3>Change control</h3>
+      {% if user.is_staff %}
+        {% if change_block %}<p class="small">⚠ {{ change_block }}</p>
+        {% elif change_reason %}<p class="small">✓ Change completed - this ticket can be resolved.</p>{% endif %}
+      {% else %}
+        <p class="small">This request goes through IT change review and approval before it is carried out.</p>
+      {% endif %}
+      {% for c in ticket.changes %}
+      <div class="chg-row">
+        {% if user.is_staff %}<a href="/changes/{{ c.number }}">{{ c.number }}</a>{% else %}<strong>{{ c.number }}</strong>{% endif %}
+        <span class="badge chg-{{ c.state.value }}">{{ c.state.label }}</span>
+        {% if c.planned_start and c.state.value in ('approved', 'in_progress', 'pending_approval') %}<br><span class="muted small">Planned {{ c.planned_start.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+      </div>
+      {% endfor %}
+      {% if user.is_staff and ticket.status.is_open and (can_work or user.role == Role.MANAGER) and not (ticket.changes|selectattr('state.is_active')|list) %}
+      <a class="btn btn-small" href="/changes/new?ticket={{ ticket.number }}">Raise change request</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if user.role == Role.MANAGER and ticket.status.is_open %}
     <div class="card">
       <h3>{% if ticket.assignee %}Reassign{% else %}Assign{% endif %}</h3>
@@ -137,8 +159,14 @@
           <option value="" selected disabled>— choose new status —</option>
           {% for s in next_statuses %}<option value="{{ s.value }}">{{ s.label }}</option>{% endfor %}
         </select>
-        <label id="resolution-box">Resolution notes (emailed to requester)
-          <textarea name="resolution_notes" rows="4"></textarea></label>
+        <div id="resolution-box">
+          <label>Resolution notes (emailed to requester)
+            <textarea name="resolution_notes" rows="4"></textarea></label>
+          {% if change_override %}
+          <label>No change was needed because… <span class="muted small">(required here - {{ ticket.ci.name }} is change-controlled; logged for audit)</span>
+            <textarea name="no_change_reason" rows="2" placeholder="e.g. user-side browser issue, the system itself was not modified"></textarea></label>
+          {% endif %}
+        </div>
         <button class="btn btn-small">Save</button>
       </form>
       <script>

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Change policy · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Change policy</h1>
+  <p class="muted">Tickets covered by this policy can't be resolved until a linked change request has been approved and completed.</p>
+  <form method="post" action="/admin/change-settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>Request types that always need a change</h3>
+    <div class="members">
+      {% for c in Category %}
+      <label><input type="checkbox" name="categories" value="{{ c.value }}" {% if c in policy.categories %}checked{% endif %}> {{ c.label.split(' (')[0] }}</label>
+      {% endfor %}
+    </div>
+    <h3>Approvals required</h3>
+    <div class="row">
+      <label>Normal change, low/medium risk <input type="number" name="approvals_normal" min="1" max="10" value="{{ policy.approvals_normal }}"></label>
+      <label>Normal change, high risk <input type="number" name="approvals_high_risk" min="1" max="10" value="{{ policy.approvals_high_risk }}"></label>
+    </div>
+    <p class="muted small">Standard changes are pre-approved; emergency changes need one approval. Nobody can approve a change they requested.</p>
+    <button class="btn">Save policy</button>
+  </form>
+</section>
+<div class="layout two">
+  <section class="card">
+    <h2>Change approvers ({{ approvers|length }})</h2>
+    <ul class="rels">{% for u in approvers %}<li>{{ u.full_name }} <span class="muted small">{{ u.role.label }}</span></li>{% endfor %}</ul>
+    <p class="muted small">IT managers can always approve. Tick <em>Change approver</em> for others on the <a href="/admin/users">Users</a> page.
+      {% if approvers|length < 2 %}<br><strong class="danger">With fewer than 2 approvers, a change raised by an approver can't be approved by anyone else.</strong>{% endif %}</p>
+  </section>
+  <section class="card">
+    <h2>Change-controlled items ({{ controlled|length }})</h2>
+    <ul class="rels">{% for ci in controlled %}<li><a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a> <span class="muted small">{{ ci.ci_type.label }}</span></li>{% else %}<li class="muted">None yet.</li>{% endfor %}</ul>
+    <p class="muted small">Tick <em>Change-controlled</em> on an item in the CMDB, or use the <code>change_controlled</code> CSV column.</p>
+  </section>
+</div>
+{% endblock %}
