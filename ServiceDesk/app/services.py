@@ -131,13 +131,24 @@ def create_ticket(
     ticket.number = f"{prefix}{1000000 + ticket.id}"
     _log(db, ticket, requester, "Ticket submitted")
 
-    # Route to IT managers for triage / assignment.
+    auto_agent = None
+    if ci is not None and ci.support_group is not None and ci.support_group.auto_assign:
+        auto_agent = cmdb.suggested_assignee(ticket, cmdb.open_ticket_counts(db))
+
+    # Route to IT managers for triage / assignment (FYI only when auto-assigned).
     for manager in active_users_with_role(db, Role.MANAGER):
+        if auto_agent:
+            subject = f"[{ticket.number}] New {ticket.category.label} auto-assigned to {auto_agent.full_name}"
+            intro = (f"A new ticket was automatically assigned to {auto_agent.full_name} "
+                     f"({ci.support_group.name}). No action is needed unless you want to reassign it.")
+        else:
+            subject = f"[{ticket.number}] New {ticket.category.label} awaiting assignment: {ticket.title}"
+            intro = "A new ticket has been submitted and needs to be assigned."
         queue_email(
             db,
             manager.email,
-            f"[{ticket.number}] New {ticket.category.label} awaiting assignment: {ticket.title}",
-            f"Hello {manager.full_name},\n\nA new ticket has been submitted and needs to be assigned.\n\n"
+            subject,
+            f"Hello {manager.full_name},\n\n{intro}\n\n"
             f"{_summary(ticket)}\n\nDescription:\n{ticket.description}{_signature()}",
             ticket.id,
         )
@@ -150,12 +161,19 @@ def create_ticket(
         f"to a service desk technician shortly.\n\n{_summary(ticket)}{_signature()}",
         ticket.id,
     )
+    if auto_agent:
+        _assign(db, ticket, auto_agent, None)
     return ticket
 
 
 def assign_ticket(db: Session, ticket: Ticket, agent: User, manager: User) -> None:
     if manager.role != Role.MANAGER:
         raise WorkflowError("Only an IT manager can assign tickets.")
+    _assign(db, ticket, agent, manager)
+
+
+def _assign(db: Session, ticket: Ticket, agent: User, manager: Optional[User]) -> None:
+    """Assign to agent; manager is None for automatic assignment."""
     if not agent.is_staff or not agent.is_active:
         raise WorkflowError("Tickets can only be assigned to active service desk staff.")
     if not ticket.status.is_open:
@@ -169,16 +187,22 @@ def assign_ticket(db: Session, ticket: Ticket, agent: User, manager: User) -> No
     ticket.assigned_at = utcnow()
     if ticket.status == Status.NEW:
         ticket.status = Status.ASSIGNED
-    if previous:
+    if manager is None:
+        _log(db, ticket, None, f"Auto-assigned to {agent.full_name} ({ticket.ci.support_group.name})")
+    elif previous:
         _log(db, ticket, manager, f"Reassigned from {previous.full_name} to {agent.full_name}")
     else:
         _log(db, ticket, manager, f"Assigned to {agent.full_name}")
 
+    by = f"{manager.full_name} has assigned you a ticket." if manager else (
+        f"A ticket for {ticket.ci.display_name} was automatically assigned to you "
+        f"({ticket.ci.support_group.name} support group)."
+    )
     queue_email(
         db,
         agent.email,
         f"[{ticket.number}] Assigned to you: {ticket.title}",
-        f"Hello {agent.full_name},\n\n{manager.full_name} has assigned you a ticket.\n\n"
+        f"Hello {agent.full_name},\n\n{by}\n\n"
         f"{_summary(ticket)}\n\nDescription:\n{ticket.description}{_signature()}",
         ticket.id,
     )
@@ -194,7 +218,10 @@ def assign_ticket(db: Session, ticket: Ticket, agent: User, manager: User) -> No
 
 def can_work(user: User, ticket: Ticket) -> bool:
     """Managers can work any ticket; agents only tickets assigned to them."""
-    return user.role == Role.MANAGER or (user.role == Role.AGENT and ticket.assignee_id == user.id)
+    # Compare the related object, not assignee_id, which is stale until the session flushes.
+    return user.role == Role.MANAGER or (
+        user.role == Role.AGENT and ticket.assignee is not None and ticket.assignee.id == user.id
+    )
 
 
 STAFF_TRANSITIONS = {
@@ -287,7 +314,7 @@ def requester_reopen(db: Session, ticket: Ticket, requester: User, reason: str) 
     reason = reason.strip()
     if not reason:
         raise WorkflowError("Please say why the ticket should be reopened.")
-    ticket.status = Status.IN_PROGRESS if ticket.assignee_id else Status.NEW
+    ticket.status = Status.IN_PROGRESS if ticket.assignee is not None else Status.NEW
     ticket.resolved_at = None
     db.add(Comment(ticket=ticket, author=requester, body=f"Reopened: {reason}", internal=False))
     _log(db, ticket, requester, "Reopened by requester")

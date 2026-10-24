@@ -11,6 +11,7 @@
       <label>Name <input name="name" value="{{ g.name }}" required></label>
       <label>Description <input name="description" value="{{ g.description or '' }}"></label>
     </div>
+    {% if g.auto_assign %}<span class="badge status-resolved">Auto-assign on</span>{% endif %}
     <strong>Members</strong> <span class="muted small">· <a href="/cmdb?group={{ g.id }}">{{ item_counts.get(g.id, 0) }} items</a></span>
     <div class="members">
       {% set ids = g.members|map(attribute='id')|list %}
@@ -18,6 +19,8 @@
       <label><input type="checkbox" name="member_ids" value="{{ s.id }}" {% if s.id in ids %}checked{% endif %}> {{ s.full_name }}</label>
       {% endfor %}
     </div>
+    <label class="check"><input type="checkbox" name="auto_assign" value="true" {% if g.auto_assign %}checked{% endif %}>
+      Auto-assign new tickets for this group's items to the least-busy member</label>
     <button class="btn btn-small">Save</button>
   </form>
   {% else %}

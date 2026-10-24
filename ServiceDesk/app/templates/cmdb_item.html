@@ -48,6 +48,11 @@
     </div>
     <button class="btn">{{ 'Save' if ci else 'Add item' }}</button>
     {% if ci %}<span class="muted small">Last updated {{ ci.updated_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>{% endif %}
+    {% if ci and ci.entra_object_id %}
+    <p class="muted small">Synced from Entra ID{% if ci.entra_synced_at %} · last sync {{ ci.entra_synced_at.strftime('%Y-%m-%d %H:%M') }} UTC{% endif %}
+      {% if ci.entra_last_sign_in %} · last device sign-in {{ ci.entra_last_sign_in.strftime('%Y-%m-%d') }}{% endif %}.
+      Name, OS and owner are refreshed by the sync; your other edits are kept.</p>
+    {% endif %}
   </form>
 </section>
 {% if ci %}

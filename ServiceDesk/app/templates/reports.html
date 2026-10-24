@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Reports · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="ticket-head">
+    <h1>Reports</h1>
+    <form method="get" action="/reports" class="filters">
+      <select name="days" onchange="this.form.submit()">
+        {% for d, label in periods.items() %}<option value="{{ d }}" {% if r.days == d %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="stats">
+    <div class="stat"><span class="num">{{ r.totals.created }}</span><span>Tickets opened</span></div>
+    <div class="stat"><span class="num">{{ r.totals.resolved }}</span><span>Resolved</span></div>
+    <div class="stat"><span class="num">{{ r.totals.open }}</span><span>Still open</span></div>
+    <div class="stat"><span class="num">{{ r.totals.incidents }}</span><span>Incidents</span></div>
+    <div class="stat"><span class="num">{{ r.totals.avg_hours|duration }}</span><span>Avg time to resolve</span></div>
+  </div>
+  <p class="muted small">Covers tickets opened in the period. {{ r.totals.with_item }} of {{ r.totals.created }} named an affected item.</p>
+</section>
+
+<section class="card">
+  <h2>Items with the most tickets</h2>
+  <p class="muted small">Repeat offenders: candidates for replacement, a fix, or problem investigation.</p>
+  {% if r.top_items %}
+  <table class="grid">
+    <thead><tr><th>Item</th><th>Type</th><th>Owner / group</th><th>Tickets</th><th>Incidents</th><th>Open</th><th>Warranty</th></tr></thead>
+    <tbody>
+    {% for row in r.top_items %}{% set ci = row.ci %}
+    <tr>
+      <td><a href="/cmdb/{{ ci.id }}#tickets">{{ ci.display_name }}</a></td>
+      <td>{{ ci.ci_type.label }}</td>
+      <td>{{ ci.assigned_user.full_name if ci.assigned_user else (ci.support_group.name if ci.support_group else '') }}</td>
+      <td><strong>{{ row.count }}</strong></td>
+      <td>{{ row.incidents }}</td>
+      <td>{{ row.open }}</td>
+      <td class="{{ 'danger' if ci.warranty_expired }}">{{ ci.warranty_expires or '' }}{% if ci.warranty_expired %} (expired){% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No tickets named an item in this period.</p>{% endif %}
+</section>
+
+<div class="layout two">
+  <section class="card">
+    <h2>By category</h2>
+    <table class="grid compact">
+      <thead><tr><th>Category</th><th>Tickets</th><th>Open</th><th>Avg resolve</th></tr></thead>
+      {% for row in r.by_category %}
+      <tr><td><a href="/tickets?status=all&category={{ row.value }}">{{ row.label }}</a></td><td>{{ row.count }}</td><td>{{ row.open }}</td><td>{{ row.avg_hours|duration }}</td></tr>
+      {% else %}<tr><td class="muted" colspan="4">No tickets.</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>By priority</h2>
+    <table class="grid compact">
+      <thead><tr><th>Priority</th><th>Tickets</th><th>Avg resolve</th></tr></thead>
+      {% for row in r.by_priority %}
+      <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.avg_hours|duration }}</td></tr>
+      {% else %}<tr><td class="muted" colspan="3">No tickets.</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>By support group</h2>
+    <table class="grid compact">
+      <thead><tr><th>Group</th><th>Tickets</th><th>Open</th><th>Avg resolve</th></tr></thead>
+      {% for row in r.by_group %}
+      <tr><td>{{ row.name }}</td><td>{{ row.count }}</td><td>{{ row.open }}</td><td>{{ row.avg_hours|duration }}</td></tr>
+      {% else %}<tr><td class="muted" colspan="4">No tickets.</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>Team</h2>
+    <table class="grid compact">
+      <thead><tr><th>Agent</th><th>Resolved</th><th>Open now</th><th>Avg resolve</th></tr></thead>
+      {% for row in r.by_agent %}
+      <tr><td><a href="/tickets?assignee={{ row.user.id }}">{{ row.user.full_name }}</a></td><td>{{ row.resolved }}</td><td>{{ row.open }}</td><td>{{ row.avg_hours|duration }}</td></tr>
+      {% else %}<tr><td class="muted" colspan="4">No assigned tickets.</td></tr>{% endfor %}
+    </table>
+  </section>
+</div>
+
+<div class="layout two">
+  <section class="card">
+    <h2>Warranty expired or ending within {{ warranty_days }} days</h2>
+    <table class="grid compact">
+      {% for ci in r.warranty %}
+      <tr><td><a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a></td><td>{{ ci.assigned_user.full_name if ci.assigned_user else '' }}</td>
+        <td class="{{ 'danger' if ci.warranty_expired }}">{{ ci.warranty_expires }}{% if ci.warranty_expired %} (expired){% endif %}</td></tr>
+      {% else %}<tr><td class="muted">Nothing due.</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>Devices not seen in Entra for {{ stale_days }}+ days</h2>
+    <table class="grid compact">
+      {% for ci in r.stale %}
+      <tr><td><a href="/cmdb/{{ ci.id }}">{{ ci.display_name }}</a></td><td>{{ ci.assigned_user.full_name if ci.assigned_user else '' }}</td>
+        <td>last sign-in {{ ci.entra_last_sign_in.strftime('%Y-%m-%d') }}</td></tr>
+      {% else %}<tr><td class="muted">None{% if not r.stale %} (or Entra sync not in use){% endif %}.</td></tr>{% endfor %}
+    </table>
+  </section>
+</div>
+{% endblock %}

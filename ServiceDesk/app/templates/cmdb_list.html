@@ -8,6 +8,7 @@
       <a class="btn btn-small" href="/cmdb/new">+ Add item</a>
       {% if user.role == Role.MANAGER %}<a href="/cmdb/import">Import CSV</a>{% endif %}
       <a href="/cmdb/export.csv">Export CSV</a>
+      {% if user.role == Role.MANAGER %}<a href="/cmdb/sync">Entra sync</a>{% endif %}
     </div>
   </div>
   <form method="get" action="/cmdb" class="filters">
@@ -34,7 +35,7 @@
     <tbody>
     {% for ci in items %}
     <tr>
-      <td><a href="/cmdb/{{ ci.id }}">{{ ci.name }}</a></td>
+      <td><a href="/cmdb/{{ ci.id }}">{{ ci.name }}</a>{% if ci.entra_object_id %} <span class="badge" title="Synced from Entra ID">Entra</span>{% endif %}</td>
       <td>{{ ci.ci_type.label }}</td>
       <td>{{ ci.asset_tag or '' }}</td>
       <td>{{ ci.manufacturer or '' }} {{ ci.model or '' }}</td>

@@ -1,5 +1,6 @@
 """Shared helpers for rendering pages."""
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,16 @@ from .security import csrf_token, pop_flashes
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.filters["fromjson"] = json.loads
+
+
+def _duration(hours) -> str:
+    if hours is None:
+        return "—"
+    return f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.1f} d"
+
+
+templates.env.filters["duration"] = _duration
 
 
 def render(request: Request, name: str, context: Optional[dict] = None, status_code: int = 200, user=None):

@@ -73,7 +73,8 @@
         <dt>Requester</dt><dd>{{ ticket.requester.full_name }}<br><span class="muted">{{ ticket.requester.email }}</span>
           {% if ticket.requester.department %}<br><span class="muted">{{ ticket.requester.department }}</span>{% endif %}</dd>
         <dt>Assigned to</dt><dd>{{ ticket.assignee.full_name if ticket.assignee else 'Awaiting IT manager' }}</dd>
-        {% if ticket.assigned_by %}<dt>Assigned by</dt><dd>{{ ticket.assigned_by.full_name }}</dd>{% endif %}
+        {% if ticket.assigned_by %}<dt>Assigned by</dt><dd>{{ ticket.assigned_by.full_name }}</dd>
+        {% elif ticket.assignee %}<dt>Assigned by</dt><dd>Auto-assignment</dd>{% endif %}
         <dt>Opened</dt><dd>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
         {% if ticket.resolved_at %}<dt>Resolved</dt><dd>{{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>{% endif %}
       </dl>

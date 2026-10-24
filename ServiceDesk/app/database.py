@@ -37,6 +37,18 @@ def init_db() -> None:
 _NEW_COLUMNS = {
     "users": {"sso_provider": "VARCHAR(50)", "sso_subject": "VARCHAR(255)"},
     "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},
+    "support_groups": {"auto_assign": "BOOLEAN NOT NULL DEFAULT 0"},
+    "config_items": {
+        "entra_object_id": "VARCHAR(64)",
+        "entra_last_sign_in": "DATETIME",
+        "entra_synced_at": "DATETIME",
+    },
+}
+
+
+# SQLite can't add a UNIQUE column to an existing table, so enforce it with an index.
+_NEW_UNIQUE_INDEXES = {
+    "uq_config_items_entra_object_id": ("config_items", "entra_object_id"),
 }
 
 
@@ -48,6 +60,8 @@ def _add_missing_columns() -> None:
             for name, ddl in columns.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+        for index, (table, column) in _NEW_UNIQUE_INDEXES.items():
+            conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
 
 
 def get_db():

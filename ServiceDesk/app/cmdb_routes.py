@@ -3,12 +3,13 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from . import cmdb, database, sso
+from . import cmdb, database, entra_sync, sso
+from .config import settings
 from .models import CIStatus, CIType, ConfigItem, Status, SupportGroup, Ticket, User
 from .security import Forbidden, flash, require_manager, require_staff, verify_csrf
 from .web import redirect, render
@@ -259,6 +260,35 @@ async def update_group(request: Request, group_id: int, user: User = Depends(req
     group.name = name
     group.description = str(form.get("description", "")).strip() or None
     group.members = list(members)
+    group.auto_assign = form.get("auto_assign") == "true"
+    if group.auto_assign and not members:
+        flash(request, f"{group.name} has no members, so nothing will be auto-assigned yet.", "info")
     db.commit()
     flash(request, f"Saved {group.name}.")
     return redirect("/admin/groups")
+
+
+# --- Entra device sync ------------------------------------------------------------
+
+@router.get("/cmdb/sync", response_class=HTMLResponse)
+def sync_page(request: Request, user: User = Depends(require_manager), db: Session = Depends(database.get_db)):
+    runs = entra_sync.last_runs(db)
+    synced = db.scalar(select(func.count()).select_from(ConfigItem).where(ConfigItem.entra_object_id.is_not(None)))
+    return render(request, "cmdb_sync.html", {
+        "runs": runs,
+        "running": any(r.status == "running" for r in runs),
+        "configured": entra_sync.is_configured(),
+        "synced_count": synced,
+        "settings": settings,
+    }, user=user)
+
+
+@router.post("/cmdb/sync")
+def sync_now(request: Request, background: BackgroundTasks, user: User = Depends(require_manager),
+             _: None = Depends(verify_csrf)):
+    if not entra_sync.is_configured():
+        flash(request, "Entra sync is not configured. See the setup steps below.", "error")
+    else:
+        background.add_task(entra_sync.run_sync, "manual")
+        flash(request, "Sync started. This page refreshes until it finishes.")
+    return redirect("/cmdb/sync")

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import cmdb, cmdb_routes, database, services, sso
+from . import cmdb, cmdb_routes, database, entra_sync, reports, services, sso
 from .config import settings
 from .emailer import deliver_pending
 from .models import Category, CIStatus, CIType, ConfigItem, EmailLog, Priority, Role, Status, Ticket, User
@@ -68,13 +68,20 @@ async def lifespan(app: FastAPI):
     database.init_db()
     ensure_admin()
     sso.reset()
+    scheduler = None
+    if settings.entra_sync_enabled and entra_sync.is_configured():
+        scheduler = entra_sync.DailyScheduler()
+        scheduler.start()
     yield
+    if scheduler:
+        scheduler.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", max_age=60 * 60 * 12)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(cmdb_routes.router)
+app.include_router(reports.router)
 
 
 @app.exception_handler(LoginRequired)

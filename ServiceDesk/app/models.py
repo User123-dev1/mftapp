@@ -168,6 +168,8 @@ class SupportGroup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Assign new tickets for this group's items to the least-busy member automatically.
+    auto_assign: Mapped[bool] = mapped_column(Boolean, default=False)
 
     members: Mapped[list[User]] = relationship(secondary=support_group_members, order_by=User.full_name)
 
@@ -191,6 +193,11 @@ class ConfigItem(Base):
     vendor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     warranty_expires: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Set for devices synced from Entra ID (the device's directory object ID).
+    entra_object_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    entra_last_sign_in: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    entra_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     assigned_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     support_group_id: Mapped[Optional[int]] = mapped_column(ForeignKey("support_groups.id"), nullable=True)
@@ -291,3 +298,18 @@ class EmailLog(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class SyncRun(Base):
+    """One run of an external inventory sync (e.g. Entra devices)."""
+
+    __tablename__ = "sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(50))
+    trigger: Mapped[str] = mapped_column(String(20))  # schedule | manual | cli
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running | success | failed
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

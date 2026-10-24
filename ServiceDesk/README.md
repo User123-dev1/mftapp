@@ -42,6 +42,21 @@ On first start an IT Manager account is created: **manager@example.com / ChangeM
 name (top right), then go to **Users** to add service desk agents. Requesters register themselves
 at `/register`.
 
+### Fastest way to try everything: demo data
+
+```bash
+python seed_demo.py     # on an empty database, then: python run.py
+```
+
+This creates agents, requesters, support groups (Desktop Support has auto-assign on), CMDB items
+and sample tickets in different states. Sign in as:
+- **IT manager:** `manager@example.com` / `ChangeMe123!`
+- **Agents:** `alice.agent@example.com`, `sam.network@example.com`
+- **Requesters:** `rita@example.com`, `omar@example.com`
+
+All demo accounts except the manager use the password `Password1!`. To start over, delete
+`servicedesk.db`.
+
 ### Quick test of the full flow
 1. Sign in as the manager → **Users** → add an agent.
 2. In a private/incognito window, register as a requester and submit a ticket.
@@ -93,6 +108,72 @@ warranty_expires,assigned_to_email,support_group,notes
 procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), network scanners such
 as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
 registered owners).
+
+## Phase 2: Entra device sync, auto-assignment, reports
+
+### Entra ID device sync (no Intune required)
+
+This sync reads your Entra-joined and hybrid-joined devices, with their **registered owners**,
+from Microsoft Graph into the CMDB. Each person's laptop and phone then appear under their
+*My devices* without anyone typing them in.
+
+**Setup** (you can reuse the SSO app registration):
+1. **App registrations → your app → API permissions → Add a permission → Microsoft Graph →
+   Application permissions**: `Device.Read.All` and `User.Read.All`. Then click **Grant admin
+   consent**.
+2. Make sure `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` and `ENTRA_CLIENT_SECRET` are set.
+3. Go to **CMDB → Entra sync → Sync now**, check the result, then turn on the daily run with
+   `ENTRA_SYNC_ENABLED=true`.
+
+**What it changes on each run:**
+- **Updated:** name, OS/version, last sign-in and owner.
+- **Filled only when empty:** manufacturer and model.
+- **Never touched:** asset tag, location, support group, warranty and notes.
+- A device whose name matches an item you imported by CSV is **linked** to it, not duplicated.
+- Devices disabled in Entra become *In Maintenance*.
+- Personal (BYOD) devices are skipped unless you opt in.
+- Devices deleted from Entra are reported. They are only marked Retired if you turn that on.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ENTRA_SYNC_ENABLED` | `false` | Run the sync daily inside the web app |
+| `ENTRA_SYNC_HOUR` | `2` | Hour of the daily run (UTC) |
+| `ENTRA_SYNC_INCLUDE_REGISTERED` | `false` | Also sync personal "registered" devices |
+| `ENTRA_SYNC_RETIRE_MISSING` | `false` | Retire items whose device was deleted from Entra |
+| `ENTRA_SYNC_DEFAULT_TYPE` | `laptop` | Type for new Windows/macOS devices (Entra can't tell laptop from desktop). Phones become *mobile*, servers *server* |
+| `GRAPH_BASE_URL` | `https://graph.microsoft.com` | `https://graph.microsoft.us` for US Government |
+
+If you run several web worker processes, leave `ENTRA_SYNC_ENABLED` off and schedule the
+command-line sync instead, so it runs once:
+
+```bash
+python -m app.entra_sync          # cron: 0 2 * * *   |  Windows Task Scheduler: daily
+```
+
+Every run (scheduled, button or command line) is logged on the **Entra sync** page with its counts,
+warnings or error.
+
+**What Intune would add later:** Entra device objects often have no serial number, and Entra has no
+warranty data or installed-software list. If you adopt Intune, its *managed devices* add those. Until
+then, keep serial numbers and warranty dates in the CSV import; the sync won't overwrite them.
+
+### Auto-assignment per support group
+
+Under **Groups**, tick *Auto-assign new tickets…* on a group. New tickets for that group's items
+then go straight to the least-busy member. The agent and requester are emailed, and managers get an
+FYI ("auto-assigned to …") instead of "awaiting assignment". Tickets with no item, or for groups
+with auto-assign off, still wait for the IT manager. A group with no members falls back to manual.
+Start with one well-staffed group, such as Desktop Support, and expand once you trust it.
+
+### Reports
+
+**Reports** in the menu (agents and managers), for the last 7/30/90/365 days:
+- Totals and average time to resolve.
+- **Items with the most tickets**: repeat offenders, with incident count and warranty status.
+- Volume and resolution time by category, priority and support group.
+- Team: resolved, open now and average resolve time per agent.
+- Devices whose **warranty** expired or ends within 90 days.
+- Devices not seen in Entra for 90+ days (candidates for clean-up).
 
 ## Single sign-on (SSO)
 
@@ -233,6 +314,8 @@ app/
   security.py    password hashing, sessions, CSRF, role checks
   cmdb.py        CMDB rules: item choices, assignee suggestion, CSV import/export
   cmdb_routes.py CMDB and support-group pages
+  entra_sync.py  Entra ID device sync via Microsoft Graph (+ daily scheduler, CLI)
+  reports.py     reporting page
   web.py         shared page rendering helpers
   sso.py         OpenID Connect sign-in (Entra ID, Okta, Google...) and claim-to-user mapping
   config.py      environment settings

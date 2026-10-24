@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Entra sync · {{ app_name }}{% endblock %}
+{% block content %}
+{% if running %}<meta http-equiv="refresh" content="3">{% endif %}
+<section class="card">
+  <p class="muted small"><a href="/cmdb">← CMDB</a></p>
+  <div class="ticket-head">
+    <h1>Entra ID device sync</h1>
+    {% if configured %}
+    <form method="post" action="/cmdb/sync" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn" {% if running %}disabled{% endif %}>{{ 'Syncing…' if running else 'Sync now' }}</button>
+    </form>
+    {% endif %}
+  </div>
+  <dl class="kv">
+    <dt>Status</dt><dd>{% if not configured %}<span class="danger">Not configured</span>{% elif settings.entra_sync_enabled %}Daily at {{ '%02d' % settings.entra_sync_hour }}:00 UTC{% else %}Manual only (set <code>ENTRA_SYNC_ENABLED=true</code> for a daily run){% endif %}</dd>
+    <dt>Devices from Entra</dt><dd><a href="/cmdb">{{ synced_count }} in the CMDB</a></dd>
+    <dt>Personal (BYOD) devices</dt><dd>{{ 'Included' if settings.entra_sync_include_registered else 'Skipped' }}</dd>
+    <dt>Removed from Entra</dt><dd>{{ 'Marked Retired' if settings.entra_sync_retire_missing else 'Reported only' }}</dd>
+  </dl>
+
+  <h2>Recent runs</h2>
+  {% if runs %}
+  <table class="grid">
+    <thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Result</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ r.trigger }}</td>
+      <td><span class="badge email-{{ 'sent' if r.status == 'success' else ('failed' if r.status == 'failed' else 'pending') }}">{{ r.status }}</span></td>
+      <td>
+        {% if r.error %}<span class="danger">{{ r.error }}</span>{% endif %}
+        {% if r.summary %}{% set s = r.summary|fromjson %}{{ s.text }}
+          {% if s.warnings %}<details><summary>{{ s.warnings|length }} warning(s)</summary><ul class="warnings">{% for w in s.warnings %}<li>{{ w }}</li>{% endfor %}</ul></details>{% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No syncs yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>What the sync does</h2>
+  <ul>
+    <li>Reads Entra-joined and hybrid-joined devices from Microsoft Graph (no Intune needed).</li>
+    <li>New devices are added as configuration items; a device whose name matches an item you imported is <em>linked</em> rather than duplicated.</li>
+    <li>Name, OS/version, last sign-in and the <strong>registered owner</strong> are updated each run, so devices show up under each person's <em>My devices</em>. Manufacturer/model are only filled when blank; your other fields (asset tag, location, support group, warranty…) are never touched.</li>
+    <li>Devices disabled in Entra are marked <em>In Maintenance</em>.</li>
+  </ul>
+  {% if not configured %}
+  <h2>Setup</h2>
+  <ol>
+    <li>Use the same app registration as single sign-on (or a separate one).</li>
+    <li><strong>API permissions → Add a permission → Microsoft Graph → Application permissions</strong>: <code>Device.Read.All</code> and <code>User.Read.All</code>, then <strong>Grant admin consent</strong>.</li>
+    <li>Set <code>ENTRA_TENANT_ID</code>, <code>ENTRA_CLIENT_ID</code>, <code>ENTRA_CLIENT_SECRET</code> and restart.</li>
+  </ol>
+  {% endif %}
+</section>
+{% endblock %}

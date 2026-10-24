@@ -68,4 +68,21 @@ class Settings:
     sso_agent_groups: list[str] = field(default_factory=lambda: _list("SSO_AGENT_GROUPS"))
 
 
+    # --- Entra ID device sync (Microsoft Graph, app-only) ---
+    # Uses the ENTRA_* app registration above. Needs application permissions
+    # Device.Read.All and User.Read.All with admin consent.
+    entra_sync_enabled: bool = field(default_factory=lambda: _bool("ENTRA_SYNC_ENABLED", False))
+    entra_sync_hour: int = field(default_factory=lambda: int(os.getenv("ENTRA_SYNC_HOUR", "2")))  # UTC
+    # Include personal "registered" (BYOD) devices, not just Entra-joined / hybrid-joined ones.
+    entra_sync_include_registered: bool = field(
+        default_factory=lambda: _bool("ENTRA_SYNC_INCLUDE_REGISTERED", False)
+    )
+    # Mark previously synced devices as Retired when they disappear from Entra.
+    entra_sync_retire_missing: bool = field(default_factory=lambda: _bool("ENTRA_SYNC_RETIRE_MISSING", False))
+    # Entra can't tell laptops from desktops; new Windows/macOS/Linux devices get this type.
+    entra_sync_default_type: str = field(default_factory=lambda: os.getenv("ENTRA_SYNC_DEFAULT_TYPE", "laptop"))
+    # e.g. https://graph.microsoft.us for US Government.
+    graph_base_url: str = field(default_factory=lambda: os.getenv("GRAPH_BASE_URL", "https://graph.microsoft.com"))
+
+
 settings = Settings()
