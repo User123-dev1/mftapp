@@ -1,0 +1,82 @@
+{
+  "format": "whmi-project",
+  "format_version": 1,
+  "name": "DemoLine",
+  "description": "Demo: a filling line with a Logix PLC and local I/O. Change PLC1 to driver 'logix' with your controller's IP to talk to a real ControlLogix/CompactLogix.",
+  "receiver": {
+    "name": "RX1",
+    "scan_ms": 10,
+    "heartbeat_ms": 250,
+    "watchdog_ms": 1000,
+    "slots": {"1": "DI8", "2": "DO8", "3": "AI4", "4": "AO2"}
+  },
+  "plc_connections": [
+    {"name": "PLC1", "driver": "simulator", "host": "192.168.1.10", "path": "1,0", "poll_ms": 100, "timeout_ms": 2000,
+     "heartbeat_tag": "HMI_Heartbeat", "heartbeat_ms": 500}
+  ],
+  "tags": [
+    {"name": "Line.Start_PB", "data_type": "BOOL", "source": "plc", "connection": "PLC1", "address": "HMI_Start_PB",
+     "access": "read_write", "momentary": true, "description": "Start push-button (momentary, released on link loss)"},
+    {"name": "Line.Stop_PB", "data_type": "BOOL", "source": "plc", "connection": "PLC1", "address": "HMI_Stop_PB",
+     "access": "read_write", "momentary": true, "description": "Stop push-button"},
+    {"name": "Line.Running", "data_type": "BOOL", "source": "plc", "connection": "PLC1", "address": "Line_Running"},
+    {"name": "Conveyor.Speed_SP", "data_type": "REAL", "source": "plc", "connection": "PLC1",
+     "address": "Conveyor.Speed_SP", "access": "read_write", "units": "%", "min": 0, "max": 100},
+    {"name": "Conveyor.Speed", "data_type": "REAL", "source": "plc", "connection": "PLC1",
+     "address": "Conveyor.Speed_Act", "units": "%", "deadband": 0.1},
+    {"name": "Tank.Level", "data_type": "REAL", "source": "io", "address": "Slot3.AI.0", "units": "%",
+     "deadband": 0.2, "scaling": {"raw_min": 0, "raw_max": 32000, "eng_min": 0, "eng_max": 100}},
+    {"name": "Tank.Pump_Run", "data_type": "BOOL", "source": "io", "address": "Slot2.DO.0",
+     "access": "read_write", "failsafe_value": false, "description": "Pump stops if the last HMI disconnects"},
+    {"name": "Tank.Jog_Fwd", "data_type": "BOOL", "source": "io", "address": "Slot2.DO.1",
+     "access": "read_write", "momentary": true},
+    {"name": "Tank.Valve_Cmd", "data_type": "REAL", "source": "io", "address": "Slot4.AO.0", "units": "%",
+     "access": "read_write", "min": 0, "max": 100, "failsafe_value": 0,
+     "scaling": {"raw_min": 0, "raw_max": 32000, "eng_min": 0, "eng_max": 100}},
+    {"name": "Safety.EStop_OK", "data_type": "BOOL", "source": "io", "address": "Slot1.DI.0", "safety": true,
+     "description": "E-stop circuit healthy (display only; the E-stop itself is hardwired)"},
+    {"name": "Safety.Door_Closed", "data_type": "BOOL", "source": "io", "address": "Slot1.DI.1"},
+    {"name": "Batch.Count", "data_type": "DINT", "source": "memory", "access": "read_write", "retentive": true},
+    {"name": "Batch.Operator_Note", "data_type": "STRING", "source": "memory", "access": "read_write"}
+  ],
+  "screens": [
+    {
+      "name": "Main",
+      "width": 1024,
+      "height": 600,
+      "background": "#1E1E1E",
+      "widgets": [
+        {"id": "title", "type": "label", "x": 20, "y": 10, "w": 600, "h": 40, "text": "Filling Line 1"},
+        {"id": "estop", "type": "indicator", "x": 820, "y": 10, "w": 180, "h": 40, "tag": "Safety.EStop_OK",
+         "on_text": "E-STOP OK", "off_text": "E-STOP!", "on_color": "#2E7D32", "off_color": "#C62828"},
+        {"id": "start", "type": "button", "x": 20, "y": 80, "w": 160, "h": 80, "tag": "Line.Start_PB",
+         "action": "momentary", "text": "START", "color": "#2E7D32"},
+        {"id": "stop", "type": "button", "x": 200, "y": 80, "w": 160, "h": 80, "tag": "Line.Stop_PB",
+         "action": "momentary", "text": "STOP", "color": "#C62828"},
+        {"id": "running", "type": "indicator", "x": 380, "y": 80, "w": 160, "h": 80, "tag": "Line.Running",
+         "on_text": "RUNNING", "off_text": "STOPPED"},
+        {"id": "speed_sp", "type": "numeric_entry", "x": 20, "y": 190, "w": 200, "h": 60, "tag": "Conveyor.Speed_SP",
+         "format": "{:.1f} %"},
+        {"id": "speed", "type": "numeric_display", "x": 240, "y": 190, "w": 200, "h": 60, "tag": "Conveyor.Speed",
+         "format": "{:.1f} %"},
+        {"id": "level", "type": "bar", "x": 600, "y": 80, "w": 80, "h": 300, "tag": "Tank.Level", "min": 0, "max": 100},
+        {"id": "pump", "type": "toggle", "x": 700, "y": 80, "w": 160, "h": 60, "tag": "Tank.Pump_Run", "text": "PUMP"},
+        {"id": "jog", "type": "button", "x": 700, "y": 160, "w": 160, "h": 60, "tag": "Tank.Jog_Fwd",
+         "action": "momentary", "text": "JOG"},
+        {"id": "valve", "type": "numeric_entry", "x": 700, "y": 240, "w": 160, "h": 60, "tag": "Tank.Valve_Cmd"},
+        {"id": "count", "type": "numeric_display", "x": 20, "y": 280, "w": 200, "h": 60, "tag": "Batch.Count"},
+        {"id": "to_diag", "type": "goto", "x": 20, "y": 520, "w": 160, "h": 60, "screen": "Diagnostics", "text": "DIAGNOSTICS"}
+      ]
+    },
+    {
+      "name": "Diagnostics",
+      "widgets": [
+        {"id": "clients", "type": "numeric_display", "x": 20, "y": 20, "w": 300, "h": 50, "tag": "_System.Link.Clients"},
+        {"id": "plc", "type": "indicator", "x": 20, "y": 90, "w": 300, "h": 50, "tag": "_System.PLC.PLC1.Connected",
+         "on_text": "PLC1 ONLINE", "off_text": "PLC1 OFFLINE"},
+        {"id": "back", "type": "goto", "x": 20, "y": 520, "w": 160, "h": 60, "screen": "Main", "text": "BACK"}
+      ]
+    }
+  ],
+  "start_screen": "Main"
+}
