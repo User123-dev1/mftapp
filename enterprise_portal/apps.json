@@ -1,0 +1,50 @@
+{
+  "portal": {
+    "title": "Enterprise App Portal",
+    "organization": "SCEPCES",
+    "support_email": "servicedesk@scepces.com"
+  },
+  "apps": [
+    {
+      "id": "mft",
+      "name": "Managed File Transfer",
+      "description": "Schedule, monitor and audit file transfers across SFTP, SMB, AS2 and HTTP.",
+      "url": "http://localhost:8000/",
+      "health_url": "http://localhost:8000/health",
+      "category": "Operations",
+      "icon": "swap_horiz",
+      "color": "#4f46e5",
+      "owner": "IT Operations"
+    },
+    {
+      "id": "asset-manager",
+      "name": "Asset Manager",
+      "description": "Track hardware, software licences and equipment assignments.",
+      "url": "http://assets.scepces.com/",
+      "category": "IT",
+      "icon": "inventory_2",
+      "color": "#0891b2",
+      "owner": "IT Asset Management"
+    },
+    {
+      "id": "label-generator",
+      "name": "Label Generator",
+      "description": "Design and print barcode, QR and asset tag labels.",
+      "url": "http://labels.scepces.com/",
+      "category": "Operations",
+      "icon": "qr_code_2",
+      "color": "#d97706",
+      "owner": "Warehouse"
+    },
+    {
+      "id": "service-desk",
+      "name": "Service Desk",
+      "description": "Raise tickets, request access and track IT support issues.",
+      "url": "http://servicedesk.scepces.com/",
+      "category": "IT",
+      "icon": "support_agent",
+      "color": "#16a34a",
+      "owner": "IT Support"
+    }
+  ]
+}
