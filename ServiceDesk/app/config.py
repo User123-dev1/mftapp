@@ -22,6 +22,8 @@ class Settings:
         default_factory=lambda: os.getenv("SD_BASE_URL", f"http://localhost:{os.getenv('SD_PORT', '8085')}")
     )
     database_url: str = field(default_factory=lambda: os.getenv("SD_DATABASE_URL", "sqlite:///./servicedesk.db"))
+    # Where uploaded files (supplier quotes) and generated PDFs are stored.
+    upload_dir: str = field(default_factory=lambda: os.getenv("SD_UPLOAD_DIR", "./uploads"))
     secret_key: str = field(default_factory=lambda: os.getenv("SD_SECRET_KEY", "change-me-in-production"))
 
     # First IT manager account, created on startup if no manager exists.

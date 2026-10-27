@@ -6,10 +6,13 @@ the request finishes. If no SMTP server is configured the message is marked
 ``logged`` so it can be inspected from the Email Log page while testing.
 """
 
+import json
 import logging
+import mimetypes
 import smtplib
 import ssl
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
@@ -22,8 +25,11 @@ from .models import EmailLog, utcnow
 logger = logging.getLogger(__name__)
 
 
-def queue_email(db: Session, to: str, subject: str, body: str, ticket_id: Optional[int] = None) -> EmailLog:
-    entry = EmailLog(to_address=to, subject=subject, body=body, ticket_id=ticket_id, status="pending")
+def queue_email(db: Session, to: str, subject: str, body: str, ticket_id: Optional[int] = None,
+                attachments: Optional[list[dict]] = None) -> EmailLog:
+    """attachments: [{"path": str, "filename": str, "content_type": str}]"""
+    entry = EmailLog(to_address=to, subject=subject, body=body, ticket_id=ticket_id, status="pending",
+                     attachments=json.dumps(attachments) if attachments else None)
     db.add(entry)
     return entry
 
@@ -34,6 +40,11 @@ def _send_smtp(entry: EmailLog) -> None:
     msg["To"] = entry.to_address
     msg["Subject"] = entry.subject
     msg.set_content(entry.body)
+    for att in entry.attachment_list:
+        ctype = att.get("content_type") or mimetypes.guess_type(att["filename"])[0] or "application/octet-stream"
+        maintype, _, subtype = ctype.partition("/")
+        msg.add_attachment(Path(att["path"]).read_bytes(), maintype=maintype, subtype=subtype or "octet-stream",
+                           filename=att["filename"])
 
     if settings.smtp_ssl:
         server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, context=ssl.create_default_context(), timeout=30)

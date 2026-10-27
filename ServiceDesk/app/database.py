@@ -39,7 +39,11 @@ _NEW_COLUMNS = {
         "sso_provider": "VARCHAR(50)",
         "sso_subject": "VARCHAR(255)",
         "is_change_approver": "BOOLEAN NOT NULL DEFAULT 0",
+        "supervisor_id": "INTEGER REFERENCES users(id)",
+        "department_id": "INTEGER REFERENCES departments(id)",
+        "is_procurement": "BOOLEAN NOT NULL DEFAULT 0",
     },
+    "email_log": {"attachments": "TEXT"},
     "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},
     "support_groups": {"auto_assign": "BOOLEAN NOT NULL DEFAULT 0"},
     "config_items": {

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}{{ pr.number if pr else 'New purchase request' }} · AbelOrder{% endblock %}
+{% block content %}
+<section class="card ao-form">
+  <p class="muted small"><a href="/abelorder">← AbelOrder</a></p>
+  <h1>{{ 'Edit ' ~ pr.number if pr else 'New purchase request' }}</h1>
+  <form method="post" action="{{ '/abelorder/%s/edit' % pr.number if pr else '/abelorder/new' }}" enctype="multipart/form-data" id="ao-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <h2>Request</h2>
+    <div class="row">
+      <label>Requester <input value="{{ pr.requester_name if pr else user.full_name }}" disabled></label>
+      <label>Date of request <input value="{{ pr.request_date if pr else '' }}" placeholder="Set when submitted" disabled></label>
+      <label>Department
+        <select name="department_id">
+          <option value="">— choose —</option>
+          {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if form.get('department_id') == d.id|string }}>{{ d.name }}{% if not d.head %} (no head set){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Direct supervisor
+        {% if locked_supervisor %}
+          <input value="{{ locked_supervisor.full_name }}" disabled>
+          <span class="muted small">Set by your administrator.</span>
+        {% else %}
+          <select name="supervisor_id">
+            <option value="">— choose —</option>
+            {% for p in people %}<option value="{{ p.id }}" {{ 'selected' if form.get('supervisor_id') == p.id|string }}>{{ p.full_name }}</option>{% endfor %}
+          </select>
+        {% endif %}
+      </label>
+    </div>
+    <div class="row">
+      <label>When is it needed?
+        <select name="urgency">
+          {% for u in Urgency %}<option value="{{ u.value }}" {{ 'selected' if (form.get('urgency') or 'normal') == u.value }}>{{ u.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Needed by (optional) <input type="date" name="needed_by" value="{{ form.get('needed_by') or '' }}"></label>
+      <label>Project / work order number <input name="project_number" value="{{ form.get('project_number') or '' }}" placeholder="e.g. WO-12345 or N/A" maxlength="100"></label>
+    </div>
+    <label>Reason / justification <textarea name="justification" rows="3" placeholder="Why is this purchase needed?">{{ form.get('justification') or '' }}</textarea></label>
+
+    <h2>Vendor</h2>
+    <div class="radio-row">
+      <label class="check"><input type="radio" name="vendor_mode" value="existing" {{ 'checked' if form.get('vendor_mode', 'existing') != 'new' }}> Existing vendor</label>
+      <label class="check"><input type="radio" name="vendor_mode" value="new" {{ 'checked' if form.get('vendor_mode') == 'new' }}> New vendor</label>
+    </div>
+    <div class="row">
+      <label id="vendor-existing">Vendor
+        <select name="vendor_id" id="vendor-select">
+          <option value="">— choose —</option>
+          {% for v in vendors %}<option value="{{ v.id }}" data-contact="{{ v.contact_name or '' }}" data-email="{{ v.contact_email or '' }}" {{ 'selected' if form.get('vendor_id') == v.id|string }}>{{ v.name }}</option>{% endfor %}
+        </select>
+        {% if not vendors %}<span class="muted small">No vendors on file yet - choose "New vendor".</span>{% endif %}
+      </label>
+      <label id="vendor-new">New vendor name <input name="vendor_name" value="{{ form.get('vendor_name') or '' }}" maxlength="255"></label>
+      <label>Vendor contact name <input name="vendor_contact_name" id="vendor-contact" value="{{ form.get('vendor_contact_name') or '' }}"></label>
+      <label>Vendor contact email <input type="email" name="vendor_contact_email" id="vendor-email" value="{{ form.get('vendor_contact_email') or '' }}"></label>
+    </div>
+
+    <h2>Items</h2>
+    <div class="table-wrap">
+    <table class="grid items-table" id="items">
+      <thead><tr><th>#</th><th>Qty</th><th>UOM</th><th>Description</th><th>RMS / Catalog #</th><th>Cost / UOM ($)</th><th class="num">Total</th><th></th></tr></thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr><td colspan="8"><button type="button" class="btn btn-small btn-secondary" id="add-item">+ Add item</button></td></tr>
+        <tr class="grand"><td colspan="6" class="num">Total budget cost</td><td class="num" id="grand-total">$0.00</td><td></td></tr>
+      </tfoot>
+    </table>
+    </div>
+    <datalist id="uoms">{% for u in uoms %}<option value="{{ u }}">{% endfor %}</datalist>
+    <p class="approval-preview" id="approval-preview"></p>
+
+    <h2>Supplier quote(s)</h2>
+    {% if pr and pr.attachments %}
+    <ul class="rels">{% for a in pr.attachments %}<li>📎 {{ a.filename }} <span class="muted small">{{ (a.size / 1024)|round(0)|int }} KB</span></li>{% endfor %}</ul>
+    {% endif %}
+    <label>Attach quote(s) <input type="file" name="quotes" multiple accept="{{ allowed_ext }}">
+      <span class="muted small">PDF, images, Word, Excel, email or ZIP · up to 15 MB each</span></label>
+
+    <label>Additional instructions / notes <textarea name="notes" rows="3">{{ form.get('notes') or '' }}</textarea></label>
+
+    <div class="actions">
+      <button class="btn" name="action" value="submit">Submit for approval</button>
+      <button class="btn btn-secondary" name="action" value="save">Save as draft</button>
+    </div>
+  </form>
+</section>
+
+<script>
+(() => {
+  const DEPT = {{ policy.dept_head_threshold|string|tojson }}, CSO = {{ policy.cso_threshold|string|tojson }};
+  const tbody = document.querySelector('#items tbody');
+  const fmt = n => '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const num = v => { const n = parseFloat(String(v).replace(/[$,\s]/g, '')); return isFinite(n) ? n : 0; };
+
+  function row(item = {}) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="ln"></td>
+      <td><input name="item_qty" inputmode="decimal" class="qty"></td>
+      <td><input name="item_uom" list="uoms" class="uom"></td>
+      <td><input name="item_desc" class="desc"></td>
+      <td><input name="item_catalog" class="cat"></td>
+      <td><input name="item_unit_cost" inputmode="decimal" class="cost"></td>
+      <td class="num line-total">$0.00</td>
+      <td><button type="button" class="link danger remove" title="Remove line">✕</button></td>`;
+    tr.querySelector('.qty').value = item.qty ?? '';
+    tr.querySelector('.uom').value = item.uom ?? 'EA';
+    tr.querySelector('.desc').value = item.desc ?? '';
+    tr.querySelector('.cat').value = item.catalog ?? '';
+    tr.querySelector('.cost').value = item.cost ?? '';
+    tr.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
+    tr.querySelector('.remove').addEventListener('click', () => { tr.remove(); if (!tbody.children.length) row(); recalc(); });
+    tbody.appendChild(tr);
+    return tr;
+  }
+
+  function recalc() {
+    let total = 0;
+    [...tbody.children].forEach((tr, i) => {
+      tr.querySelector('.ln').textContent = i + 1;
+      const line = Math.round(num(tr.querySelector('.qty').value) * num(tr.querySelector('.cost').value) * 100) / 100;
+      tr.querySelector('.line-total').textContent = fmt(line);
+      total += line;
+    });
+    document.getElementById('grand-total').textContent = fmt(total);
+    const steps = ['Direct Supervisor'];
+    if (total > num(DEPT)) steps.push('Department Head');
+    if (total > num(CSO)) steps.push('CSO');
+    document.getElementById('approval-preview').innerHTML =
+      '<strong>Approvals required:</strong> ' + steps.join(' → ') +
+      ` <span class="muted small">(Department Head over ${fmt(num(DEPT))}, CSO over ${fmt(num(CSO))})</span>`;
+  }
+
+  const initial = {{ items|tojson }};
+  (initial.length ? initial : [{}]).forEach(row);
+  document.getElementById('add-item').addEventListener('click', () => { row().querySelector('.qty').focus(); recalc(); });
+  recalc();
+
+  // Vendor: existing vs new, and pre-fill contact from the vendor list.
+  const modes = document.querySelectorAll('input[name=vendor_mode]');
+  const sync = () => {
+    const isNew = document.querySelector('input[name=vendor_mode]:checked').value === 'new';
+    document.getElementById('vendor-existing').hidden = isNew;
+    document.getElementById('vendor-new').hidden = !isNew;
+  };
+  modes.forEach(m => m.addEventListener('change', sync)); sync();
+  document.getElementById('vendor-select').addEventListener('change', e => {
+    const o = e.target.selectedOptions[0];
+    if (o && o.value) {
+      document.getElementById('vendor-contact').value = o.dataset.contact;
+      document.getElementById('vendor-email').value = o.dataset.email;
+    }
+  });
+})();
+</script>
+{% endblock %}

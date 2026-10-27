@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import change_routes, changes, cmdb, cmdb_routes, database, entra_sync, reports, services, sso
+from . import abelorder_routes, change_routes, changes, cmdb, cmdb_routes, database, entra_sync, reports, services, sso
 from .config import settings
 from .emailer import deliver_pending
 from .models import Category, CIStatus, CIType, ConfigItem, EmailLog, Priority, Role, Status, Ticket, User
@@ -83,6 +83,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.include_router(cmdb_routes.router)
 app.include_router(reports.router)
 app.include_router(change_routes.router)
+app.include_router(abelorder_routes.router)
 
 
 @app.exception_handler(LoginRequired)

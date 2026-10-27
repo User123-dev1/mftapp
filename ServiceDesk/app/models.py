@@ -96,7 +96,15 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Member of the change advisory board (IT managers can always approve changes).
     is_change_approver: Mapped[bool] = mapped_column(Boolean, default=False)
+    # AbelOrder: who approves this person's purchase requests, their department, and
+    # whether they work in Procurement (see all requests, issue PO numbers).
+    supervisor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    department_id: Mapped[Optional[int]] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    is_procurement: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    supervisor: Mapped[Optional["User"]] = relationship(remote_side="User.id", foreign_keys=[supervisor_id])
+    department_ref: Mapped[Optional["Department"]] = relationship(foreign_keys=[department_id])
 
     @property
     def can_approve_changes(self) -> bool:
@@ -306,8 +314,15 @@ class EmailLog(Base):
     body: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|sent|logged|failed
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # JSON list of {"path", "filename", "content_type"} files to attach.
+    attachments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def attachment_list(self) -> list[dict]:
+        import json
+        return json.loads(self.attachments) if self.attachments else []
 
 
 class SyncRun(Base):
@@ -467,4 +482,193 @@ class ChangeActivity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     change: Mapped[ChangeRequest] = relationship(back_populates="activities")
+    actor: Mapped[Optional[User]] = relationship()
+
+
+# --- AbelOrder (purchase requests) -----------------------------------------------------
+
+class Department(Base):
+    __tablename__ = "departments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    head_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    head: Mapped[Optional[User]] = relationship(foreign_keys=[head_id])
+
+
+class Vendor(Base):
+    __tablename__ = "vendors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Urgency(str, enum.Enum):
+    NORMAL = "normal"
+    URGENT = "urgent"
+    CRITICAL = "critical"
+
+    @property
+    def label(self) -> str:
+        return self.value.title()
+
+
+class PRStatus(str, enum.Enum):
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"        # all signatures done, sent to Procurement, awaiting PO number
+    PO_ISSUED = "po_issued"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+    @property
+    def label(self) -> str:
+        return {"po_issued": "PO Issued", "approved": "Approved - Awaiting PO"}.get(
+            self.value, self.value.replace("_", " ").title())
+
+
+class ApprovalRole(str, enum.Enum):
+    SUPERVISOR = "supervisor"
+    DEPT_HEAD = "dept_head"
+    CSO = "cso"
+
+    @property
+    def label(self) -> str:
+        return {"supervisor": "Direct Supervisor", "dept_head": "Department Head", "cso": "CSO"}[self.value]
+
+
+class StepState(str, enum.Enum):
+    WAITING = "waiting"    # earlier step not signed yet
+    PENDING = "pending"    # with this approver now
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+    @property
+    def label(self) -> str:
+        return self.value.title()
+
+
+class PurchaseRequest(Base):
+    __tablename__ = "purchase_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    number: Mapped[str] = mapped_column(String(20), unique=True, index=True, default="")
+    status: Mapped[PRStatus] = mapped_column(Enum(PRStatus), default=PRStatus.DRAFT, index=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    requester_name: Mapped[str] = mapped_column(String(255))
+    request_date: Mapped[date] = mapped_column(Date)
+    justification: Mapped[str] = mapped_column(Text)
+    urgency: Mapped[Urgency] = mapped_column(Enum(Urgency), default=Urgency.NORMAL)
+    needed_by: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    project_number: Mapped[str] = mapped_column(String(100))
+    department_id: Mapped[Optional[int]] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    supervisor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # True when the supervisor came from the user's profile (set by an administrator).
+    supervisor_from_profile: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    vendor_is_new: Mapped[bool] = mapped_column(Boolean, default=False)
+    vendor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vendors.id"), nullable=True)
+    vendor_name: Mapped[str] = mapped_column(String(255))
+    vendor_contact_name: Mapped[str] = mapped_column(String(255))
+    vendor_contact_email: Mapped[str] = mapped_column(String(255))
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Money is kept as exact decimal strings; total_cents allows sorting/filtering.
+    total: Mapped[str] = mapped_column(String(32), default="0.00")
+    total_cents: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    po_number: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True)
+    po_issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    po_issued_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id])
+    supervisor: Mapped[Optional[User]] = relationship(foreign_keys=[supervisor_id])
+    department: Mapped[Optional[Department]] = relationship()
+    vendor: Mapped[Optional[Vendor]] = relationship()
+    po_issued_by: Mapped[Optional[User]] = relationship(foreign_keys=[po_issued_by_id])
+    items: Mapped[list["PurchaseItem"]] = relationship(
+        back_populates="request", order_by="PurchaseItem.line_no", cascade="all, delete-orphan"
+    )
+    approvals: Mapped[list["PurchaseApproval"]] = relationship(
+        back_populates="request", order_by="PurchaseApproval.step_order", cascade="all, delete-orphan"
+    )
+    attachments: Mapped[list["PurchaseAttachment"]] = relationship(
+        back_populates="request", order_by="PurchaseAttachment.id", cascade="all, delete-orphan"
+    )
+    activities: Mapped[list["PurchaseActivity"]] = relationship(
+        back_populates="request", order_by="PurchaseActivity.id", cascade="all, delete-orphan"
+    )
+
+    @property
+    def current_step(self) -> Optional["PurchaseApproval"]:
+        return next((a for a in self.approvals if a.state == StepState.PENDING), None)
+
+
+class PurchaseItem(Base):
+    __tablename__ = "purchase_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("purchase_requests.id", ondelete="CASCADE"), index=True)
+    line_no: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[str] = mapped_column(String(32))
+    uom: Mapped[str] = mapped_column(String(20))
+    description: Mapped[str] = mapped_column(Text)
+    catalog_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # RMS / catalog #
+    unit_cost: Mapped[str] = mapped_column(String(32))  # cost per UOM
+    line_total: Mapped[str] = mapped_column(String(32))
+
+    request: Mapped[PurchaseRequest] = relationship(back_populates="items")
+
+
+class PurchaseApproval(Base):
+    __tablename__ = "purchase_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("purchase_requests.id", ondelete="CASCADE"), index=True)
+    step_order: Mapped[int] = mapped_column(Integer)
+    role: Mapped[ApprovalRole] = mapped_column(Enum(ApprovalRole))
+    approver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    state: Mapped[StepState] = mapped_column(Enum(StepState), default=StepState.WAITING)
+    note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # e.g. "escalated: requester is supervisor"
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    request: Mapped[PurchaseRequest] = relationship(back_populates="approvals")
+    approver: Mapped[User] = relationship()
+
+
+class PurchaseAttachment(Base):
+    __tablename__ = "purchase_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("purchase_requests.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))       # original name, for display
+    stored_name: Mapped[str] = mapped_column(String(255))    # random name on disk
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    request: Mapped[PurchaseRequest] = relationship(back_populates="attachments")
+    uploaded_by: Mapped[User] = relationship()
+
+
+class PurchaseActivity(Base):
+    __tablename__ = "purchase_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("purchase_requests.id", ondelete="CASCADE"), index=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    message: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    request: Mapped[PurchaseRequest] = relationship(back_populates="activities")
     actor: Mapped[Optional[User]] = relationship()

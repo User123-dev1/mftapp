@@ -14,6 +14,7 @@
       <span class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
     </summary>
     {% if e.error %}<p class="danger">Error: {{ e.error }}</p>{% endif %}
+    {% if e.attachment_list %}<p class="small">📎 {% for a in e.attachment_list %}{{ a.filename }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
     <pre>{{ e.body }}</pre>
   </details>
   {% else %}

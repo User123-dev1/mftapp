@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}{{ pr.number }} · AbelOrder{% endblock %}
+{% block content %}
+<div class="layout">
+  <section class="card main-col">
+    <p class="muted small"><a href="/abelorder">← AbelOrder</a></p>
+    <div class="ticket-head">
+      <h1>{{ pr.number }} — {{ pr.vendor_name }}</h1>
+      <div><span class="badge pr-{{ pr.status.value }}">{{ pr.status.label }}</span>
+        <span class="badge urg-{{ pr.urgency.value }}">{{ pr.urgency.label }}</span></div>
+    </div>
+
+    <dl class="kv two-col">
+      <dt>Requester</dt><dd>{{ pr.requester_name }} <span class="muted small">{{ pr.requester.email }}</span></dd>
+      <dt>Department</dt><dd>{{ pr.department.name if pr.department else '—' }}</dd>
+      <dt>Date of request</dt><dd>{{ pr.request_date }}</dd>
+      <dt>Needed</dt><dd>{{ pr.urgency.label }}{% if pr.needed_by %} — by {{ pr.needed_by }}{% endif %}</dd>
+      <dt>Project / WO</dt><dd>{{ pr.project_number or '—' }}</dd>
+      <dt>PO number</dt><dd>{% if pr.po_number %}<strong>{{ pr.po_number }}</strong>{% else %}<span class="muted">Issued by Procurement after approval</span>{% endif %}</dd>
+    </dl>
+
+    <h2>Vendor</h2>
+    <dl class="kv two-col">
+      <dt>Vendor</dt><dd>{{ pr.vendor_name }} {% if pr.vendor_is_new %}<span class="badge prio-high">New vendor</span>{% else %}<span class="badge">Existing</span>{% endif %}</dd>
+      <dt>Contact</dt><dd>{{ pr.vendor_contact_name }} &lt;<a href="mailto:{{ pr.vendor_contact_email }}">{{ pr.vendor_contact_email }}</a>&gt;</dd>
+    </dl>
+
+    <h2>Items</h2>
+    <div class="table-wrap">
+    <table class="grid">
+      <thead><tr><th>#</th><th class="num">Qty</th><th>UOM</th><th>Description</th><th>RMS / Catalog #</th><th class="num">Cost / UOM</th><th class="num">Total</th></tr></thead>
+      <tbody>
+      {% for i in pr.items %}
+      <tr><td>{{ i.line_no }}</td><td class="num">{{ qty_text(i.quantity) }}</td><td>{{ i.uom }}</td><td>{{ i.description }}</td>
+        <td>{{ i.catalog_number or '' }}</td><td class="num">{{ unit_money(i.unit_cost) }}</td><td class="num">{{ money(i.line_total) }}</td></tr>
+      {% else %}<tr><td colspan="7" class="muted">No items.</td></tr>{% endfor %}
+      </tbody>
+      <tfoot><tr class="grand"><td colspan="6" class="num">Total budget cost</td><td class="num">{{ money(pr.total) }}</td></tr></tfoot>
+    </table>
+    </div>
+
+    <h3>Reason / justification</h3>
+    <p class="pre">{{ pr.justification or '—' }}</p>
+    {% if pr.notes %}<h3>Additional instructions / notes</h3><p class="pre">{{ pr.notes }}</p>{% endif %}
+
+    <h2 id="attachments">Supplier quotes</h2>
+    <ul class="rels">
+      {% for a in pr.attachments %}
+      <li>📎 <a href="/abelorder/{{ pr.number }}/attachments/{{ a.id }}">{{ a.filename }}</a>
+        <span class="muted small">{{ (a.size / 1024)|round(0)|int }} KB · {{ a.uploaded_by.full_name }}</span>
+        {% if pr.status == PRStatus.DRAFT and user.id == pr.requester_id %}
+        <form method="post" action="/abelorder/{{ pr.number }}/attachments/{{ a.id }}/delete" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link danger small">remove</button></form>
+        {% endif %}
+      </li>
+      {% else %}<li class="muted">No quote attached.</li>{% endfor %}
+    </ul>
+    {% if can_attach %}
+    <form method="post" action="/abelorder/{{ pr.number }}/attachments" enctype="multipart/form-data" class="filters">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="file" name="quotes" multiple required>
+      <button class="btn btn-small btn-secondary">Upload</button>
+    </form>
+    {% endif %}
+  </section>
+
+  <aside class="side-col">
+    {% if can_decide %}
+    <div class="card assign-card">
+      <h3>Your approval is needed</h3>
+      <p class="small">As <strong>{{ pr.current_step.role.label }}</strong> for {{ money(pr.total) }}.</p>
+      <form method="post" action="/abelorder/{{ pr.number }}/decide">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Comment (required to reject) <textarea name="comment" rows="2"></textarea></label>
+        <div class="actions">
+          <button class="btn" name="decision" value="approve">Approve &amp; sign</button>
+          <button class="btn btn-warn" name="decision" value="reject">Reject</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if is_procurement and pr.status in (PRStatus.APPROVED, PRStatus.PO_ISSUED) %}
+    <div class="card {{ 'assign-card' if pr.status == PRStatus.APPROVED }}">
+      <h3>{{ 'Change PO number' if pr.po_number else 'Issue PO number' }}</h3>
+      <form method="post" action="/abelorder/{{ pr.number }}/po">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>PO number <input name="po_number" value="{{ pr.po_number or '' }}" required maxlength="100"></label>
+        <button class="btn btn-small">Save &amp; notify requester</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h3>Signatures</h3>
+      {% if pr.approvals %}
+      <ol class="signatures">
+        {% for a in pr.approvals %}
+        <li class="sig-{{ a.state.value }}">
+          <strong>{{ a.role.label }}</strong> — {{ a.approver.full_name }}<br>
+          <span class="badge step-{{ a.state.value }}">{{ a.state.label }}</span>
+          {% if a.decided_at %}<span class="muted small">{{ a.decided_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>{% endif %}
+          {% if a.note %}<br><span class="muted small">{{ a.note }}</span>{% endif %}
+          {% if a.comment %}<br><span class="small">“{{ a.comment }}”</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="muted small">Not submitted yet. Route by total: Direct Supervisor; + Department Head over {{ money(policy.dept_head_threshold) }}; + CSO over {{ money(policy.cso_threshold) }}.</p>
+      {% endif %}
+      <p><a class="btn btn-small btn-secondary" href="/abelorder/{{ pr.number }}/pdf" target="_blank">Download PDF copy</a></p>
+    </div>
+
+    {% if user.id == pr.requester_id or is_procurement %}
+    <div class="card">
+      <h3>Actions</h3>
+      {% if pr.status == PRStatus.DRAFT and user.id == pr.requester_id %}
+        <p><a class="btn btn-small btn-secondary" href="/abelorder/{{ pr.number }}/edit">Edit</a></p>
+        <form method="post" action="/abelorder/{{ pr.number }}/submit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Submit for approval</button></form>
+      {% elif pr.status == PRStatus.REJECTED and user.id == pr.requester_id %}
+        <form method="post" action="/abelorder/{{ pr.number }}/revise"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Revise &amp; resubmit</button></form>
+      {% endif %}
+      {% if pr.status in (PRStatus.DRAFT, PRStatus.PENDING_APPROVAL, PRStatus.REJECTED, PRStatus.APPROVED) %}
+      <details class="small"><summary class="danger">Cancel request</summary>
+        <form method="post" action="/abelorder/{{ pr.number }}/cancel"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Reason <input name="reason" required></label><button class="btn btn-small btn-warn">Cancel request</button></form>
+      </details>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h3>History</h3>
+      <ul class="activity">
+        {% for a in pr.activities|reverse %}
+        <li><span class="muted">{{ a.created_at.strftime('%m-%d %H:%M') }}</span> {{ a.message }}{% if a.actor %} — {{ a.actor.full_name }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </aside>
+</div>
+{% endblock %}

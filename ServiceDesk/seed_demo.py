@@ -5,16 +5,17 @@ All demo accounts use the password Password1! (the IT manager keeps SD_ADMIN_PAS
 
 import sys
 from datetime import date, timedelta
+from decimal import Decimal
 
 from sqlalchemy import func, select
 
 from datetime import datetime
 
-from app import changes, cmdb, database, services
+from app import abelorder, changes, cmdb, database, services
 from app.config import settings
 from app.main import ensure_admin
 from app.models import (
-    Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
+    Department, Vendor, Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
     Ticket, User,
 )
 from app.security import hash_password
@@ -115,6 +116,44 @@ def main() -> None:
     ticket(omar, "Keyboard keys sticking", Category.HARDWARE, Priority.LOW, omar_lt)
     ticket(rita, "Access to shared Finance drive", Category.ACCOUNT, Priority.MEDIUM,
            details={"request_type": "access", "system": "\\\\fs01\\finance", "access_level": "Read/Write"})
+
+    # --- AbelOrder: org chart, vendors and purchase requests ---
+    sup = user("sara.supervisor@example.com", "Sara Supervisor", Role.REQUESTER, "Operations")
+    head = user("hank.head@example.com", "Hank Head", Role.REQUESTER, "Operations")
+    cso = user("carla.cso@example.com", "Carla CSO", Role.REQUESTER, "Executive")
+    pat = user("pat.procurement@example.com", "Pat Procurement", Role.REQUESTER, "Procurement")
+    pat.is_procurement = True
+    db.flush()
+    ops = Department(name="Operations", head=head)
+    db.add_all([ops, Department(name="Finance"), Department(name="IT", head=manager)])
+    omar.supervisor, omar.department_ref = sup, ops
+    rita.supervisor = sup
+    acme = Vendor(name="Acme Industrial Supply", contact_name="Al Jones", contact_email="al.jones@acme.example")
+    db.add_all([acme, Vendor(name="Grainger", contact_name="Sales Desk", contact_email="sales@grainger.example")])
+    abelorder.set_setting(db, "abelorder.cso_user_id", str(cso.id))
+    db.flush()
+
+    def order(requester, items, **kw):
+        data = abelorder.OrderInput(
+            justification=kw.get("why", "Replacement parts for line 2 maintenance."),
+            urgency=kw.get("urgency", abelorder.Urgency.NORMAL), project_number=kw.get("wo", "WO-4471"),
+            department_id=ops.id, vendor_id=acme.id, vendor_name=acme.name, vendor_contact_name="Al Jones",
+            vendor_contact_email="al.jones@acme.example", notes=kw.get("notes", ""),
+            items=[abelorder.ItemInput(Decimal(q), u, d, c, Decimal(p)) for q, u, d, c, p in items])
+        pr = abelorder.create_request(db, requester, data)
+        abelorder.submit(db, pr, requester)
+        return pr
+
+    order(omar, [("4", "EA", "Mechanical seal kit 2in", "RMS-22841", "186.50"),
+                 ("2", "BX", "Nitrile gloves, L (100/box)", "CAT-G100L", "14.95")],
+          urgency=abelorder.Urgency.URGENT, notes="Deliver to dock 3, attn. Omar")
+    big = order(omar, [("1", "EA", "Variable frequency drive 75HP", "RMS-77310", "18450.00"),
+                       ("1", "LOT", "Installation & commissioning", "", "6200.00")],
+                why="VFD on pump 4 failed; current unit is obsolete.", wo="WO-4502")
+    abelorder.decide(db, big, sup, True, "Agreed - critical asset")
+    done = order(omar, [("10", "EA", "Safety glasses", "CAT-SG10", "8.25")])
+    abelorder.decide(db, done, sup, True, "")
+    abelorder.issue_po(db, done, pat, "PO-2026-01017")
     db.commit()
     db.close()
 
@@ -122,6 +161,7 @@ def main() -> None:
     print(f"  IT manager : {settings.admin_email} / (SD_ADMIN_PASSWORD, default ChangeMe123!)")
     print(f"  Agents     : alice.agent@example.com, sam.network@example.com (change approver) / {PASSWORD}")
     print(f"  Requesters : rita@example.com, omar@example.com / {PASSWORD}")
+    print(f"  AbelOrder  : sara.supervisor@, hank.head@, carla.cso@, pat.procurement@example.com / {PASSWORD}")
 
 
 if __name__ == "__main__":

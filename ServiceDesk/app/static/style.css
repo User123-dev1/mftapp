@@ -18,7 +18,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; flex: 1; min-width
 h1 { font-size: 22px; margin: 0 0 12px; } h2 { font-size: 18px; margin: 0 0 10px; } h3 { font-size: 15px; margin: 0 0 8px; }
 label { display: block; margin-bottom: 12px; font-weight: 500; }
 input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; margin-top: 4px; background: #fff; }
-input[type=checkbox] { width: auto; }
+input[type=checkbox], input[type=radio] { width: auto; margin-top: 0; }
 label.check { font-weight: 400; display: flex; gap: 8px; align-items: center; }
 fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 0 0 12px; padding: 10px 14px; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
@@ -143,3 +143,26 @@ ul.rels { list-style: none; padding: 0; margin: 0 0 12px; } ul.rels li { padding
   .brand { font-size: 16px; }
   .topbar { flex-wrap: nowrap; gap: 10px; padding: 10px 12px; }
 }
+
+/* --- AbelOrder --- */
+.num { text-align: right; white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+.items-table input { margin: 0; padding: 6px 8px; }
+.items-table .qty { width: 80px; } .items-table .uom { width: 80px; } .items-table .cost { width: 110px; }
+.items-table .cat { width: 140px; } .items-table .desc { min-width: 220px; }
+.items-table td.ln { color: var(--muted); width: 28px; }
+tr.grand td { font-weight: 700; font-size: 16px; border-top: 2px solid var(--text); }
+.approval-preview { background: #f7fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.radio-row { display: flex; gap: 18px; margin-bottom: 6px; }
+.radio-row label.check { margin: 0; }
+dl.kv.two-col { grid-template-columns: max-content 1fr max-content 1fr; }
+@media (max-width: 800px) { dl.kv.two-col { grid-template-columns: max-content 1fr; } }
+ol.signatures { padding-left: 18px; margin: 0 0 10px; }
+ol.signatures li { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.pr-draft { background: #edf2f7; } .pr-pending_approval { background: #fefcbf; color: #975a16; }
+.pr-approved { background: #e9e3ff; color: #553c9a; } .pr-po_issued { background: #e6f4ea; color: #276749; }
+.pr-rejected { background: #fed7d7; color: #9b2c2c; } .pr-cancelled { background: #e2e8f0; color: #4a5568; }
+.urg-normal { background: #edf2f7; } .urg-urgent { background: #feebc8; color: #9c4221; }
+.urg-critical { background: #fed7d7; color: #9b2c2c; font-weight: 600; }
+.step-waiting { background: #edf2f7; color: #718096; } .step-pending { background: #fefcbf; color: #975a16; }
+.step-approved { background: #e6f4ea; color: #276749; } .step-rejected { background: #fed7d7; color: #9b2c2c; }

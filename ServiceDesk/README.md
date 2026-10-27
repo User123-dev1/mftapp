@@ -56,6 +56,11 @@ is a change approver). Sign in as:
 - **Agents:** `alice.agent@example.com`, `sam.network@example.com`
 - **Requesters:** `rita@example.com`, `omar@example.com`
 
+- **AbelOrder:** `sara.supervisor@example.com` (Omar's and Rita's supervisor),
+  `hank.head@example.com` (Operations head), `carla.cso@example.com` (CSO) and
+  `pat.procurement@example.com` (Procurement). Omar has three sample purchase requests in different
+  stages.
+
 All demo accounts except the manager use the password `Password1!`. To start over, delete
 `servicedesk.db`.
 
@@ -110,6 +115,70 @@ warranty_expires,assigned_to_email,support_group,notes
 procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), network scanners such
 as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
 registered owners).
+
+## AbelOrder: purchase-order requests
+
+Any employee can request a PO under **AbelOrder → New PO Request**. The request is signed off in
+order and then emailed to Procurement.
+
+### The form
+- **Request:** requester name, filled in from their account; date of request, set when submitted;
+  department; direct supervisor; urgency (Normal / Urgent / Critical) and an optional needed-by date;
+  project or work order number; reason / justification.
+- **Vendor:** choose *Existing vendor* from the list, which fills in the contact, or *New vendor*.
+  Then the vendor contact name and email.
+- **Items:** add as many lines as needed, each with quantity, unit of measure, description,
+  RMS / Catalog #, and cost per UOM. Line totals and the **total budget cost** update as you type.
+  The server recalculates every amount exactly (decimal maths, rounded half-up to the cent); totals
+  sent by the browser are never trusted.
+- **Supplier quote(s):** attach one or more files (PDF, images, Word, Excel, email or ZIP, up to
+  15 MB each).
+- **Additional instructions / notes.**
+- **PO number:** filled in by Procurement after approval.
+
+While you fill in the form, it shows which approvals the total will need. You can save a draft and
+submit it later.
+
+### Signature flow
+
+```
+Submit ──► Direct Supervisor ──► Department Head (if total > $10,000) ──► CSO (if total > $50,000)
+                │ reject (reason required) ─► requester emailed, can revise & resubmit
+                ▼ all signed
+   Signed PDF + supplier quotes emailed to Procurement (abztprocurement@abelzeta.com)
+   Copy of the signed PDF emailed to the requester
+                ▼
+   Procurement enters the PO number ─► requester emailed the PO number + final PDF
+```
+
+- Each approver is emailed a link when it's their turn, and sees a red count on **PO Approvals**.
+  Approvals are sequential, and each one is recorded with name, date/time and comment. The PDF
+  marks them as electronically signed.
+- **Nobody signs their own request.** If the requester holds a role on the route, that step goes up
+  one level: supervisor to department head to CSO. If one person holds two roles (for example
+  supervisor and department head), one approval signs both.
+- Cancelling an already-approved request emails Procurement "CANCELLED - do not issue a PO".
+- A new vendor is added to the vendor list automatically once its request is approved.
+
+### Setup: **AbelOrder Settings** in the sidebar (IT managers)
+1. **Policy:** the procurement email (default `abztprocurement@abelzeta.com`), both dollar
+   thresholds, and which user is the **CSO**.
+2. **Departments:** create departments and choose each **department head**.
+3. **People:** set each employee's **direct supervisor** and department, and tick **Procurement**
+   for buyers. A supervisor set here is fixed on that person's requests; if none is set, the
+   employee picks one on the form. Procurement members see all requests, have a **Ready for PO**
+   queue, record PO numbers and maintain the vendor list.
+4. **Vendors:** your existing vendors and their default contacts.
+
+Supervisors, department heads and the CSO don't need IT roles: ordinary (requester) accounts can
+approve. With SSO, they just sign in with Microsoft.
+
+Uploaded quotes and generated PDFs are stored in `SD_UPLOAD_DIR` (default `./uploads`). Back up
+this folder together with `servicedesk.db`.
+
+**Real email is needed for this to be useful:** set `SMTP_HOST` and the other SMTP settings (see
+below). Until then, every message, with its attachments, can be checked under **Admin → Email
+Log**.
 
 ## Phase 3: Change management
 
@@ -329,6 +398,7 @@ wrong-tenant tokens and forged `state`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `SD_UPLOAD_DIR` | `./uploads` | Where supplier quotes and generated PDFs are stored |
 | `SD_PORT` | `8085` | Port the web server listens on (`python run.py --port N` also works) |
 | `SD_BASE_URL` | `http://localhost:<port>` | Public address, used for links in emails and SSO redirect URIs. Set it when users reach the app by server name, e.g. `http://servicedesk.yourco.local:8085` |
 | `SD_SECRET_KEY` | `change-me-in-production` | Signs session cookies — **set this** |
@@ -371,6 +441,9 @@ app/
   cmdb_routes.py CMDB and support-group pages
   entra_sync.py  Entra ID device sync via Microsoft Graph (+ daily scheduler, CLI)
   reports.py     reporting page
+  abelorder.py   AbelOrder purchase requests: form rules, routing, signatures, notifications
+  abelorder_pdf.py  PDF copy of a purchase request
+  abelorder_routes.py  AbelOrder pages and settings
   changes.py     change management: policy, approvals, impact, conflicts
   change_routes.py change pages, change policy, CI relationships
   web.py         shared page rendering helpers

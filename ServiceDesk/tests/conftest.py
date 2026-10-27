@@ -41,6 +41,7 @@ class Browser:
 @pytest.fixture()
 def client(tmp_path):
     settings.smtp_host = ""  # never send real email from tests
+    settings.upload_dir = str(tmp_path / "uploads")
     database.configure(f"sqlite:///{tmp_path / 'test.db'}")
     with TestClient(app):  # runs startup: create tables + initial manager
         yield Browser

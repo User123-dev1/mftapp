@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import database, sso
 from .config import settings
-from .models import Category, ChangeState, ChangeType, CIStatus, CIType, Priority, Role, Status, User
+from .models import Category, ChangeState, ChangeType, CIStatus, CIType, Priority, PRStatus, Role, Status, User
 from .security import csrf_token, pop_flashes
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -33,6 +33,7 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "app_name": settings.app_name,
         "user": user,
         "my_approvals": _approval_count(user),
+        "ao_approvals": _order_approval_count(user),
         "csrf_token": csrf_token(request),
         "flashes": pop_flashes(request),
         "Status": Status,
@@ -42,6 +43,7 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "CIType": CIType,
         "CIStatus": CIStatus,
         "ChangeState": ChangeState,
+        "PRStatus": PRStatus,
         "ChangeType": ChangeType,
         "sso_providers": sso.providers(),
         "local_login": settings.local_login,
@@ -54,6 +56,18 @@ def _approval_count(user: Optional[User]) -> int:
     if user is None or not user.can_approve_changes:
         return 0
     from .changes import pending_for
+
+    db = database.SessionLocal()
+    try:
+        return len(pending_for(db, db.get(User, user.id)))
+    finally:
+        db.close()
+
+
+def _order_approval_count(user: Optional[User]) -> int:
+    if user is None:
+        return 0
+    from .abelorder import pending_for
 
     db = database.SessionLocal()
     try:

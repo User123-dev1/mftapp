@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}AbelOrder settings · {{ app_name }}{% endblock %}
+{% block content %}
+{% if full_admin %}
+<section class="card">
+  <h1>AbelOrder settings</h1>
+  <form method="post" action="/admin/abelorder/policy">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="row">
+      <label>Procurement email <input type="email" name="procurement_email" value="{{ policy.procurement_email }}" required>
+        <span class="muted small">Receives every fully approved request (PDF + quotes).</span></label>
+      <label>Department Head required over ($) <input name="dept_head_threshold" value="{{ policy.dept_head_threshold }}" required></label>
+      <label>CSO required over ($) <input name="cso_threshold" value="{{ policy.cso_threshold }}" required></label>
+      <label>CSO (approver)
+        <select name="cso_user_id">
+          <option value="">— not set —</option>
+          {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if policy.cso and policy.cso.id == u.id }}>{{ u.full_name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <button class="btn">Save</button>
+  </form>
+</section>
+
+<section class="card" id="departments">
+  <h2>Departments &amp; department heads</h2>
+  <table class="grid compact">
+    <thead><tr><th>Department</th><th>Head (approves over {{ money(policy.dept_head_threshold) }})</th><th></th></tr></thead>
+    {% for d in departments %}
+    <tr>
+      <td><input name="name" value="{{ d.name }}" form="dept-{{ d.id }}" required></td>
+      <td><select name="head_id" form="dept-{{ d.id }}"><option value="">— none —</option>
+        {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if d.head_id == u.id }}>{{ u.full_name }}</option>{% endfor %}</select></td>
+      <td><form method="post" action="/admin/abelorder/departments" id="dept-{{ d.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="dept_id" value="{{ d.id }}"><button class="btn btn-small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td><input name="name" placeholder="New department" form="dept-new" required></td>
+      <td><select name="head_id" form="dept-new"><option value="">— none —</option>{% for u in users %}<option value="{{ u.id }}">{{ u.full_name }}</option>{% endfor %}</select></td>
+      <td><form method="post" action="/admin/abelorder/departments" id="dept-new"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Add</button></form></td>
+    </tr>
+  </table>
+</section>
+
+<section class="card" id="people">
+  <h2>People: supervisor, department, Procurement</h2>
+  <p class="muted small">A supervisor set here is fixed on that person's requests. If none is set, they choose their supervisor on the form.
+    Procurement members see all requests and record PO numbers.</p>
+  <div class="table-wrap">
+  <table class="grid compact">
+    <thead><tr><th>Name</th><th>Direct supervisor</th><th>Department</th><th>Procurement</th><th></th></tr></thead>
+    {% for p in users %}
+    <tr>
+      <td>{{ p.full_name }}<br><span class="muted small">{{ p.email }}</span></td>
+      <td><select name="supervisor_id" form="person-{{ p.id }}"><option value="">— employee chooses —</option>
+        {% for u in users if u.id != p.id %}<option value="{{ u.id }}" {{ 'selected' if p.supervisor_id == u.id }}>{{ u.full_name }}</option>{% endfor %}</select></td>
+      <td><select name="department_id" form="person-{{ p.id }}"><option value="">—</option>
+        {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if p.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></td>
+      <td><input type="checkbox" name="is_procurement" value="true" form="person-{{ p.id }}" {{ 'checked' if p.is_procurement }}></td>
+      <td><form method="post" action="/admin/abelorder/people/{{ p.id }}" id="person-{{ p.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card" id="vendors">
+  <h2>Vendors</h2>
+  <p class="muted small">Approved requests for a new vendor add it here automatically.</p>
+  <div class="table-wrap">
+  <table class="grid compact">
+    <thead><tr><th>Vendor</th><th>Contact name</th><th>Contact email</th><th></th></tr></thead>
+    {% for v in vendors %}
+    <tr>
+      <td><input name="name" value="{{ v.name }}" form="vendor-{{ v.id }}" required></td>
+      <td><input name="contact_name" value="{{ v.contact_name or '' }}" form="vendor-{{ v.id }}"></td>
+      <td><input name="contact_email" value="{{ v.contact_email or '' }}" form="vendor-{{ v.id }}" type="email"></td>
+      <td><form method="post" action="/admin/abelorder/vendors" id="vendor-{{ v.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="vendor_id" value="{{ v.id }}"><button class="btn btn-small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td><input name="name" placeholder="New vendor" form="vendor-new" required></td>
+      <td><input name="contact_name" form="vendor-new"></td>
+      <td><input name="contact_email" form="vendor-new" type="email"></td>
+      <td><form method="post" action="/admin/abelorder/vendors" id="vendor-new"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Add</button></form></td>
+    </tr>
+  </table>
+  </div>
+</section>
+{% endblock %}

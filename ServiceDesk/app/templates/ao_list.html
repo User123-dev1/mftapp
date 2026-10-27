@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}AbelOrder · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="ticket-head">
+    <h1>AbelOrder — purchase requests</h1>
+    <a class="btn btn-small" href="/abelorder/new">+ New purchase request</a>
+  </div>
+  <nav class="tabs">
+    {% set tabs = [('mine', 'My requests'), ('approvals', 'Awaiting my approval'), ('signed', 'Signed by me')] %}
+    {% if sees_all %}{% set tabs = tabs + [('procurement', 'Ready for PO'), ('all', 'All requests')] %}{% endif %}
+    {% for key, label in tabs %}
+    <a href="/abelorder?view={{ key }}" class="{{ 'on' if view == key }}">{{ label }}{% if key == 'approvals' and ao_approvals %} <span class="count">{{ ao_approvals }}</span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  {% if view not in ('approvals',) %}
+  <form method="get" action="/abelorder" class="filters">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input name="q" placeholder="Number, vendor, project, PO, requester" value="{{ q }}">
+    <button class="btn btn-small">Search</button>
+  </form>
+  {% endif %}
+  {% if rows %}
+  <div class="table-wrap">
+  <table class="grid">
+    <thead><tr><th>Request</th><th>Requester</th><th>Vendor</th><th>Project / WO</th><th class="num">Total</th><th>Urgency</th><th>Status</th><th>PO #</th></tr></thead>
+    <tbody>
+    {% for pr in rows %}
+    <tr>
+      <td><a href="/abelorder/{{ pr.number }}">{{ pr.number }}</a><br><span class="muted small">{{ pr.request_date }}</span></td>
+      <td>{{ pr.requester_name }}</td>
+      <td>{{ pr.vendor_name }}{% if pr.vendor_is_new %} <span class="badge prio-high">new</span>{% endif %}</td>
+      <td>{{ pr.project_number }}</td>
+      <td class="num">{{ money(pr.total) }}</td>
+      <td><span class="badge urg-{{ pr.urgency.value }}">{{ pr.urgency.label }}</span></td>
+      <td><span class="badge pr-{{ pr.status.value }}">{{ pr.status.label }}</span>
+        {% if pr.current_step %}<br><span class="muted small">with {{ pr.current_step.approver.full_name }} ({{ pr.current_step.role.label }})</span>{% endif %}</td>
+      <td>{{ pr.po_number or '' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">{% if view == 'approvals' %}Nothing is waiting for your approval.{% elif view == 'procurement' %}No approved requests are waiting for a PO number.{% else %}No requests yet. <a href="/abelorder/new">Create one</a>.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

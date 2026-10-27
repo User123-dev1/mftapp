@@ -21,7 +21,7 @@
   <a class="brand" href="/">{{ app_name }}</a>
   {% if user %}
   <div class="who">
-    <a class="btn btn-small" href="/tickets/new">+ New Request</a>
+    <a class="btn btn-small" href="/tickets/new">+ New IT Request</a>
     <a href="/profile" class="who-name">{{ user.full_name }}</a> <span class="role">{{ user.role.label }}</span>
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -41,7 +41,17 @@
         {{ nav('/tickets?status=new', 'Unassigned', icon='⧗') }}
         {{ nav('/tickets', 'All Open', icon='☰') }}
         {{ nav('/tickets?status=all', 'All Tickets', icon='⌕') }}
-        {{ nav('/tickets/new', 'New Request', icon='+') }}
+        {{ nav('/tickets/new', 'New IT Request', icon='+') }}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">AbelOrder</div>
+        {{ nav('/abelorder/new', 'New PO Request', icon='+') }}
+        {{ nav('/abelorder', 'My Requests', prefix='/abelorder/AO-', icon='🛒') }}
+        {{ nav('/abelorder?view=approvals', 'PO Approvals', badge=ao_approvals, icon='✍') }}
+        {% if user.is_procurement or user.role == Role.MANAGER %}
+        {{ nav('/abelorder?view=procurement', 'Ready for PO', icon='⇥') }}
+        {{ nav('/admin/abelorder', 'AbelOrder Settings' if user.role == Role.MANAGER else 'Vendors', icon='⚙') }}
+        {% endif %}
       </div>
       <div class="nav-group">
         <div class="nav-title">Change</div>
@@ -74,10 +84,21 @@
     {% else %}
       <div class="nav-group">
         {{ nav('/', 'Home', icon='⌂') }}
-        {{ nav('/tickets/new', 'New Request', icon='+') }}
-        {{ nav('/tickets?status=all', 'My Tickets', icon='☰') }}
+        {{ nav('/tickets/new', 'New IT Request', icon='+') }}
+        {{ nav('/tickets?status=all', 'My IT Tickets', icon='☰') }}
         {{ nav('/profile', 'My Profile', icon='☺') }}
       </div>
+      <div class="nav-group">
+        <div class="nav-title">AbelOrder</div>
+        {{ nav('/abelorder/new', 'New PO Request', icon='+') }}
+        {{ nav('/abelorder', 'My Requests', prefix='/abelorder/AO-', icon='🛒') }}
+        {{ nav('/abelorder?view=approvals', 'PO Approvals', badge=ao_approvals, icon='✍') }}
+        {% if user.is_procurement or user.role == Role.MANAGER %}
+        {{ nav('/abelorder?view=procurement', 'Ready for PO', icon='⇥') }}
+        {{ nav('/admin/abelorder', 'AbelOrder Settings' if user.role == Role.MANAGER else 'Vendors', icon='⚙') }}
+        {% endif %}
+      </div>
+
     {% endif %}
   </aside>
   {% endif %}
