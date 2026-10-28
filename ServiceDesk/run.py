@@ -6,8 +6,13 @@
 
 import argparse
 import os
+import warnings
 
 import uvicorn
+
+# Newer Authlib releases warn about their own httpx integration at import time; it's harmless
+# but PowerShell shows it as an error, so hide it.
+warnings.filterwarnings("ignore", message=r".*httpx module is deprecated.*")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the IT Service Desk web server")
