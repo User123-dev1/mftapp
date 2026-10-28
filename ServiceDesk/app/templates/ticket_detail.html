@@ -103,6 +103,9 @@
         {% if ticket.assigned_by %}<dt>Assigned by</dt><dd>{{ ticket.assigned_by.full_name }}</dd>
         {% elif ticket.assignee %}<dt>Assigned by</dt><dd>Auto-assignment</dd>{% endif %}
         <dt>Opened</dt><dd>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
+        {% if user.is_staff and ticket.status.is_open and ticket.category == Category.INCIDENT %}
+        <dt>Outage?</dt><dd><a href="/notices/new?ticket={{ ticket.number }}">📣 Notify users</a></dd>
+        {% endif %}
         {% if ticket.resolved_at %}<dt>Resolved</dt><dd>{{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>{% endif %}
       </dl>
     </div>

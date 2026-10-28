@@ -10,7 +10,9 @@ from fastapi.templating import Jinja2Templates
 
 from . import database, sso
 from .config import settings
-from .models import Category, ChangeState, ChangeType, CIStatus, CIType, Priority, PRStatus, Role, Status, User
+from .models import (
+    Category, ChangeState, ChangeType, CIStatus, CIType, NoticeStatus, Priority, PRStatus, Role, Status, User,
+)
 from .security import csrf_token, pop_flashes
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -34,6 +36,7 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "user": user,
         "my_approvals": _approval_count(user),
         "ao_approvals": _order_approval_count(user),
+        "banners": _banners(user),
         "csrf_token": csrf_token(request),
         "flashes": pop_flashes(request),
         "Status": Status,
@@ -44,6 +47,7 @@ def render(request: Request, name: str, context: Optional[dict] = None, status_c
         "CIStatus": CIStatus,
         "ChangeState": ChangeState,
         "PRStatus": PRStatus,
+        "NoticeStatus": NoticeStatus,
         "ChangeType": ChangeType,
         "sso_providers": sso.providers(),
         "local_login": settings.local_login,
@@ -72,6 +76,20 @@ def _order_approval_count(user: Optional[User]) -> int:
     db = database.SessionLocal()
     try:
         return len(pending_for(db, db.get(User, user.id)))
+    finally:
+        db.close()
+
+
+def _banners(user: Optional[User]) -> list:
+    if user is None:
+        return []
+    from .notices import banner_notices
+
+    db = database.SessionLocal()
+    try:
+        rows = banner_notices(db)
+        return [{"number": n.number, "title": n.title, "severity": n.severity.value, "kind": n.kind.label}
+                for n in rows]
     finally:
         db.close()
 

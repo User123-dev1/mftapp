@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ n.number }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <section class="card main-col">
+    <p class="muted small"><a href="/notices">← Service notices</a></p>
+    <div class="ticket-head">
+      <h1>{{ n.number }} — {{ n.title }}</h1>
+      <div><span class="badge ntc-{{ n.status.value }}">{{ n.status.label }}</span> <span class="badge sev-{{ n.severity.value }}">{{ n.kind.label }}</span></div>
+    </div>
+    {% if n.change %}<p class="small">Related change: <a href="/changes/{{ n.change.number }}">{{ n.change.number }}</a></p>{% endif %}
+    {% if n.ticket %}<p class="small">Related ticket: <a href="/tickets/{{ n.ticket.number }}">{{ n.ticket.number }}</a></p>{% endif %}
+
+    <h2>{{ 'Email preview' if n.status == NoticeStatus.DRAFT else 'Message sent' }}</h2>
+    <div class="email-preview">
+      <div class="muted small">Subject: <strong>{{ preview_subject }}</strong></div>
+      <pre>{{ preview }}</pre>
+    </div>
+
+    {% if n.updates %}
+    <h2>Timeline</h2>
+    <ul class="activity">
+      {% for u in n.updates|reverse %}
+      <li><span class="badge upd-{{ u.kind }}">{{ u.kind|title }}</span> <span class="muted">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }} UTC — {{ u.author.full_name }}</span>
+        {% if u.kind != 'sent' %}<p class="pre">{{ u.message }}</p>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <aside class="side-col">
+    <div class="card">
+      <h3>Recipients ({{ recipients|length }})</h3>
+      <ul class="rels">{% for r in recipients %}<li>{{ r }}</li>{% else %}<li class="danger">None selected</li>{% endfor %}</ul>
+      {% if window %}<p class="small"><strong>When:</strong> {{ window }}</p>{% endif %}
+      {% if n.items %}<p class="small"><strong>Affected:</strong> {{ n.items|map(attribute='name')|join(', ') }}</p>{% endif %}
+      <p class="small"><strong>Banner:</strong> {{ 'shown while active' if n.show_banner else 'off' }}</p>
+    </div>
+
+    {% if n.status == NoticeStatus.DRAFT %}
+    <div class="card assign-card">
+      <h3>Send</h3>
+      <p><a class="btn btn-small btn-secondary" href="/notices/{{ n.number }}/edit">Edit draft</a></p>
+      {% if can_send %}
+      <form method="post" action="/notices/{{ n.number }}/send">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="check"><input type="checkbox" name="confirm" value="true" required> I've checked the message and recipients</label>
+        <button class="btn">Send to {{ recipients|length }} address(es)</button>
+      </form>
+      {% else %}
+      <p class="muted small">An IT manager (or staff allowed to send notices) must send it.</p>
+      {% endif %}
+      <details class="small"><summary class="danger">Discard draft</summary>
+        <form method="post" action="/notices/{{ n.number }}/cancel"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small btn-warn">Discard</button></form>
+      </details>
+    </div>
+    {% elif n.status == NoticeStatus.ACTIVE and can_send %}
+    <div class="card">
+      <h3>Post an update</h3>
+      <form method="post" action="/notices/{{ n.number }}/update">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <textarea name="message" rows="3" required placeholder="e.g. Engineers on site; next update by 3pm."></textarea>
+        <button class="btn btn-small">Send update</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>{{ 'Mark completed' if n.kind.value in ('maintenance', 'change') else 'Mark resolved' }}</h3>
+      <form method="post" action="/notices/{{ n.number }}/resolve">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <textarea name="message" rows="2" required placeholder="e.g. Service restored at 2:40pm. Thank you for your patience."></textarea>
+        <button class="btn btn-small">Send &amp; close</button>
+      </form>
+      <details class="small"><summary class="danger">Cancel / postpone</summary>
+        <form method="post" action="/notices/{{ n.number }}/cancel"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input name="message" required placeholder="Reason, e.g. maintenance postponed"><button class="btn btn-small btn-warn">Send cancellation</button></form>
+      </details>
+    </div>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

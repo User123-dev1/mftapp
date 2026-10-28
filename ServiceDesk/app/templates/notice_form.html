@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ notice.number if notice else 'New service notice' }} · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p class="muted small"><a href="/notices">← Service notices</a></p>
+  <h1>{{ 'Edit ' ~ notice.number if notice else 'New service notice' }}</h1>
+  {% if change %}<p>For change <a href="/changes/{{ change.number }}">{{ change.number }}</a> — {{ change.title }}</p>{% endif %}
+  {% if ticket %}<p>For ticket <a href="/tickets/{{ ticket.number }}">{{ ticket.number }}</a> — {{ ticket.title }}</p>{% endif %}
+  <form method="post" action="{{ '/notices/%s/edit' % notice.number if notice else '/notices/new' }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if change and not notice %}<input type="hidden" name="change" value="{{ change.number }}">{% endif %}
+    {% if ticket and not notice %}<input type="hidden" name="ticket" value="{{ ticket.number }}">{% endif %}
+    <div class="row">
+      <label>Type
+        <select name="kind">{% for k in NoticeKind %}<option value="{{ k.value }}" {{ 'selected' if form.get('kind') == k.value }}>{{ k.label }}</option>{% endfor %}</select>
+      </label>
+      <label>Severity
+        <select name="severity">{% for s in NoticeSeverity %}<option value="{{ s.value }}" {{ 'selected' if form.get('severity') == s.value }}>{{ s.label }}</option>{% endfor %}</select>
+      </label>
+      <label>Starts (local time) <input type="datetime-local" name="start_at" value="{{ form.get('start_at') or '' }}"></label>
+      <label>Ends (local time) <input type="datetime-local" name="end_at" value="{{ form.get('end_at') or '' }}">
+        <span class="muted small">Leave blank for outages with no known end.</span></label>
+    </div>
+    <label>Title (email subject) <input name="title" value="{{ form.get('title') or '' }}" maxlength="255" required placeholder="e.g. Email unavailable Saturday 8-10pm"></label>
+    <label>What is happening <textarea name="message" rows="4" required>{{ form.get('message') or '' }}</textarea></label>
+    <label>Impact - who / what is affected <textarea name="impact" rows="2">{{ form.get('impact') or '' }}</textarea></label>
+    <label>What users should do <textarea name="user_action" rows="2" placeholder="e.g. Save your work before 8pm. No need to log a ticket.">{{ form.get('user_action') or '' }}</textarea></label>
+
+    <fieldset>
+      <legend>Send to</legend>
+      {% if lists %}
+      <div class="members">
+        {% for dl in lists %}
+        <label><input type="checkbox" name="list_ids" value="{{ dl.id }}" {{ 'checked' if dl.id|string in form.get('list_ids', []) }}> {{ dl.name }} <span class="muted small">{{ dl.email }}</span></label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="danger small">No distribution lists set up yet{% if user.role == Role.MANAGER %} - add them under <a href="/admin/mail">Admin → Mail Setup</a>{% else %} - ask an IT manager to add them under Mail Setup{% endif %}.</p>
+      {% endif %}
+      <label>Additional recipients (optional) <input name="extra_recipients" value="{{ form.get('extra_recipients') or '' }}" placeholder="name@abelzeta.com; other@abelzeta.com"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Affected services (optional)</legend>
+      <input type="search" id="item-filter" placeholder="Filter…" class="ci-filter">
+      <div class="item-list">
+        {% for ci in items %}
+        <label class="check item" data-text="{{ ci.name|lower }}"><input type="checkbox" name="item_ids" value="{{ ci.id }}" {{ 'checked' if ci.id|string in form.get('item_ids', []) }}> {{ ci.display_name }} <span class="muted small">{{ ci.ci_type.label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <label class="check"><input type="checkbox" name="show_banner" value="true" {{ 'checked' if form.get('show_banner') }}> Show a banner in the service desk while this notice is active</label>
+    <div class="actions"><button class="btn">Save draft &amp; preview</button></div>
+  </form>
+</section>
+<script>
+  const f = document.getElementById('item-filter');
+  f.addEventListener('input', () => document.querySelectorAll('.item-list .item').forEach(el => el.hidden = !el.dataset.text.includes(f.value.toLowerCase())));
+</script>
+{% endblock %}

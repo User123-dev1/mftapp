@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Mail setup · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Mail setup</h1>
+  <dl class="kv">
+    <dt>Outgoing mail (SMTP)</dt><dd>{% if settings.smtp_host %}<strong>{{ settings.smtp_host }}:{{ settings.smtp_port }}</strong>{% if settings.smtp_ssl %} (SSL){% elif settings.smtp_starttls %} (STARTTLS){% endif %}{% if settings.smtp_user %} as {{ settings.smtp_user }}{% endif %}{% else %}<span class="danger">Not configured - emails are only recorded in the Email Log.</span> Set <code>SMTP_HOST</code> etc. (see README) and restart.{% endif %}</dd>
+    <dt>From address</dt><dd>{{ settings.smtp_from }}</dd>
+    <dt>Links in emails</dt><dd>{{ settings.base_url }}</dd>
+  </dl>
+  <form method="post" action="/admin/mail/test" class="filters">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="email" name="to" value="{{ user.email }}" required>
+    <button class="btn btn-small">Send test email</button>
+    <a href="/admin/emails">Email log →</a>
+  </form>
+</section>
+
+<section class="card" id="lists">
+  <h2>Distribution lists</h2>
+  <p class="muted small">Service notices are sent to these addresses; your mail server (Exchange / Microsoft 365 groups) delivers them to members.
+    <em>Default</em> lists are pre-selected on new notices.</p>
+  <table class="grid compact">
+    <thead><tr><th>Name</th><th>List email</th><th>Description</th><th>Default</th><th>Active</th><th></th></tr></thead>
+    {% for dl in lists %}
+    <tr>
+      <td><input name="name" value="{{ dl.name }}" form="dl-{{ dl.id }}" required></td>
+      <td><input type="email" name="email" value="{{ dl.email }}" form="dl-{{ dl.id }}" required></td>
+      <td><input name="description" value="{{ dl.description or '' }}" form="dl-{{ dl.id }}"></td>
+      <td><input type="checkbox" name="is_default" value="true" form="dl-{{ dl.id }}" {{ 'checked' if dl.is_default }}></td>
+      <td><input type="checkbox" name="active" value="true" form="dl-{{ dl.id }}" {{ 'checked' if dl.active }}></td>
+      <td><form method="post" action="/admin/mail/lists" id="dl-{{ dl.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="list_id" value="{{ dl.id }}"><button class="btn btn-small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td><input name="name" placeholder="e.g. All Staff" form="dl-new" required></td>
+      <td><input type="email" name="email" placeholder="allstaff@abelzeta.com" form="dl-new" required></td>
+      <td><input name="description" form="dl-new"></td>
+      <td><input type="checkbox" name="is_default" value="true" form="dl-new"></td>
+      <td><input type="checkbox" name="active" value="true" form="dl-new" checked></td>
+      <td><form method="post" action="/admin/mail/lists" id="dl-new"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Add</button></form></td>
+    </tr>
+  </table>
+</section>
+{% endblock %}

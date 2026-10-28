@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import abelorder_routes, change_routes, changes, cmdb, cmdb_routes, database, entra_sync, reports, services, sso
+from . import abelorder_routes, change_routes, notice_routes, changes, cmdb, cmdb_routes, database, entra_sync, reports, services, sso
 from .config import settings
 from .emailer import deliver_pending
 from .models import Category, CIStatus, CIType, ConfigItem, EmailLog, Priority, Role, Status, Ticket, User
@@ -84,6 +84,7 @@ app.include_router(cmdb_routes.router)
 app.include_router(reports.router)
 app.include_router(change_routes.router)
 app.include_router(abelorder_routes.router)
+app.include_router(notice_routes.router)
 
 
 @app.exception_handler(LoginRequired)
@@ -697,6 +698,7 @@ def edit_user(
     role: str = Form(...),
     is_active: bool = Form(False),
     is_change_approver: bool = Form(False),
+    can_send_notices: bool = Form(False),
     password: str = Form(""),
     user: User = Depends(require_manager),
     db: Session = Depends(database.get_db),
@@ -718,6 +720,7 @@ def edit_user(
     target.role = new_role
     target.is_active = is_active
     target.is_change_approver = is_change_approver and new_role != Role.REQUESTER
+    target.can_send_notices = can_send_notices and new_role != Role.REQUESTER
     if password:
         target.password_hash = hash_password(password)
     db.commit()

@@ -42,6 +42,7 @@ _NEW_COLUMNS = {
         "supervisor_id": "INTEGER REFERENCES users(id)",
         "department_id": "INTEGER REFERENCES departments(id)",
         "is_procurement": "BOOLEAN NOT NULL DEFAULT 0",
+        "can_send_notices": "BOOLEAN NOT NULL DEFAULT 0",
     },
     "email_log": {"attachments": "TEXT"},
     "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},

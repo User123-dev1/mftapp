@@ -42,6 +42,8 @@
         {{ nav('/tickets', 'All Open', icon='☰') }}
         {{ nav('/tickets?status=all', 'All Tickets', icon='⌕') }}
         {{ nav('/tickets/new', 'New IT Request', icon='+') }}
+        {{ nav('/notices', 'Service Notices', prefix='/notices/', icon='📣') }}
+        {{ nav('/status', 'Service Status', badge=banners|length, icon='●') }}
       </div>
       <div class="nav-group">
         <div class="nav-title">AbelOrder</div>
@@ -78,7 +80,8 @@
         {{ nav('/admin/users', 'Users', icon='☺') }}
         {{ nav('/admin/groups', 'Support Groups', icon='⚇') }}
         {{ nav('/admin/change-settings', 'Change Policy', icon='⚖') }}
-        {{ nav('/admin/emails', 'Email Log', icon='✉') }}
+        {{ nav('/admin/mail', 'Mail Setup', icon='✉') }}
+        {{ nav('/admin/emails', 'Email Log', icon='☷') }}
       </div>
       {% endif %}
     {% else %}
@@ -86,6 +89,7 @@
         {{ nav('/', 'Home', icon='⌂') }}
         {{ nav('/tickets/new', 'New IT Request', icon='+') }}
         {{ nav('/tickets?status=all', 'My IT Tickets', icon='☰') }}
+        {{ nav('/status', 'Service Status', badge=banners|length, icon='●') }}
         {{ nav('/profile', 'My Profile', icon='☺') }}
       </div>
       <div class="nav-group">
@@ -103,6 +107,11 @@
   </aside>
   {% endif %}
   <main>
+    {% for b in banners %}
+      <a class="notice-banner sev-banner-{{ b.severity }}" href="/status">
+        <strong>{{ b.kind }}:</strong> {{ b.title }} <span class="small">— details →</span>
+      </a>
+    {% endfor %}
     {% for category, message in flashes %}
       <div class="flash flash-{{ category }}">{{ message }}</div>
     {% endfor %}

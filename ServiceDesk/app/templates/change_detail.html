@@ -78,6 +78,9 @@
         <dt>Requested by</dt><dd>{{ change.requested_by.full_name }}</dd>
         <dt>Implementer</dt><dd>{{ change.implementer.full_name if change.implementer else '—' }}</dd>
       </dl>
+      {% if change.state.value in ('approved', 'pending_approval', 'in_progress') %}
+      <a class="btn btn-small btn-secondary" href="/notices/new?change={{ change.number }}">📣 Notify users</a>
+      {% endif %}
     </div>
 
     {% if can_edit %}

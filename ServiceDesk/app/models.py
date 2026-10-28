@@ -101,10 +101,16 @@ class User(Base):
     supervisor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     department_id: Mapped[Optional[int]] = mapped_column(ForeignKey("departments.id"), nullable=True)
     is_procurement: Mapped[bool] = mapped_column(Boolean, default=False)
+    # May email service notices to the distribution lists (IT managers always can).
+    can_send_notices: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     supervisor: Mapped[Optional["User"]] = relationship(remote_side="User.id", foreign_keys=[supervisor_id])
     department_ref: Mapped[Optional["Department"]] = relationship(foreign_keys=[department_id])
+
+    @property
+    def may_send_notices(self) -> bool:
+        return self.is_active and (self.role == Role.MANAGER or (self.is_staff and self.can_send_notices))
 
     @property
     def can_approve_changes(self) -> bool:
@@ -683,3 +689,125 @@ class PurchaseActivity(Base):
 
     request: Mapped[PurchaseRequest] = relationship(back_populates="activities")
     actor: Mapped[Optional[User]] = relationship()
+
+
+# --- Service notices (outage / maintenance / change announcements) ---------------------------
+
+class DistributionList(Base):
+    """A mail distribution list address (e.g. allstaff@company.com); the mail server expands it."""
+
+    __tablename__ = "distribution_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)  # pre-selected on new notices
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class NoticeKind(str, enum.Enum):
+    OUTAGE = "outage"
+    MAINTENANCE = "maintenance"
+    CHANGE = "change"
+    INFO = "info"
+
+    @property
+    def label(self) -> str:
+        return {"outage": "Outage / Major Incident", "maintenance": "Planned Maintenance",
+                "change": "Service Change / Update", "info": "Information"}[self.value]
+
+    @property
+    def tag(self) -> str:
+        return {"outage": "OUTAGE", "maintenance": "PLANNED MAINTENANCE", "change": "SERVICE CHANGE",
+                "info": "IT NOTICE"}[self.value]
+
+
+class NoticeSeverity(str, enum.Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+    @property
+    def label(self) -> str:
+        return {"info": "Low - informational", "warning": "Medium - some users affected",
+                "critical": "High - major impact"}[self.value]
+
+
+class NoticeStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"        # sent; shown on the banner / status page
+    RESOLVED = "resolved"
+    CANCELLED = "cancelled"
+
+    @property
+    def label(self) -> str:
+        return {"active": "Active (sent)"}.get(self.value, self.value.title())
+
+
+notice_lists = Table(
+    "notice_lists",
+    Base.metadata,
+    Column("notice_id", ForeignKey("service_notices.id", ondelete="CASCADE"), primary_key=True),
+    Column("list_id", ForeignKey("distribution_lists.id", ondelete="CASCADE"), primary_key=True),
+)
+
+notice_items = Table(
+    "notice_items",
+    Base.metadata,
+    Column("notice_id", ForeignKey("service_notices.id", ondelete="CASCADE"), primary_key=True),
+    Column("ci_id", ForeignKey("config_items.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class ServiceNotice(Base):
+    __tablename__ = "service_notices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    number: Mapped[str] = mapped_column(String(20), unique=True, index=True, default="")
+    kind: Mapped[NoticeKind] = mapped_column(Enum(NoticeKind))
+    severity: Mapped[NoticeSeverity] = mapped_column(Enum(NoticeSeverity), default=NoticeSeverity.WARNING)
+    status: Mapped[NoticeStatus] = mapped_column(Enum(NoticeStatus), default=NoticeStatus.DRAFT, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    message: Mapped[str] = mapped_column(Text)                       # what is happening
+    impact: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # who/what is affected
+    user_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # what users should do
+    # Local wall-clock times, as entered (same convention as change windows).
+    start_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    end_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    show_banner: Mapped[bool] = mapped_column(Boolean, default=True)
+    extra_recipients: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # comma-separated addresses
+
+    change_id: Mapped[Optional[int]] = mapped_column(ForeignKey("change_requests.id"), nullable=True)
+    ticket_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    sent_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    change: Mapped[Optional[ChangeRequest]] = relationship()
+    ticket: Mapped[Optional[Ticket]] = relationship()
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id])
+    sent_by: Mapped[Optional[User]] = relationship(foreign_keys=[sent_by_id])
+    lists: Mapped[list[DistributionList]] = relationship(secondary=notice_lists, order_by=DistributionList.name)
+    items: Mapped[list[ConfigItem]] = relationship(secondary=notice_items, order_by=ConfigItem.name)
+    updates: Mapped[list["NoticeUpdate"]] = relationship(
+        back_populates="notice", order_by="NoticeUpdate.id", cascade="all, delete-orphan"
+    )
+
+
+class NoticeUpdate(Base):
+    """A follow-up sent to the same lists: progress update, resolution or cancellation."""
+
+    __tablename__ = "notice_updates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notice_id: Mapped[int] = mapped_column(ForeignKey("service_notices.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # sent | update | resolved | cancelled
+    message: Mapped[str] = mapped_column(Text)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    notice: Mapped[ServiceNotice] = relationship(back_populates="updates")
+    author: Mapped[User] = relationship()

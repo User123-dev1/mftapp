@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Service notices · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="ticket-head">
+    <h1>Service notices</h1>
+    <a class="btn btn-small" href="/notices/new">+ New notice</a>
+  </div>
+  <nav class="tabs">
+    {% for key, label in [('active', 'Active'), ('drafts', 'Drafts'), ('all', 'All')] %}
+    <a href="/notices?view={{ key }}" class="{{ 'on' if view == key }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% if rows %}
+  <table class="grid">
+    <thead><tr><th>Notice</th><th>Title</th><th>Type</th><th>When</th><th>Sent to</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for n in rows %}
+    <tr>
+      <td><a href="/notices/{{ n.number }}">{{ n.number }}</a></td>
+      <td>{{ n.title }}</td>
+      <td><span class="badge sev-{{ n.severity.value }}">{{ n.kind.label }}</span></td>
+      <td class="small">{% if n.start_at %}{{ n.start_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% if n.end_at %} → {{ n.end_at.strftime('%m-%d %H:%M') }}{% endif %}</td>
+      <td class="small">{{ n.lists|map(attribute='name')|join(', ') }}</td>
+      <td><span class="badge ntc-{{ n.status.value }}">{{ n.status.label }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No notices.</p>{% endif %}
+</section>
+{% endblock %}

@@ -14,11 +14,11 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from app import abelorder, changes, cmdb, database, services
+from app import abelorder, changes, cmdb, database, notices, services
 from app.config import settings
 from app.main import ensure_admin
 from app.models import (
-    Department, Project, Vendor, Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
+    Department, DistributionList, NoticeKind, NoticeSeverity, Project, Vendor, Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
     Ticket, User,
 )
 from app.security import hash_password
@@ -203,6 +203,22 @@ def main() -> None:
     }, [sql], alice)
     changes.submit(db, patch, alice)
     changes.decide(db, patch, sam, True, "OK outside business hours")
+
+    # Service notices: distribution lists and an announcement for the firewall change.
+    staff_dl = DistributionList(name="All Staff", email="allstaff@abelzeta.com", is_default=True,
+                                description="Everyone in the company")
+    db.add_all([staff_dl, DistributionList(name="Plant Operations", email="plantops@abelzeta.com"),
+                DistributionList(name="IT Team", email="it@abelzeta.com")])
+    db.flush()
+    notice = notices.create(db, manager, {
+        "kind": NoticeKind.MAINTENANCE, "severity": NoticeSeverity.WARNING,
+        "title": "Network maintenance - brief interruptions to ERP and VPN",
+        "message": "IT is updating the core firewall. ERP, Payroll and VPN may drop for a few minutes.",
+        "impact": "ERP, Payroll (ADP) and remote VPN users.",
+        "user_action": "Save your work before the window starts. No need to log a ticket.",
+        "start_at": chg.planned_start, "end_at": chg.planned_end, "show_banner": True,
+    }, [staff_dl.id], [firewall.id, vpn.id], change=chg)
+    notices.send(db, notice, manager)
     ticket(omar, "Keyboard keys sticking", Category.HARDWARE, Priority.LOW, omar_lt)
     ticket(rita, "Access to shared Finance drive", Category.ACCOUNT, Priority.MEDIUM,
            details={"request_type": "access", "system": "\\\\fs01\\finance", "access_level": "Read/Write"})

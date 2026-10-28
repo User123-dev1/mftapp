@@ -116,6 +116,39 @@ procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), n
 as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
 registered owners).
 
+## Service notices (outages, maintenance, service changes)
+
+Service notices tell end users about outages, planned maintenance and changes that affect them.
+They are emailed to your **mail distribution lists**, shown as a **banner** on every page while
+active, and listed on the **Service Status** page, which everyone can see in the sidebar.
+
+**Setup: Admin → Mail Setup** (IT managers)
+- Add your distribution lists, for example *All Staff* `allstaff@abelzeta.com` or *Plant Operations*
+  `plantops@abelzeta.com`. The app sends one email to each list address and your mail server
+  (Exchange / Microsoft 365 group) delivers it to the members. Tick **Default** for lists that
+  should be pre-selected on new notices.
+- The page shows whether SMTP is configured, and has a **Send test email** button.
+- Exchange Online usually rejects mail to a group from outside the organisation unless the
+  sending account is allowed. Send as an internal mailbox (`SMTP_USER` / `SMTP_FROM`), or allow
+  external senders on the group.
+
+**Sending a notice: Service Notices → New notice**
+1. Choose the type (Outage / Major Incident, Planned Maintenance, Service Change / Update or
+   Information), the severity, the time window, the title (used as the email subject), what is
+   happening, the impact, what users should do, affected services from the CMDB, and the lists.
+2. **Save draft & preview** shows the exact email and every recipient address.
+3. **Send:** tick the confirmation box and send. Only **IT managers**, plus staff ticked **Can send
+   notices** on the Users page, can email the lists. Other agents can prepare drafts.
+4. While it's active: **Post an update**, emailed as "UPDATE 1, 2…". Then **Mark resolved /
+   completed**, or **Cancel / postpone**; each is emailed to the same lists.
+
+**Shortcuts:**
+- **Notify users** on a change request pre-fills the window and affected items.
+- **Notify users** on an open incident ticket pre-fills an outage for its affected service.
+
+The banner shows severity colours (red for major impact) and disappears when the notice is
+resolved or its scheduled end time has passed.
+
 ## AbelOrder: purchase-order requests
 
 Any employee can request a PO under **AbelOrder → New PO Request**. The request is signed off in
@@ -449,6 +482,8 @@ app/
   cmdb_routes.py CMDB and support-group pages
   entra_sync.py  Entra ID device sync via Microsoft Graph (+ daily scheduler, CLI)
   reports.py     reporting page
+  notices.py     service notices: distribution lists, emails, banner, status page
+  notice_routes.py notice pages, Service Status, Mail Setup
   abelorder.py   AbelOrder purchase requests: form rules, routing, signatures, notifications
   abelorder_pdf.py  PDF copy of a purchase request
   abelorder_routes.py  AbelOrder pages and settings

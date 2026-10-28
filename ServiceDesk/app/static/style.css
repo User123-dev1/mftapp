@@ -166,3 +166,20 @@ ol.signatures li { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .urg-critical { background: #fed7d7; color: #9b2c2c; font-weight: 600; }
 .step-waiting { background: #edf2f7; color: #718096; } .step-pending { background: #fefcbf; color: #975a16; }
 .step-approved { background: #e6f4ea; color: #276749; } .step-rejected { background: #fed7d7; color: #9b2c2c; }
+
+/* --- Service notices --- */
+.notice-banner { display: block; padding: 10px 14px; border-radius: 6px; margin-bottom: 10px; color: inherit; border-left: 5px solid; }
+.notice-banner:hover { text-decoration: none; filter: brightness(.98); }
+.sev-banner-critical { background: #fde8e8; border-color: #c53030; color: #742a2a; }
+.sev-banner-warning { background: #fff8e1; border-color: #d69e2e; color: #744210; }
+.sev-banner-info { background: #ebf4ff; border-color: #2b6cb0; color: #1f4e79; }
+.sev-critical { background: #fed7d7; color: #9b2c2c; } .sev-warning { background: #feebc8; color: #9c4221; } .sev-info { background: #ebf4ff; color: #2b6cb0; }
+.ntc-draft { background: #edf2f7; } .ntc-active { background: #fefcbf; color: #975a16; }
+.ntc-resolved { background: #e6f4ea; color: #276749; } .ntc-cancelled { background: #e2e8f0; color: #4a5568; }
+.upd-sent { background: #ebf4ff; } .upd-update { background: #fefcbf; } .upd-resolved { background: #e6f4ea; } .upd-cancelled { background: #e2e8f0; }
+.email-preview { border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; background: #fafbfc; }
+.email-preview pre { white-space: pre-wrap; font-family: inherit; margin: 8px 0 0; }
+.status-card { border: 1px solid var(--border); border-left: 5px solid; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; }
+.sev-border-critical { border-left-color: #c53030; } .sev-border-warning { border-left-color: #d69e2e; } .sev-border-info { border-left-color: #2b6cb0; }
+.all-good { background: #e6f4ea; color: #276749; padding: 14px; border-radius: 6px; font-weight: 600; margin-bottom: 12px; }
+.update-line { margin: 4px 0; }

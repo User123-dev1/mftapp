@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Service status · {{ app_name }}{% endblock %}
+{% macro notice_card(n) %}
+<div class="status-card sev-border-{{ n.severity.value }}">
+  <div class="ticket-head"><h3>{{ n.title }}</h3><span class="badge sev-{{ n.severity.value }}">{{ n.kind.label }}</span></div>
+  {% set w = window(n) %}{% if w %}<p class="small"><strong>When:</strong> {{ w }}</p>{% endif %}
+  {% if n.items %}<p class="small"><strong>Affected:</strong> {{ n.items|map(attribute='name')|join(', ') }}</p>{% endif %}
+  <p class="pre">{{ n.message }}</p>
+  {% if n.impact %}<p class="small"><strong>Impact:</strong> {{ n.impact }}</p>{% endif %}
+  {% if n.user_action %}<p class="small"><strong>What to do:</strong> {{ n.user_action }}</p>{% endif %}
+  {% for u in n.updates|reverse if u.kind in ('update', 'resolved', 'cancelled') %}
+  <p class="small update-line"><span class="badge upd-{{ u.kind }}">{{ u.kind|title }}</span> {{ u.created_at.strftime('%m-%d %H:%M') }} UTC — {{ u.message }}</p>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% block content %}
+<section class="card">
+  <h1>Service status</h1>
+  {% if not current and not upcoming %}
+  <div class="all-good">✓ All services are running normally.</div>
+  {% endif %}
+  {% if current %}<h2>Current issues and work in progress</h2>{% for n in current %}{{ notice_card(n) }}{% endfor %}{% endif %}
+  {% if upcoming %}<h2>Upcoming planned work</h2>{% for n in upcoming %}{{ notice_card(n) }}{% endfor %}{% endif %}
+  {% if recent %}<h2>Recently resolved (last 14 days)</h2>{% for n in recent %}{{ notice_card(n) }}{% endfor %}{% endif %}
+  <p class="muted small">Having a problem that isn't listed? <a href="/tickets/new">Report it to the IT Service Desk</a>.</p>
+</section>
+{% endblock %}
