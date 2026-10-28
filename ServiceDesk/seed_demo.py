@@ -1,21 +1,24 @@
-"""Fill an empty database with demo users, CMDB items and tickets: python seed_demo.py
+"""Demo data.
+
+    python seed_demo.py              # empty database: demo users, CMDB, tickets, changes, AbelOrder
+    python seed_demo.py --abelorder  # any database: just AbelOrder reference data (departments with
+                                     # heads, CSO, Procurement user, vendors, project codes). Safe to re-run;
+                                     # never changes existing tickets or overwrites your own settings.
 
 All demo accounts use the password Password1! (the IT manager keeps SD_ADMIN_PASSWORD).
 """
 
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
-
-from datetime import datetime
 
 from app import abelorder, changes, cmdb, database, services
 from app.config import settings
 from app.main import ensure_admin
 from app.models import (
-    Department, Vendor, Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
+    Department, Project, Vendor, Category, ChangeType, CIRelationship, CIStatus, CIType, ConfigItem, Level, Priority, Role, Status, SupportGroup,
     Ticket, User,
 )
 from app.security import hash_password
@@ -23,21 +26,108 @@ from app.security import hash_password
 PASSWORD = "Password1!"
 
 
+def get_user(db, email, name, role=Role.REQUESTER, dept=None):
+    u = db.scalar(select(User).where(User.email == email))
+    if u is None:
+        u = User(email=email, full_name=name, role=role, department=dept, is_active=True,
+                 password_hash=hash_password(PASSWORD))
+        db.add(u)
+        db.flush()
+    return u
+
+
+def seed_abelorder_reference(db) -> dict:
+    """Departments (with heads), CSO, Procurement user, vendors and project codes. Idempotent:
+    existing records and settings are kept as they are."""
+    manager = db.scalar(select(User).where(User.role == Role.MANAGER).order_by(User.id))
+    heads = {
+        "Operations": get_user(db, "hank.head@example.com", "Hank Head", dept="Operations"),
+        "Finance": get_user(db, "fiona.finance@example.com", "Fiona Finance", dept="Finance"),
+        "Engineering": get_user(db, "eli.engineering@example.com", "Eli Engineering", dept="Engineering"),
+        "Human Resources": get_user(db, "holly.hr@example.com", "Holly HR", dept="Human Resources"),
+        "Sales": get_user(db, "sid.sales@example.com", "Sid Sales", dept="Sales"),
+        "IT": manager,
+    }
+    depts = {}
+    for name, head in heads.items():
+        d = db.scalar(select(Department).where(func.lower(Department.name) == name.lower()))
+        if d is None:
+            d = Department(name=name)
+            db.add(d)
+        if d.head is None:
+            d.head = head
+        depts[name] = d
+
+    cso = get_user(db, "carla.cso@example.com", "Carla CSO", dept="Executive")
+    if not abelorder.get_setting(db, "abelorder.cso_user_id"):
+        abelorder.set_setting(db, "abelorder.cso_user_id", str(cso.id))
+    pat = get_user(db, "pat.procurement@example.com", "Pat Procurement", dept="Procurement")
+    pat.is_procurement = True
+    sup = get_user(db, "sara.supervisor@example.com", "Sara Supervisor", dept="Operations")
+    if sup.department_ref is None:
+        sup.department_ref = depts["Operations"]
+
+    vendors = {}
+    for name, contact, email in [
+        ("Acme Industrial Supply", "Al Jones", "al.jones@acme.example"),
+        ("Grainger", "Sales Desk", "sales@grainger.example"),
+        ("CDW", "Account Team", "orders@cdw.example"),
+        ("Dell Technologies", "Inside Sales", "sales@dell.example"),
+        ("Fastenal", "Branch 412", "branch412@fastenal.example"),
+    ]:
+        v = db.scalar(select(Vendor).where(func.lower(Vendor.name) == name.lower()))
+        if v is None:
+            v = Vendor(name=name, contact_name=contact, contact_email=email)
+            db.add(v)
+        vendors[name] = v
+
+    for code, desc in [
+        ("CR00168", "New project (capital request)"),
+        ("WO-4471", "Line 2 preventive maintenance"),
+        ("WO-4502", "Pump 4 VFD replacement"),
+        ("WO-4600", "Line 3 expansion"),
+        ("CAP-2026-01", "2026 capital equipment"),
+        ("OPEX-IT-2026", "IT operating budget 2026"),
+        ("OPEX-FAC-2026", "Facilities operating budget 2026"),
+    ]:
+        if not db.scalar(select(Project).where(func.lower(Project.code) == code.lower())):
+            db.add(Project(code=code, name=desc, active=True))
+    db.flush()
+    return {"depts": depts, "cso": cso, "pat": pat, "sup": sup, "vendors": vendors}
+
+
+def seed_abelorder_only() -> None:
+    database.init_db()
+    ensure_admin()
+    db = database.SessionLocal()
+    ref = seed_abelorder_reference(db)
+    db.commit()
+    print("AbelOrder reference data is in place:")
+    for name, d in ref["depts"].items():
+        print(f"  Department {name:<16} head: {d.head.full_name if d.head else '-'}")
+    cso_id = abelorder.get_setting(db, "abelorder.cso_user_id")
+    cso = db.get(User, int(cso_id)) if cso_id.isdigit() else None
+    print(f"  CSO: {cso.full_name if cso else '-'}   Procurement: {ref['pat'].email}")
+    print(f"  Vendors: {db.scalar(select(func.count()).select_from(Vendor))}   "
+          f"Project codes: {db.scalar(select(func.count()).select_from(Project))}")
+    print(f"New demo accounts use the password {PASSWORD}. Change any of this under AbelOrder Settings.")
+    db.close()
+
+
 def main() -> None:
+    if "--abelorder" in sys.argv:
+        seed_abelorder_only()
+        return
     database.init_db()
     ensure_admin()
     db = database.SessionLocal()
     if db.scalar(select(func.count()).select_from(Ticket)) and "--force" not in sys.argv:
-        print("The database already has tickets; run with --force to add demo data anyway.")
+        print("The database already has tickets; run with --force to add demo data anyway,")
+        print("or 'python seed_demo.py --abelorder' to add only the AbelOrder setup (departments, projects...).")
         return
 
     def user(email, name, role, dept=None):
-        u = db.scalar(select(User).where(User.email == email))
-        if u is None:
-            u = User(email=email, full_name=name, role=role, department=dept, is_active=True,
-                     password_hash=hash_password(PASSWORD))
-            db.add(u)
-        return u
+        return get_user(db, email, name, role, dept)
 
     manager = db.scalar(select(User).where(User.role == Role.MANAGER))
     alice = user("alice.agent@example.com", "Alice Agent", Role.AGENT)
@@ -117,21 +207,12 @@ def main() -> None:
     ticket(rita, "Access to shared Finance drive", Category.ACCOUNT, Priority.MEDIUM,
            details={"request_type": "access", "system": "\\\\fs01\\finance", "access_level": "Read/Write"})
 
-    # --- AbelOrder: org chart, vendors and purchase requests ---
-    sup = user("sara.supervisor@example.com", "Sara Supervisor", Role.REQUESTER, "Operations")
-    head = user("hank.head@example.com", "Hank Head", Role.REQUESTER, "Operations")
-    cso = user("carla.cso@example.com", "Carla CSO", Role.REQUESTER, "Executive")
-    pat = user("pat.procurement@example.com", "Pat Procurement", Role.REQUESTER, "Procurement")
-    pat.is_procurement = True
-    db.flush()
-    ops = Department(name="Operations", head=head)
-    db.add_all([ops, Department(name="Finance"), Department(name="IT", head=manager)])
+    # --- AbelOrder: org chart, vendors, project codes and purchase requests ---
+    ref = seed_abelorder_reference(db)
+    sup, pat, ops = ref["sup"], ref["pat"], ref["depts"]["Operations"]
+    acme = ref["vendors"]["Acme Industrial Supply"]
     omar.supervisor, omar.department_ref = sup, ops
-    rita.supervisor = sup
-    acme = Vendor(name="Acme Industrial Supply", contact_name="Al Jones", contact_email="al.jones@acme.example")
-    db.add_all([acme, Vendor(name="Grainger", contact_name="Sales Desk", contact_email="sales@grainger.example")])
-    abelorder.set_setting(db, "abelorder.cso_user_id", str(cso.id))
-    db.flush()
+    rita.supervisor, rita.department_ref = sup, ref["depts"]["Finance"]
 
     def order(requester, items, **kw):
         data = abelorder.OrderInput(
@@ -162,6 +243,7 @@ def main() -> None:
     print(f"  Agents     : alice.agent@example.com, sam.network@example.com (change approver) / {PASSWORD}")
     print(f"  Requesters : rita@example.com, omar@example.com / {PASSWORD}")
     print(f"  AbelOrder  : sara.supervisor@, hank.head@, carla.cso@, pat.procurement@example.com / {PASSWORD}")
+    print("               (department heads: hank.head@, fiona.finance@, eli.engineering@, holly.hr@, sid.sales@)")
 
 
 if __name__ == "__main__":

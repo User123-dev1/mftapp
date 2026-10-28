@@ -160,6 +160,11 @@ Submit ──► Direct Supervisor ──► Department Head (if total > $10,000
 - Cancelling an already-approved request emails Procurement "CANCELLED - do not issue a PO".
 - A new vendor is added to the vendor list automatically once its request is approved.
 
+**Quick test setup on an existing database:** `python seed_demo.py --abelorder` adds sample
+departments, each with a head (Operations, Finance, Engineering, Human Resources, Sales, IT), a CSO
+(Carla CSO), a Procurement user, vendors and project codes. It leaves your tickets alone and never
+overwrites anything you've already set, so it's safe to run again.
+
 ### Setup: **AbelOrder Settings** in the sidebar (IT managers)
 1. **Policy:** the procurement email (default `abztprocurement@abelzeta.com`), both dollar
    thresholds, and which user is the **CSO**.
@@ -168,7 +173,10 @@ Submit ──► Direct Supervisor ──► Department Head (if total > $10,000
    for buyers. A supervisor set here is fixed on that person's requests; if none is set, the
    employee picks one on the form. Procurement members see all requests, have a **Ready for PO**
    queue, record PO numbers and maintain the vendor list.
-4. **Vendors:** your existing vendors and their default contacts.
+4. **Projects / work orders:** the codes employees can charge to. These appear as a dropdown on
+   the form, plus "N/A". Untick *Active* to retire a code. If no codes are defined, the field is
+   free text.
+5. **Vendors:** your existing vendors and their default contacts.
 
 Supervisors, department heads and the CSO don't need IT roles: ordinary (requester) accounts can
 approve. With SSO, they just sign in with Microsoft.

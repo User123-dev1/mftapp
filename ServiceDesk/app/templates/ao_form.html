@@ -36,7 +36,19 @@
         </select>
       </label>
       <label>Needed by (optional) <input type="date" name="needed_by" value="{{ form.get('needed_by') or '' }}"></label>
-      <label>Project / work order number <input name="project_number" value="{{ form.get('project_number') or '' }}" placeholder="e.g. WO-12345 or N/A" maxlength="100"></label>
+      <label>Project / work order number
+        {% if projects %}
+        {% set cur = form.get('project_number') or '' %}
+        <select name="project_number">
+          <option value="">— choose —</option>
+          {% for p in projects %}<option value="{{ p.code }}" {{ 'selected' if cur == p.code }}>{{ p.code }}{% if p.name %} — {{ p.name }}{% endif %}</option>{% endfor %}
+          {% if cur and cur != no_project and cur not in projects|map(attribute='code') %}<option value="{{ cur }}" selected>{{ cur }} (not on the active list)</option>{% endif %}
+          <option value="{{ no_project }}" {{ 'selected' if cur == no_project }}>N/A — not project related</option>
+        </select>
+        {% else %}
+        <input name="project_number" value="{{ form.get('project_number') or '' }}" placeholder="e.g. WO-12345 or N/A" maxlength="100">
+        {% endif %}
+      </label>
     </div>
     <label>Reason / justification <textarea name="justification" rows="3" placeholder="Why is this purchase needed?">{{ form.get('justification') or '' }}</textarea></label>
 

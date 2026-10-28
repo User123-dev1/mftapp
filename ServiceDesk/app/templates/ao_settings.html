@@ -42,6 +42,29 @@
   </table>
 </section>
 
+<section class="card" id="projects">
+  <h2>Projects / work orders</h2>
+  <p class="muted small">Active codes appear in the request form's dropdown (plus "N/A"). Untick <em>Active</em> to retire a code without losing history.
+    With no codes here, employees type the number freely.</p>
+  <table class="grid compact">
+    <thead><tr><th>Code</th><th>Name / description</th><th>Active</th><th></th></tr></thead>
+    {% for p in projects %}
+    <tr>
+      <td><input name="code" value="{{ p.code }}" form="proj-{{ p.id }}" required></td>
+      <td><input name="name" value="{{ p.name or '' }}" form="proj-{{ p.id }}"></td>
+      <td><input type="checkbox" name="active" value="true" form="proj-{{ p.id }}" {{ 'checked' if p.active }}></td>
+      <td><form method="post" action="/admin/abelorder/projects" id="proj-{{ p.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="project_id" value="{{ p.id }}"><button class="btn btn-small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td><input name="code" placeholder="New code, e.g. WO-4600" form="proj-new" required></td>
+      <td><input name="name" placeholder="Description" form="proj-new"></td>
+      <td><input type="checkbox" name="active" value="true" form="proj-new" checked></td>
+      <td><form method="post" action="/admin/abelorder/projects" id="proj-new"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-small">Add</button></form></td>
+    </tr>
+  </table>
+</section>
+
 <section class="card" id="people">
   <h2>People: supervisor, department, Procurement</h2>
   <p class="muted small">A supervisor set here is fixed on that person's requests. If none is set, they choose their supervisor on the form.

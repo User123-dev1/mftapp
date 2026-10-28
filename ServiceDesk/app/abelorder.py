@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .emailer import queue_email
 from .models import (
-    AppSetting, ApprovalRole, Department, PRStatus, PurchaseActivity, PurchaseApproval, PurchaseAttachment,
+    AppSetting, ApprovalRole, Department, PRStatus, Project, PurchaseActivity, PurchaseApproval, PurchaseAttachment,
     PurchaseItem, PurchaseRequest, Role, StepState, Urgency, User, Vendor, utcnow,
 )
 
@@ -35,6 +35,13 @@ ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".doc", ".docx", 
 UOM_CHOICES = ["EA", "BX", "CS", "PK", "PR", "SET", "LOT", "KIT", "ROLL", "FT", "M", "LB", "KG", "GAL", "L", "HR",
                "DAY", "MO", "YR", "LIC"]
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+NO_PROJECT = "N/A"
+
+
+def active_projects(db: Session) -> list[Project]:
+    return list(db.scalars(select(Project).where(Project.active.is_(True)).order_by(Project.code)))
 
 
 class OrderError(ValueError):
@@ -213,7 +220,10 @@ def validate_for_submit(db: Session, data: OrderInput) -> list[str]:
     if not data.justification:
         e.append("Reason / justification is required.")
     if not data.project_number:
-        e.append("Project or work order number is required (enter N/A if none).")
+        e.append("Project or work order number is required (choose N/A if none).")
+    elif data.project_number != NO_PROJECT and active_projects(db) and not db.scalar(
+            select(Project).where(Project.code == data.project_number, Project.active.is_(True))):
+        e.append(f"Project / work order {data.project_number} isn't on the active list - choose one from the list.")
     if not data.vendor_is_new and (data.vendor_id is None or db.get(Vendor, data.vendor_id) is None):
         e.append("Choose an existing vendor, or select 'New vendor' and enter its name.")
     if data.vendor_is_new and not data.vendor_name:
@@ -309,6 +319,9 @@ def build_route(db: Session, pr: PurchaseRequest) -> list[tuple[ApprovalRole, Us
         if role == ApprovalRole.SUPERVISOR:
             return "Choose your direct supervisor."
         if role == ApprovalRole.DEPT_HEAD:
+            if not db.scalar(select(func.count()).select_from(Department)):
+                return ("Orders over " + money(pol.dept_head_threshold) + " need a department head, but no departments "
+                        "are set up yet - an administrator can add them under AbelOrder Settings > Departments.")
             return ("Orders over " + money(pol.dept_head_threshold) + " need a department head: choose a department "
                     "that has a head (ask an administrator to set one).")
         return "Orders over " + money(pol.cso_threshold) + " need CSO approval, but no CSO is configured."

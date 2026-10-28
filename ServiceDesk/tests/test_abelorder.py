@@ -2,7 +2,7 @@ import re
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import abelorder, database
 from app.config import settings
@@ -346,3 +346,50 @@ def test_settings_access(client, manager):
     r = manager.post("/admin/abelorder/policy", {"procurement_email": PROCUREMENT, "dept_head_threshold": "50000",
                                                  "cso_threshold": "10000"})
     assert "must be higher" in r.text
+
+
+def test_project_codes_managed_by_admin(client, manager):
+    ids, b = org(client, manager)
+    # With no codes defined the field is free text.
+    assert 'name="project_number" value=""' in b["emma"].get("/abelorder/new").text
+    r = manager.post("/admin/abelorder/projects", {"code": "WO-4600", "name": "Line 3 expansion", "active": "true"})
+    assert "Saved project WO-4600" in r.text
+    manager.post("/admin/abelorder/projects", {"code": "OLD-1", "name": "Retired", "active": ""})
+    assert "unique project" in manager.post("/admin/abelorder/projects", {"code": "N/A"}).text  # reserved
+    assert "unique project" in manager.post("/admin/abelorder/projects", {"code": "wo-4600"}).text
+    assert b["pat"].post("/admin/abelorder/projects", {"code": "X"}).status_code == 403
+
+    page = b["emma"].get("/abelorder/new").text
+    assert '<select name="project_number">' in page and "WO-4600 — Line 3 expansion" in page
+    assert "OLD-1" not in page and "N/A — not project related" in page
+
+    r = post_request(b["emma"], form(ids, ONE_ITEM, project_number="WO-9999"))
+    assert "isn&#39;t on the active list" in r.text
+    r = post_request(b["emma"], form(ids, ONE_ITEM, project_number="OLD-1"))
+    assert "isn&#39;t on the active list" in r.text
+    post_request(b["emma"], form(ids, ONE_ITEM, project_number="N/A"))
+    assert latest().project_number == "N/A"
+    post_request(b["emma"], form(ids, ONE_ITEM, project_number="WO-4600"))
+    assert latest().project_number == "WO-4600" and latest().status == PRStatus.PENDING_APPROVAL
+
+
+def test_seed_abelorder_reference_is_idempotent(client, manager):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("seed_demo", Path(__file__).resolve().parents[1] / "seed_demo.py")
+    seed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed)
+    with database.SessionLocal() as db:
+        # An admin's own choices are kept.
+        db.add(Department(name="Finance", head_id=None))
+        abelorder.set_setting(db, "abelorder.cso_user_id", "")
+        db.commit()
+        seed.seed_abelorder_reference(db)
+        db.commit()
+        seed.seed_abelorder_reference(db)
+        db.commit()
+        from app.models import Project
+        assert db.scalar(select(func.count()).select_from(Department)) == 6
+        assert db.scalar(select(func.count()).select_from(Project)) == 7
+        fin = db.scalar(select(Department).where(Department.name == "Finance"))
+        assert fin.head.full_name == "Fiona Finance"  # filled because it had none
+        assert abelorder.policy(db).cso.full_name == "Carla CSO"

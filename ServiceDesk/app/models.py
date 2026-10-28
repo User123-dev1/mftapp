@@ -497,6 +497,17 @@ class Department(Base):
     head: Mapped[Optional[User]] = relationship(foreign_keys=[head_id])
 
 
+class Project(Base):
+    """Project / work-order codes employees can charge purchase requests to."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(100), unique=True)
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Vendor(Base):
     __tablename__ = "vendors"
 

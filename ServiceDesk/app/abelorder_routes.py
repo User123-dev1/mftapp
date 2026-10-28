@@ -13,7 +13,7 @@ from . import database
 from .abelorder_pdf import render as render_pdf
 from .emailer import deliver_pending
 from .models import (
-    Department, PRStatus, PurchaseApproval, PurchaseAttachment, PurchaseRequest, Role, Urgency, User, Vendor,
+    Department, PRStatus, Project, PurchaseApproval, PurchaseAttachment, PurchaseRequest, Role, Urgency, User, Vendor,
 )
 from .security import Forbidden, flash, get_current_user, require_manager, verify_csrf
 from .web import redirect, render
@@ -37,6 +37,7 @@ def _form_context(db: Session, user: User, pr: Optional[PurchaseRequest], form: 
         "pr": pr, "form": form, "people": people, "Urgency": Urgency,
         "departments": db.scalars(select(Department).order_by(Department.name)).all(),
         "vendors": db.scalars(select(Vendor).order_by(Vendor.name)).all(),
+        "projects": ao.active_projects(db), "no_project": ao.NO_PROJECT,
         "uoms": ao.UOM_CHOICES,
         "items": form["items"] if "items" in form else ao.form_items(pr),
         "policy": pol, "locked_supervisor": user.supervisor,
@@ -327,6 +328,7 @@ def settings_page(request: Request, user: User = Depends(get_current_user), db: 
         "policy": ao.policy(db), "users": users, "money": ao.money, "full_admin": user.role == Role.MANAGER,
         "departments": db.scalars(select(Department).order_by(Department.name)).all(),
         "vendors": db.scalars(select(Vendor).order_by(Vendor.name)).all(),
+        "projects": db.scalars(select(Project).order_by(Project.active.desc(), Project.code)).all(),
     }, user=user)
 
 
@@ -370,6 +372,23 @@ def save_department(request: Request, name: str = Form(...), head_id: str = Form
     db.commit()
     flash(request, f"Saved department {name}.")
     return redirect("/admin/abelorder#departments")
+
+
+@router.post("/admin/abelorder/projects")
+def save_project(request: Request, code: str = Form(...), name: str = Form(""), active: bool = Form(False),
+                 project_id: str = Form(""), user: User = Depends(require_manager),
+                 db: Session = Depends(database.get_db), _: None = Depends(verify_csrf)):
+    code = code.strip()
+    project = db.get(Project, int(project_id)) if project_id.isdigit() else Project()
+    clash = db.scalar(select(Project).where(func.lower(Project.code) == code.lower()))
+    if not code or code.upper() == ao.NO_PROJECT or (clash and clash is not project):
+        flash(request, "Enter a unique project / work order code.", "error")
+        return redirect("/admin/abelorder#projects")
+    project.code, project.name, project.active = code, name.strip() or None, active
+    db.add(project)
+    db.commit()
+    flash(request, f"Saved project {code}.")
+    return redirect("/admin/abelorder#projects")
 
 
 @router.post("/admin/abelorder/people/{user_id:int}")
