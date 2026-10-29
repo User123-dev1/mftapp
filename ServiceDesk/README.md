@@ -116,6 +116,25 @@ procurement or vendor portals (Dell/HP/Lenovo give serial and warranty lists), n
 as Lansweeper, or a Microsoft Graph export of Entra devices (`Get-MgDevice` gives names, OS and
 registered owners).
 
+## Who can see what (permission matrix)
+
+| Area | Employee (requester) | IT Agent | IT Manager |
+|------|------------------|----------|------------|
+| Submit IT tickets, Service Status, AbelOrder requests, own profile | ✅ | ✅ | ✅ |
+| IT tickets | **own only**, no internal work notes | all; works tickets assigned to them | all; assigns any |
+| Dashboard, Reports, CMDB, Changes, Service Notices | ❌ | ✅ | ✅ |
+| Approve changes / send notices | ❌ | only if ticked on Users page | ✅ |
+| CMDB import, Entra sync, Users, Support Groups, Change Policy, Mail Setup, Email Log | ❌ | ❌ | ✅ |
+| AbelOrder request | own; plus those where they're on the **signature route** | same as employee | all |
+| AbelOrder Settings | ❌ | ❌ | ✅ (all sections) |
+
+**Procurement** (a tick on AbelOrder Settings → People): sees all purchase requests, the Ready for
+PO queue, records PO numbers, and maintains the vendor list only. **Supervisors, department heads
+and the CSO** need no special role: they see a request once they're on its route.
+
+Signed-out visitors are sent to the login page. `tests/test_permissions.py` checks this whole
+matrix, so a change that loosens it fails the tests.
+
 ## Service notices (outages, maintenance, service changes)
 
 Service notices tell end users about outages, planned maintenance and changes that affect them.
