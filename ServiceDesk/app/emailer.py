@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 def queue_email(db: Session, to: str, subject: str, body: str, ticket_id: Optional[int] = None,
-                attachments: Optional[list[dict]] = None) -> EmailLog:
+                attachments: Optional[list[dict]] = None, source: str = "servicedesk") -> EmailLog:
     """attachments: [{"path": str, "filename": str, "content_type": str}]"""
     entry = EmailLog(to_address=to, subject=subject, body=body, ticket_id=ticket_id, status="pending",
-                     attachments=json.dumps(attachments) if attachments else None)
+                     attachments=json.dumps(attachments) if attachments else None, source=source)
     db.add(entry)
     return entry
 

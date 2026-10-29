@@ -367,16 +367,20 @@ def submit(db: Session, pr: PurchaseRequest, actor: User) -> None:
     _log(db, pr, actor, f"Submitted for approval ({money(pr.total)}): "
                         + " -> ".join(f"{r.label}: {p.full_name}" for r, p, _ in route))
     _notify_approver(db, pr)
-    queue_email(db, pr.requester.email, f"[{pr.number}] Purchase request submitted",
+    _mail(db, pr.requester.email, f"[{pr.number}] Purchase request submitted",
                 f"Hello {pr.requester.full_name},\n\nYour purchase request was submitted for approval.\n"
                 f"Approval route: " + " -> ".join(f"{r.label} ({p.full_name})" for r, p, _ in route)
                 + f"\n\n{summary(pr)}{_signature()}")
 
 
+def _mail(db: Session, to: str, subject: str, body: str, attachments: Optional[list[dict]] = None) -> None:
+    """All AbelOrder mail is tagged 'abelorder' so it only appears in Procurement's email log."""
+    queue_email(db, to, subject, body, attachments=attachments, source="abelorder")
+
+
 def can_view(user: User, pr: PurchaseRequest) -> bool:
     return (
         user.id == pr.requester_id
-        or user.role == Role.MANAGER
         or user.is_procurement
         or any(_approver_id(a) == user.id for a in pr.approvals)  # anyone on the signature route
     )
@@ -405,7 +409,7 @@ def decide(db: Session, pr: PurchaseRequest, approver: User, approve: bool, comm
     if not approve:
         pr.status = PRStatus.REJECTED
         _log(db, pr, approver, f"Rejected by {step.role.label}: {comment}")
-        queue_email(db, pr.requester.email, f"[{pr.number}] Purchase request rejected",
+        _mail(db, pr.requester.email, f"[{pr.number}] Purchase request rejected",
                     f"Hello {pr.requester.full_name},\n\n{approver.full_name} ({step.role.label}) rejected your "
                     f"purchase request:\n\n{comment}\n\nYou can revise and resubmit it.\n\n{summary(pr)}{_signature()}")
         return
@@ -436,12 +440,12 @@ def _fully_approved(db: Session, pr: PurchaseRequest) -> None:
     pdf = write_pdf(pr, "approved")
     files = [pdf] + [attachment_file(a) for a in pr.attachments]
     pol = policy(db)
-    queue_email(db, pol.procurement_email, f"[{pr.number}] Approved purchase request - {pr.vendor_name} - "
+    _mail(db, pol.procurement_email, f"[{pr.number}] Approved purchase request - {pr.vendor_name} - "
                 f"{money(pr.total)}",
                 f"Hello Procurement,\n\nThe attached purchase request has been fully approved and is ready for a PO."
                 f"\n\n{summary(pr)}\n\nSignatures:\n{signatures_text(pr)}\n\n"
                 f"Record the PO number here: {request_url(pr)}{_signature()}", attachments=files)
-    queue_email(db, pr.requester.email, f"[{pr.number}] Purchase request approved",
+    _mail(db, pr.requester.email, f"[{pr.number}] Purchase request approved",
                 f"Hello {pr.requester.full_name},\n\nYour purchase request has all required signatures and was sent "
                 f"to Procurement ({pol.procurement_email}). A copy of the signed request is attached. You'll get "
                 f"another email when the PO number is issued.\n\n{summary(pr)}{_signature()}", attachments=[pdf])
@@ -453,7 +457,7 @@ def _fully_approved(db: Session, pr: PurchaseRequest) -> None:
 
 def issue_po(db: Session, pr: PurchaseRequest, actor: User, po_number: str) -> None:
     po_number = (po_number or "").strip()
-    if not (actor.is_procurement or actor.role == Role.MANAGER):
+    if not actor.is_procurement:
         raise OrderError("Only Procurement can record PO numbers.")
     if pr.status not in (PRStatus.APPROVED, PRStatus.PO_ISSUED):
         raise OrderError("A PO number can only be added after the request is fully approved.")
@@ -470,7 +474,7 @@ def issue_po(db: Session, pr: PurchaseRequest, actor: User, po_number: str) -> N
     db.flush()
     from .abelorder_pdf import write_pdf
     pdf = write_pdf(pr, "po")
-    queue_email(db, pr.requester.email, f"[{pr.number}] PO {po_number} issued",
+    _mail(db, pr.requester.email, f"[{pr.number}] PO {po_number} issued",
                 f"Hello {pr.requester.full_name},\n\nProcurement issued PO number {po_number} for your request. "
                 f"The final copy is attached.\n\n{summary(pr)}{_signature()}", attachments=[pdf])
 
@@ -489,7 +493,7 @@ def cancel(db: Session, pr: PurchaseRequest, actor: User, reason: str) -> None:
     reason = (reason or "").strip()
     if pr.status not in (PRStatus.DRAFT, PRStatus.PENDING_APPROVAL, PRStatus.REJECTED, PRStatus.APPROVED):
         raise OrderError("This request can no longer be cancelled.")
-    allowed = actor.id == pr.requester_id or actor.is_procurement or actor.role == Role.MANAGER
+    allowed = actor.id == pr.requester_id or actor.is_procurement
     if not allowed:
         raise OrderError("You can't cancel this request.")
     if not reason:
@@ -499,11 +503,11 @@ def cancel(db: Session, pr: PurchaseRequest, actor: User, reason: str) -> None:
     pr.status = PRStatus.CANCELLED
     _log(db, pr, actor, f"Cancelled: {reason}")
     if step is not None:
-        queue_email(db, step.approver.email, f"[{pr.number}] Purchase request cancelled - no action needed",
+        _mail(db, step.approver.email, f"[{pr.number}] Purchase request cancelled - no action needed",
                     f"Hello {step.approver.full_name},\n\n{actor.full_name} cancelled this request: {reason}"
                     f"\n\n{summary(pr)}{_signature()}")
     if was_approved:
-        queue_email(db, policy(db).procurement_email, f"[{pr.number}] CANCELLED - do not issue a PO",
+        _mail(db, policy(db).procurement_email, f"[{pr.number}] CANCELLED - do not issue a PO",
                     f"Hello Procurement,\n\n{actor.full_name} cancelled this approved request: {reason}"
                     f"\n\n{summary(pr)}{_signature()}")
 
@@ -544,7 +548,7 @@ def attachment_file(att: PurchaseAttachment) -> dict:
 
 
 def can_attach(user: User, pr: PurchaseRequest) -> bool:
-    if user.is_procurement or user.role == Role.MANAGER:
+    if user.is_procurement:
         return pr.status != PRStatus.CANCELLED
     return user.id == pr.requester_id and pr.status in (PRStatus.DRAFT, PRStatus.PENDING_APPROVAL, PRStatus.REJECTED)
 
@@ -606,7 +610,7 @@ def _notify_approver(db: Session, pr: PurchaseRequest) -> None:
     step = pr.current_step
     if step is None:
         return
-    queue_email(db, step.approver.email, f"[{pr.number}] Approval needed: {money(pr.total)} - {pr.vendor_name}",
+    _mail(db, step.approver.email, f"[{pr.number}] Approval needed: {money(pr.total)} - {pr.vendor_name}",
                 f"Hello {step.approver.full_name},\n\nA purchase request needs your approval as "
                 f"{step.role.label}.\nApprove or reject it here: {request_url(pr)}\n\n{summary(pr)}{_signature()}")
 

@@ -44,7 +44,7 @@ _NEW_COLUMNS = {
         "is_procurement": "BOOLEAN NOT NULL DEFAULT 0",
         "can_send_notices": "BOOLEAN NOT NULL DEFAULT 0",
     },
-    "email_log": {"attachments": "TEXT"},
+    "email_log": {"attachments": "TEXT", "source": "VARCHAR(20) NOT NULL DEFAULT 'servicedesk'"},
     "tickets": {"ci_id": "INTEGER REFERENCES config_items(id)"},
     "support_groups": {"auto_assign": "BOOLEAN NOT NULL DEFAULT 0"},
     "config_items": {
@@ -70,6 +70,9 @@ def _add_missing_columns() -> None:
             for name, ddl in columns.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                    if (table, name) == ("email_log", "source"):
+                        # AbelOrder mail sent before the column existed: subjects start with "[AO-".
+                        conn.execute(text("UPDATE email_log SET source = 'abelorder' WHERE subject LIKE '[AO-%'"))
         for index, (table, column) in _NEW_UNIQUE_INDEXES.items():
             conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
 

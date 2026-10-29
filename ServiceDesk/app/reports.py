@@ -33,10 +33,13 @@ def _avg(values) -> Optional[float]:
     return mean(values) if values else None
 
 
-def build_report(db: Session, days: int) -> dict:
+def build_report(db: Session, days: int, user: Optional[User] = None) -> dict:
+    """Ticket figures cover only the tickets `user` may see (all of them for IT managers)."""
+    from .services import scoped
     now = utcnow()
     since = now - timedelta(days=days)
-    tickets = db.scalars(select(Ticket).where(Ticket.created_at >= since)).all()
+    stmt = select(Ticket).where(Ticket.created_at >= since)
+    tickets = db.scalars(scoped(stmt, user) if user else stmt).all()
     resolved = [t for t in tickets if t.resolved_at is not None]
 
     by_category = []
@@ -82,8 +85,9 @@ def build_report(db: Session, days: int) -> dict:
         if t.assignee_id:
             per_agent[t.assignee_id].append(t)
     open_by_agent: dict[int, int] = defaultdict(int)
-    for t in db.scalars(select(Ticket).where(Ticket.assignee_id.is_not(None),
-                                             Ticket.status.in_([s for s in Status if s.is_open]))):
+    open_stmt = select(Ticket).where(Ticket.assignee_id.is_not(None),
+                                     Ticket.status.in_([s for s in Status if s.is_open]))
+    for t in db.scalars(scoped(open_stmt, user) if user else open_stmt):
         open_by_agent[t.assignee_id] += 1
     agents = {u.id: u for u in db.scalars(select(User).where(User.id.in_(set(per_agent) | set(open_by_agent))))}
     by_agent = sorted(
@@ -131,6 +135,6 @@ def reports_page(request: Request, days: int = 30, user: User = Depends(require_
                  db: Session = Depends(database.get_db)):
     if days not in PERIODS:
         days = 30
-    return render(request, "reports.html", {"r": build_report(db, days), "periods": PERIODS,
+    return render(request, "reports.html", {"r": build_report(db, days, user), "periods": PERIODS,
                                             "stale_days": STALE_DAYS, "warranty_days": WARRANTY_HORIZON_DAYS},
                   user=user)

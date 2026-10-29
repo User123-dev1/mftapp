@@ -121,15 +121,22 @@ registered owners).
 | Area | Employee (requester) | IT Agent | IT Manager |
 |------|------------------|----------|------------|
 | Submit IT tickets, Service Status, AbelOrder requests, own profile | ✅ | ✅ | ✅ |
-| IT tickets | **own only**, no internal work notes | all; works tickets assigned to them | all; assigns any |
+| IT tickets | **own only**, no internal work notes | assigned to them, or for items owned by **one of their support groups** | all; assigns any |
 | Dashboard, Reports, CMDB, Changes, Service Notices | ❌ | ✅ | ✅ |
 | Approve changes / send notices | ❌ | only if ticked on Users page | ✅ |
 | CMDB import, Entra sync, Users, Support Groups, Change Policy, Mail Setup, Email Log | ❌ | ❌ | ✅ |
-| AbelOrder request | own; plus those where they're on the **signature route** | same as employee | all |
-| AbelOrder Settings | ❌ | ❌ | ✅ (all sections) |
+| AbelOrder request | own; plus those where they're on the **signature route** | same as employee | same as employee (**no access to other people's purchase requests**) |
+| AbelOrder Settings | ❌ | ❌ | ✅ policy, departments, people, projects (vendors are Procurement's) |
+| Email Log | ❌ | ❌ | ✅ IT and notice mail only (**AbelOrder mail is hidden**) |
 
 **Procurement** (a tick on AbelOrder Settings → People): sees all purchase requests, the Ready for
-PO queue, records PO numbers, and maintains the vendor list only. **Supervisors, department heads
+PO queue and the **AbelOrder email log**; records PO numbers; maintains the vendor list. Purchasing
+data stays with Procurement and the approvers. An IT manager who needs it must be ticked as
+Procurement, which is deliberate and visible on the People list.
+
+**Agents and support groups:** tickets whose affected item has no support group, or that have no
+item at all, are seen only by IT managers until they're assigned. This also applies to dashboard
+counts, reports, CMDB ticket history, and pre-filling a change or notice from a ticket. **Supervisors, department heads
 and the CSO** need no special role: they see a request once they're on its route.
 
 Signed-out visitors are sent to the login page. `tests/test_permissions.py` checks this whole

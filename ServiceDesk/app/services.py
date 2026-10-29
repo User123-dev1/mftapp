@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, object_session
 
 from .config import settings
@@ -214,6 +214,42 @@ def _assign(db: Session, ticket: Ticket, agent: User, manager: Optional[User]) -
         f"{_summary(ticket)}{_signature()}",
         ticket.id,
     )
+
+
+# --- Visibility ----------------------------------------------------------------
+# IT managers see every ticket. Agents see tickets assigned to them and tickets whose affected
+# item belongs to one of their support groups. Everyone sees tickets they raised.
+
+def _my_group_items(user: User):
+    from .models import ConfigItem, support_group_members
+    groups = select(support_group_members.c.group_id).where(support_group_members.c.user_id == user.id)
+    return select(ConfigItem.id).where(ConfigItem.support_group_id.in_(groups))
+
+
+def ticket_scope(user: User):
+    """SQL condition limiting Ticket queries to what `user` may see (None = everything)."""
+    if user.role == Role.MANAGER:
+        return None
+    if user.role == Role.AGENT:
+        return or_(Ticket.requester_id == user.id, Ticket.assignee_id == user.id,
+                   Ticket.ci_id.in_(_my_group_items(user)))
+    return Ticket.requester_id == user.id
+
+
+def scoped(stmt, user: User):
+    cond = ticket_scope(user)
+    return stmt if cond is None else stmt.where(cond)
+
+
+def can_see_ticket(user: User, ticket: Ticket) -> bool:
+    if user.role == Role.MANAGER or ticket.requester_id == user.id:
+        return True
+    if user.role != Role.AGENT:
+        return False
+    if ticket.assignee is not None and ticket.assignee.id == user.id:
+        return True
+    group = ticket.ci.support_group if ticket.ci else None
+    return group is not None and any(m.id == user.id for m in group.members)
 
 
 def can_work(user: User, ticket: Ticket) -> bool:

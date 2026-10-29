@@ -2,7 +2,7 @@
 {% block title %}Email log · {{ app_name }}{% endblock %}
 {% block content %}
 <section class="card">
-  <h1>Email log</h1>
+  <h1>{{ log_title or 'Email log' }}</h1>
   {% if not smtp_configured %}
   <div class="flash flash-info">SMTP is not configured, so notifications are recorded here but not sent. Set <code>SMTP_HOST</code> (see README) to deliver real email.</div>
   {% endif %}

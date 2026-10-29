@@ -110,7 +110,7 @@ def _get_ticket(db: Session, number: str, user: User) -> Ticket:
     ticket = db.scalar(select(Ticket).where(Ticket.number == number.upper()))
     if ticket is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    if not user.is_staff and ticket.requester_id != user.id:
+    if not services.can_see_ticket(user, ticket):
         raise Forbidden()
     return ticket
 
@@ -277,14 +277,16 @@ def home(request: Request, user: Optional[User] = Depends(get_optional_user), db
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, user: User = Depends(require_staff), db: Session = Depends(database.get_db)):
     open_statuses = [s for s in Status if s.is_open]
-    by_status = dict(db.execute(select(Ticket.status, func.count()).group_by(Ticket.status)).all())
+    by_status = dict(db.execute(services.scoped(select(Ticket.status, func.count()), user)
+                                .group_by(Ticket.status)).all())
     by_category = dict(
         db.execute(
-            select(Ticket.category, func.count()).where(Ticket.status.in_(open_statuses)).group_by(Ticket.category)
+            services.scoped(select(Ticket.category, func.count()), user)
+            .where(Ticket.status.in_(open_statuses)).group_by(Ticket.category)
         ).all()
     )
     unassigned = db.scalars(
-        select(Ticket).where(Ticket.status == Status.NEW).order_by(Ticket.created_at)
+        services.scoped(select(Ticket), user).where(Ticket.status == Status.NEW).order_by(Ticket.created_at)
     ).all()
     my_work = db.scalars(
         select(Ticket)
@@ -404,9 +406,7 @@ def list_tickets(
     user: User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    stmt = select(Ticket)
-    if not user.is_staff:
-        stmt = stmt.where(Ticket.requester_id == user.id)
+    stmt = services.scoped(select(Ticket), user)
 
     if status == "open":
         stmt = stmt.where(Ticket.status.in_([s for s in Status if s.is_open]))
@@ -730,8 +730,11 @@ def edit_user(
 
 @app.get("/admin/emails", response_class=HTMLResponse)
 def email_log(request: Request, user: User = Depends(require_manager), db: Session = Depends(database.get_db)):
-    emails = db.scalars(select(EmailLog).order_by(EmailLog.created_at.desc(), EmailLog.id.desc()).limit(200)).all()
-    return render(request, "emails.html", {"emails": emails, "smtp_configured": bool(settings.smtp_host)}, user=user)
+    # Purchasing (AbelOrder) mail is excluded: it stays with Procurement.
+    emails = db.scalars(select(EmailLog).where(EmailLog.source != "abelorder")
+                        .order_by(EmailLog.created_at.desc(), EmailLog.id.desc()).limit(200)).all()
+    return render(request, "emails.html", {"emails": emails, "smtp_configured": bool(settings.smtp_host),
+                                           "log_title": "Email log"}, user=user)
 
 
 # --- Profile -------------------------------------------------------------------

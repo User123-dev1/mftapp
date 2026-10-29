@@ -322,6 +322,8 @@ class EmailLog(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # JSON list of {"path", "filename", "content_type"} files to attach.
     attachments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Which module sent it. 'abelorder' mail is only visible to Procurement.
+    source: Mapped[str] = mapped_column(String(20), default="servicedesk", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

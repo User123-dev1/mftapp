@@ -50,8 +50,11 @@
         {{ nav('/abelorder/new', 'New PO Request', icon='+') }}
         {{ nav('/abelorder', 'My Requests', prefix='/abelorder/AO-', icon='🛒') }}
         {{ nav('/abelorder?view=approvals', 'PO Approvals', badge=ao_approvals, icon='✍') }}
-        {% if user.is_procurement or user.role == Role.MANAGER %}
+        {% if user.is_procurement %}
         {{ nav('/abelorder?view=procurement', 'Ready for PO', icon='⇥') }}
+        {{ nav('/abelorder/emails', 'AbelOrder Emails', icon='✉') }}
+        {% endif %}
+        {% if user.is_procurement or user.role == Role.MANAGER %}
         {{ nav('/admin/abelorder', 'AbelOrder Settings' if user.role == Role.MANAGER else 'Vendors', icon='⚙') }}
         {% endif %}
       </div>
@@ -97,8 +100,11 @@
         {{ nav('/abelorder/new', 'New PO Request', icon='+') }}
         {{ nav('/abelorder', 'My Requests', prefix='/abelorder/AO-', icon='🛒') }}
         {{ nav('/abelorder?view=approvals', 'PO Approvals', badge=ao_approvals, icon='✍') }}
-        {% if user.is_procurement or user.role == Role.MANAGER %}
+        {% if user.is_procurement %}
         {{ nav('/abelorder?view=procurement', 'Ready for PO', icon='⇥') }}
+        {{ nav('/abelorder/emails', 'AbelOrder Emails', icon='✉') }}
+        {% endif %}
+        {% if user.is_procurement or user.role == Role.MANAGER %}
         {{ nav('/admin/abelorder', 'AbelOrder Settings' if user.role == Role.MANAGER else 'Vendors', icon='⚙') }}
         {% endif %}
       </div>

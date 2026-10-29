@@ -155,7 +155,9 @@ def item_detail(request: Request, ci_id: int, user: User = Depends(require_staff
     if ci is None:
         raise HTTPException(status_code=404, detail="Item not found")
     users, groups = _staff_and_groups(db)
-    tickets = db.scalars(select(Ticket).where(Ticket.ci_id == ci.id).order_by(Ticket.created_at.desc())).all()
+    from .services import scoped
+    tickets = db.scalars(scoped(select(Ticket), user).where(Ticket.ci_id == ci.id)
+                         .order_by(Ticket.created_at.desc())).all()
     others = db.scalars(select(ConfigItem).where(ConfigItem.id != ci.id, ConfigItem.status != CIStatus.RETIRED)
                         .order_by(ConfigItem.name)).all()
     ci_changes = db.scalars(select(ChangeRequest).where(ChangeRequest.items.any(ConfigItem.id == ci.id))

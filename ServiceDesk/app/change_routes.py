@@ -14,7 +14,7 @@ from .emailer import deliver_pending
 from .models import (
     Category, ChangeRequest, ChangeState, ChangeType, CIRelationship, CIStatus, ConfigItem, Level, Ticket, User,
 )
-from .security import flash, require_manager, require_staff, verify_csrf
+from .security import Forbidden, flash, require_manager, require_staff, verify_csrf
 from .web import redirect, render
 
 router = APIRouter()
@@ -114,6 +114,8 @@ def list_changes(request: Request, view: str = "active", q: str = "", user: User
 def new_change_page(request: Request, ticket: str = "", user: User = Depends(require_staff),
                     db: Session = Depends(database.get_db)):
     t = db.scalar(select(Ticket).where(Ticket.number == ticket.upper())) if ticket else None
+    if t is not None and not services.can_see_ticket(user, t):
+        raise Forbidden()
     form: dict = {"change_type": "normal", "risk": "medium", "impact": "medium", "implementer_id": str(user.id)}
     if t is not None:
         details = "\n".join(f"{label}: {value}" for label, value in services.parse_details(t))
@@ -136,6 +138,8 @@ async def create_change(request: Request, background: BackgroundTasks, user: Use
     form = await request.form()
     number = str(form.get("ticket", "")).upper()
     ticket = db.scalar(select(Ticket).where(Ticket.number == number)) if number else None
+    if ticket is not None and not services.can_see_ticket(user, ticket):
+        raise Forbidden()
     try:
         data, items, implementer = _form_data(db, form)
         change = changes.create_change(db, user, data, items, implementer, ticket)
@@ -199,6 +203,7 @@ def change_detail(request: Request, number: str, user: User = Depends(require_st
         "impacted": changes.impacted(db, change.items),
         "conflicts": changes.conflicts(db, change),
         "current_votes": [a for a in change.approvals if a.current],
+        "can_see_ticket": change.ticket is not None and services.can_see_ticket(user, change.ticket),
         "old_votes": [a for a in change.approvals if not a.current],
     }, user=user)
 

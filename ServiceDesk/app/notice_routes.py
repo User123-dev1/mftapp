@@ -8,14 +8,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import database, notices
+from . import database, notices, services
 from .config import settings
 from .emailer import deliver_pending, queue_email
 from .models import (
     ChangeRequest, CIStatus, ConfigItem, DistributionList, NoticeKind, NoticeSeverity, NoticeStatus, ServiceNotice,
     Ticket, User, utcnow,
 )
-from .security import flash, get_current_user, require_manager, require_staff, verify_csrf
+from .security import Forbidden, flash, get_current_user, require_manager, require_staff, verify_csrf
 from .web import redirect, render
 
 router = APIRouter()
@@ -88,6 +88,8 @@ def new_notice(request: Request, change: str = "", ticket: str = "", user: User 
                db: Session = Depends(database.get_db)):
     chg = db.scalar(select(ChangeRequest).where(ChangeRequest.number == change.upper())) if change else None
     tkt = db.scalar(select(Ticket).where(Ticket.number == ticket.upper())) if ticket else None
+    if tkt is not None and not services.can_see_ticket(user, tkt):
+        raise Forbidden()
     form: dict = {"kind": "outage", "severity": "warning", "show_banner": "true"}
     if chg:
         form.update(notices.defaults_from_change(chg))
@@ -104,6 +106,8 @@ async def create_notice(request: Request, background: BackgroundTasks, user: Use
     form = await request.form()
     chg = db.scalar(select(ChangeRequest).where(ChangeRequest.number == str(form.get("change", "")).upper()))
     tkt = db.scalar(select(Ticket).where(Ticket.number == str(form.get("ticket", "")).upper()))
+    if tkt is not None and not services.can_see_ticket(user, tkt):
+        raise Forbidden()
     try:
         data, list_ids, item_ids = _parse(form)
         notice = notices.create(db, user, data, list_ids, item_ids, chg, tkt)

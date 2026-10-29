@@ -9,7 +9,7 @@
       <div><span class="badge chg-{{ change.state.value }}">{{ change.state.label }}</span>
         <span class="badge">{{ change.change_type.label }}</span></div>
     </div>
-    {% if change.ticket %}<p>From ticket <a href="/tickets/{{ change.ticket.number }}">{{ change.ticket.number }}</a> — {{ change.ticket.title }}</p>{% endif %}
+    {% if change.ticket %}<p>From ticket {% if can_see_ticket %}<a href="/tickets/{{ change.ticket.number }}">{{ change.ticket.number }}</a> — {{ change.ticket.title }}{% else %}{{ change.ticket.number }}{% endif %}</p>{% endif %}
 
     {% if conflicts %}
     <div class="flash flash-error">⚠ Schedule conflict - overlapping window with:

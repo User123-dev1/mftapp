@@ -76,7 +76,7 @@ async def _save_uploads(db: Session, pr: PurchaseRequest, user: User, form) -> l
 @router.get("/abelorder", response_class=HTMLResponse)
 def list_requests(request: Request, view: str = "mine", q: str = "", user: User = Depends(get_current_user),
                   db: Session = Depends(database.get_db)):
-    sees_all = user.is_procurement or user.role == Role.MANAGER
+    sees_all = user.is_procurement
     if view == "approvals":
         rows = ao.pending_for(db, user)
     else:
@@ -100,6 +100,20 @@ def list_requests(request: Request, view: str = "mine", q: str = "", user: User 
         rows = db.scalars(stmt.limit(500)).all()
     return render(request, "ao_list.html", {"rows": rows, "view": view, "q": q, "sees_all": sees_all,
                                             "money": ao.money}, user=user)
+
+
+@router.get("/abelorder/emails", response_class=HTMLResponse)
+def procurement_email_log(request: Request, user: User = Depends(get_current_user),
+                          db: Session = Depends(database.get_db)):
+    """AbelOrder emails (incl. PDFs to Procurement) - visible to Procurement only."""
+    if not user.is_procurement:
+        raise Forbidden()
+    from .config import settings
+    from .models import EmailLog
+    emails = db.scalars(select(EmailLog).where(EmailLog.source == "abelorder")
+                        .order_by(EmailLog.created_at.desc(), EmailLog.id.desc()).limit(200)).all()
+    return render(request, "emails.html", {"emails": emails, "smtp_configured": bool(settings.smtp_host),
+                                           "log_title": "AbelOrder email log"}, user=user)
 
 
 # --- Create / edit ---------------------------------------------------------------------------------
@@ -196,7 +210,7 @@ def detail(request: Request, number: str, user: User = Depends(get_current_user)
     return render(request, "ao_detail.html", {
         "pr": pr, "money": ao.money, "unit_money": ao.unit_money, "qty_text": ao.qty_text,
         "can_decide": ao.can_decide(user, pr), "can_attach": ao.can_attach(user, pr),
-        "is_procurement": user.is_procurement or user.role == Role.MANAGER,
+        "is_procurement": user.is_procurement,
         "policy": ao.policy(db),
     }, user=user)
 
@@ -326,6 +340,7 @@ def settings_page(request: Request, user: User = Depends(get_current_user), db: 
     users = db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.full_name)).all()
     return render(request, "ao_settings.html", {
         "policy": ao.policy(db), "users": users, "money": ao.money, "full_admin": user.role == Role.MANAGER,
+        "show_vendors": user.is_procurement,
         "departments": db.scalars(select(Department).order_by(Department.name)).all(),
         "vendors": db.scalars(select(Vendor).order_by(Vendor.name)).all(),
         "projects": db.scalars(select(Project).order_by(Project.active.desc(), Project.code)).all(),
@@ -413,7 +428,7 @@ def save_person(request: Request, user_id: int, supervisor_id: str = Form(""), d
 def save_vendor(request: Request, name: str = Form(...), contact_name: str = Form(""), contact_email: str = Form(""),
                 vendor_id: str = Form(""), user: User = Depends(get_current_user),
                 db: Session = Depends(database.get_db), _: None = Depends(verify_csrf)):
-    if not (user.is_procurement or user.role == Role.MANAGER):
+    if not user.is_procurement:
         raise Forbidden()
     name = name.strip()
     vendor = db.get(Vendor, int(vendor_id)) if vendor_id.isdigit() else Vendor()

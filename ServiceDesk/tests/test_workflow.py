@@ -130,7 +130,7 @@ def test_agent_cannot_work_unassigned_ticket(client, manager):
     number = get_ticket()[0]
     agent = client().login("agent@example.com", "Password1!")
     r = agent.post(f"/tickets/{number}/status", {"status": "resolved", "resolution_notes": "x"})
-    assert "Cannot move ticket" in r.text
+    assert r.status_code == 403  # not assigned and not in the item's support group
     assert get_ticket()[1] == Status.NEW
 
 

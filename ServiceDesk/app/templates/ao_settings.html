@@ -88,6 +88,7 @@
 </section>
 {% endif %}
 
+{% if show_vendors %}
 <section class="card" id="vendors">
   <h2>Vendors</h2>
   <p class="muted small">Approved requests for a new vendor add it here automatically.</p>
@@ -111,4 +112,7 @@
   </table>
   </div>
 </section>
+{% elif full_admin %}
+<section class="card"><p class="muted small">The vendor list is maintained by Procurement.</p></section>
+{% endif %}
 {% endblock %}
