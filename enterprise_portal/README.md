@@ -27,6 +27,64 @@ Environment variables:
 | `PORTAL_HEALTH_TIMEOUT` | `3` | Seconds before a health check gives up |
 | `PORTAL_HEALTH_CACHE` | `30` | Seconds to reuse a health result |
 
+## Docker
+
+```bash
+docker build -t enterprise-portal .
+docker run -p 8080:8080 enterprise-portal
+```
+
+## Hosting on AWS
+
+The portal is one small container, so it runs on any AWS container service.
+The recommended setup is **ECS Fargate behind an Application Load Balancer**:
+
+```
+staff ──VPN / Direct Connect──▶ internal ALB (HTTPS, ACM cert) ──▶ ECS Fargate task (port 8080)
+                                                                     │
+                                       health checks to each app ◀───┘ (needs network reach)
+```
+
+Things to settle first:
+
+1. **Network reach to the apps.** The status dots come from the server
+   calling each app. If the apps run on-premises, the VPC needs a
+   Site-to-Site VPN or Direct Connect to that network, plus DNS resolution
+   for names like `assets.scepces.com` (a Route 53 Resolver outbound
+   endpoint). Without it the portal still works, but every app shows
+   "Unreachable". `localhost` URLs in `apps.json` will not work in AWS:
+   use the app's real hostname.
+2. **Who can open it.** Either keep the ALB internal (reachable only over
+   the VPN), or make it internet-facing and turn on ALB authentication
+   (OIDC with Microsoft Entra ID, or Amazon Cognito) so staff sign in first.
+   Don't expose it publicly without one of these.
+3. **Updating the app list.** `apps.json` is baked into the image, so a
+   change means rebuilding and redeploying. To change it without a deploy,
+   mount it from EFS and point `PORTAL_APPS_FILE` at it.
+
+Deploy steps (replace `<account>` and `<region>`):
+
+```bash
+# 1. Push the image to ECR
+aws ecr create-repository --repository-name enterprise-portal
+aws ecr get-login-password --region <region> | \
+  docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
+docker build -t <account>.dkr.ecr.<region>.amazonaws.com/enterprise-portal:latest .
+docker push <account>.dkr.ecr.<region>.amazonaws.com/enterprise-portal:latest
+```
+
+2. Create an ECS cluster and a Fargate task definition using that image:
+   0.25 vCPU / 0.5 GB is plenty, container port 8080.
+3. Create a target group (type IP, port 8080, health check path `/health`)
+   and an ALB with an HTTPS listener using an ACM certificate.
+4. Create an ECS service (1–2 tasks, private subnets) attached to the
+   target group.
+5. Add a Route 53 record, e.g. `portal.scepces.com`, pointing at the ALB.
+
+For a lower-cost single server, the same container also runs on one EC2
+instance or Lightsail instance with `docker run`, but you lose automatic
+restarts across hosts and zero-downtime deploys.
+
 ## Adding or changing apps
 
 Edit `apps.json`. It is re-read on each request, so you don't need to restart.
@@ -65,5 +123,6 @@ Edit `apps.json`. It is re-read on each request, so you don't need to restart.
 ## Tests
 
 ```bash
+pip install pytest
 python -m pytest test_portal.py
 ```
