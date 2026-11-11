@@ -1,0 +1,1164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GMP Asset Manager</title>
+<style>
+:root {
+  --bg: #f4f6f8; --panel: #fff; --text: #1b2430; --muted: #5d6b7a; --line: #d9e0e6;
+  --accent: #0b5cad; --ok: #127a3a; --ok-bg: #e3f5ea; --bad: #b42318; --bad-bg: #fde8e6; --warn: #8a5a00; --warn-bg: #fff4d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11161c; --panel: #1a2129; --text: #e6edf3; --muted: #93a1b0; --line: #2c3743;
+    --accent: #5aa7f0; --ok: #4cc17a; --ok-bg: #12301f; --bad: #ff7b6e; --bad-bg: #3a1714; --warn: #f0c050; --warn-bg: #352a0e;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; flex: 1; }
+nav { display: flex; gap: 4px; padding: 8px 16px; flex-wrap: wrap; background: var(--panel); border-bottom: 1px solid var(--line); }
+nav button { background: none; border: 0; padding: 8px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 14px; }
+nav button.active { background: var(--accent); color: #fff; }
+main { padding: 16px; max-width: 1150px; margin: 0 auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 3px; }
+label.check { display: flex; gap: 6px; align-items: center; color: var(--text); }
+label.check input { width: auto; }
+button.btn { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
+button.btn.secondary { background: none; color: var(--accent); }
+button.btn.danger { background: var(--bad); border-color: var(--bad); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 14px; }
+#scanInput { font-size: 22px; padding: 14px; font-family: ui-monospace, monospace; }
+.verdict { border-radius: 10px; padding: 18px; font-size: 26px; font-weight: 700; text-align: center; margin: 12px 0; }
+.verdict.ok { background: var(--ok-bg); color: var(--ok); }
+.verdict.bad { background: var(--bad-bg); color: var(--bad); }
+.verdict.neutral { background: var(--bg); color: var(--muted); font-size: 18px; }
+ul.reasons { margin: 6px 0 0; padding-left: 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td.mono { white-space: nowrap; word-break: normal; }
+.tbl { overflow-x: auto; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); white-space: nowrap; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.pill.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+.pill.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+a.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px; background: var(--text); color: var(--bg); display: none; max-width: 90vw; z-index: 50; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
+.modal { background: var(--panel); border-radius: 10px; padding: 18px; width: 100%; max-width: 520px; max-height: 92vh; overflow: auto; }
+.sigbox { border: 2px solid var(--accent); border-radius: 8px; padding: 10px; margin-top: 12px; }
+video { width: 100%; max-height: 300px; background: #000; border-radius: 8px; }
+.label-img { background: #fff; padding: 6px; border-radius: 6px; max-width: 100%; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="loginView" class="hidden">
+  <main style="max-width:420px">
+    <div class="panel">
+      <h2>GMP Asset Manager - Sign in</h2>
+      <p id="loginCompany" class="muted" style="margin-top:-6px"></p>
+      <form id="loginForm">
+        <label>User ID</label><input name="username" autocomplete="username" required>
+        <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+        <div class="row" style="margin-top:14px"><button class="btn">Sign in</button></div>
+      </form>
+      <p class="muted" style="font-size:13px">Authorized users only. All activity is recorded in a secure, computer-generated audit trail.</p>
+    </div>
+  </main>
+</div>
+
+<div id="pwView" class="hidden">
+  <main style="max-width:420px">
+    <div class="panel">
+      <h2>Change password</h2>
+      <p class="muted">Your password must be changed before continuing (first login or expiry).</p>
+      <form id="pwForm">
+        <label>Current password</label><input name="old_password" type="password" autocomplete="current-password" required>
+        <label>New password (10+ chars, upper, lower, digit)</label><input name="new_password" type="password" autocomplete="new-password" required>
+        <label>Confirm new password</label><input name="confirm" type="password" autocomplete="new-password" required>
+        <div class="row" style="margin-top:14px"><button class="btn">Change password</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="setupView" class="hidden">
+  <main style="max-width:560px">
+    <div class="panel">
+      <h2>Company setup</h2>
+      <p class="muted">Welcome. Before assets can be registered, tell us about your company. You can change this later under Administration.</p>
+      <form id="setupForm">
+        <label>Company name</label><input name="name" required placeholder="e.g. Acme Biologics Ltd">
+        <label>Site / plant name</label><input name="site_name" required placeholder="e.g. Accra Plant 1">
+        <label>Address (optional)</label><textarea name="address" rows="2"></textarea>
+        <label>Asset ID prefix (1-10 letters/digits)</label><input name="asset_prefix" required maxlength="10" placeholder="e.g. ACME" style="text-transform:uppercase">
+        <p class="muted" style="font-size:13px">Assets will be numbered <b id="prefixPreview">ACME-000001</b>, -000002, ...</p>
+        <div class="row" style="margin-top:14px"><button class="btn">Save and continue</button>
+          <button type="button" class="btn secondary" id="setupLogout">Sign out</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="waitView" class="hidden">
+  <main style="max-width:480px"><div class="panel"><h2>System not set up yet</h2>
+    <p>An administrator must complete the company setup before the system can be used.</p>
+    <button class="btn secondary" id="waitLogout">Sign out</button></div></main>
+</div>
+
+<div id="appView" class="hidden">
+  <header>
+    <h1>GMP Asset Manager <span class="pill" title="Application version">v1.3</span> <span id="companyName" class="muted" style="font-weight:400"></span></h1>
+    <span id="who" class="muted"></span>
+    <button class="btn secondary" id="logoutBtn">Sign out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="content"></main>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const state = { token: sessionStorage.getItem("gmp_token"), me: null, tab: null, company: null, moveTarget: null, scanMode: "lookup", camera: null };
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const can = (perm) => state.me && state.me.permissions.includes(perm);
+
+function toast(msg, ms = 3500) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = "none", ms);
+}
+
+function beep(ok) {
+  try {
+    const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = ok ? 1200 : 300; o.connect(g); g.connect(ctx.destination);
+    g.gain.value = 0.08; o.start(); o.stop(ctx.currentTime + (ok ? 0.12 : 0.45));
+  } catch (_) { /* audio unavailable */ }
+}
+
+async function api(method, url, body, raw = false) {
+  const res = await fetch(url, {
+    method, headers: { "Content-Type": "application/json", ...(state.token ? { Authorization: "Bearer " + state.token } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+    // 401 is also used for a failed e-signature; only a dead session ends the UI session
+    if (res.status === 401 && state.me && /^(Session|Not authenticated)/.test(detail)) logoutLocal(detail);
+    throw new Error(detail);
+  }
+  if (raw) return res;
+  return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
+}
+
+function logoutLocal(msg) {
+  stopCamera();
+  state.token = null; state.me = null; state.tab = null; state.company = null; sessionStorage.removeItem("gmp_token");
+  show("login"); if (msg) toast(msg);
+}
+
+function show(view) {
+  for (const v of ["login", "pw", "setup", "wait", "app"]) $("#" + v + "View").classList.toggle("hidden", v !== view);
+  if (view === "login") $("#loginForm [name=username]").focus();
+}
+
+// ---- Modals, forms and electronic signatures ------------------------------
+function modal(html, onSubmit) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal"><form>${html}<div class="row" style="margin-top:14px;justify-content:flex-end">
+    <button type="button" class="btn secondary" data-cancel>Cancel</button><button class="btn">Submit</button></div></form></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); refocusScan(); };
+  $("[data-cancel]", bg).onclick = close;
+  $("form", bg).onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target), data = {};
+    for (const [k, v] of fd.entries()) data[k] = v;
+    for (const cb of e.target.querySelectorAll("input[type=checkbox]")) data[cb.name] = cb.checked;
+    try { await onSubmit(data); close(); } catch (err) { toast(err.message, 6000); beep(false); }
+  };
+  const first = $("input, select, textarea", bg); if (first) first.focus();
+}
+
+function sigBlock(meaning) {
+  return `<div class="sigbox"><b>Electronic signature - ${esc(meaning.toUpperCase())}</b>
+    <div class="muted" style="font-size:13px">Signing as <b>${esc(state.me.full_name)}</b> (${esc(state.me.username)}).
+    By entering your password you confirm this electronic signature is the legally binding equivalent of your handwritten signature.</div>
+    <label>Password</label><input name="sig_password" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" required></div>`;
+}
+
+const field = (name, labelText, attrs = "") => `<div><label>${labelText}</label><input name="${name}" ${attrs}></div>`;
+const select = (name, labelText, options, selected) => `<div><label>${labelText}</label><select name="${name}">${
+  options.map(o => `<option value="${esc(o)}" ${o === selected ? "selected" : ""}>${esc(o.replace(/_/g, " "))}</option>`).join("")}</select></div>`;
+const today = () => new Date().toISOString().slice(0, 10);
+const optionsHtml = (pairs, selected) => pairs.map(([v, t]) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(t)}</option>`).join("");
+const selectPairs = (name, labelText, pairs, selected) => `<div><label>${labelText}</label><select name="${name}">${optionsHtml(pairs, selected)}</select></div>`;
+const deptPairs = (ds, current) => [["", "- none -"], ...ds.filter(d => d.active).map(d => [d.name, d.name]),
+  ...(current && !ds.some(d => d.name === current) ? [[current, current + " (not in list)"]] : [])];
+const locPairs = (ls) => [["", "- none -"], ...ls.filter(l => l.active).map(l => [l.code, `${l.code} - ${l.name}`])];
+
+// People pick-lists (approvers = QA, assignees = can perform maintenance)
+const peopleCache = {};
+async function people(kind) { return peopleCache[kind] || (peopleCache[kind] = await api("GET", `/api/people/${kind}`)); }
+const personLabel = (p) => `${p.full_name}${p.email ? " <" + p.email + ">" : ""}`;
+const personPairs = (ps, none) => [...(none ? [["", none]] : []), ...ps.map(p => [String(p.id), personLabel(p)])];
+const REQUEST_TYPES = { asset_induction: "Asset induction (release for use)", work_order: "Work order sign-off" };
+const aprPill = (st) => `<span class="pill ${st === "approved" ? "ok" : st === "rejected" ? "bad" : st === "pending" ? "warn" : ""}">${esc(st)}</span>`;
+
+// "Load standard list" for departments / locations, offered wherever the list is empty
+const LOADERS = {
+  department: { url: "/api/departments", load: "/api/departments/load-standard", pairs: deptPairs },
+  location_code: { url: "/api/locations", load: "/api/locations/load-standard", pairs: locPairs },
+};
+const loadLink = (field, list) => !list.length && can("location.manage")
+  ? `<a class="link" style="font-size:13px" data-load="${field}">Load standard list</a>` : "";
+function wireLoadLinks(root) {
+  for (const a of root.querySelectorAll("[data-load]")) a.onclick = async () => {
+    const L = LOADERS[a.dataset.load];
+    try {
+      const r = await api("POST", L.load);
+      $(`select[name=${a.dataset.load}]`, root).innerHTML = optionsHtml(L.pairs(await api("GET", L.url)), "");
+      toast(`${r.added} added to the list`); a.remove();
+    } catch (err) { toast(err.message); }
+  };
+}
+
+// ---- Tabs ----------------------------------------------------------------
+const TABS = [
+  ["mytasks", "My tasks", () => true],
+  ["assets", "Assets", () => can("asset.view")], ["workorders", "Work orders", () => can("asset.view")],
+  ["scan", "Scan", () => true],
+  ["approvals", "Approvals", () => can("calibration.approve")], ["deviations", "Deviations", () => can("asset.view")],
+  ["due", "Due list", () => can("asset.view")], ["audit", "Audit trail", () => can("audit.view")],
+  ["admin", "Administration", () => can("user.manage")],
+];
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.filter(t => t[2]()).map(([id, name]) =>
+    `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}">${name}${id === "mytasks" && state.taskCount
+      ? ` <span class="pill bad" style="padding:0 6px">${state.taskCount}</span>` : ""}</button>`).join("");
+  for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => openTab(b.dataset.tab);
+}
+
+async function openTab(tab) {
+  if (tab !== "scan") stopCamera();
+  state.tab = tab; renderTabs();
+  const c = $("#content");
+  c.innerHTML = `<div class="panel muted">Loading...</div>`;
+  try { await VIEWS[tab](c); } catch (err) { c.innerHTML = `<div class="panel">${esc(err.message)}</div>`; }
+}
+
+// ---- Scan station --------------------------------------------------------
+function refocusScan() {
+  const inp = $("#scanInput");
+  if (inp && !document.querySelector(".modal-bg")) inp.focus();
+}
+
+const VIEWS = {};
+VIEWS.scan = async (c) => {
+  c.innerHTML = `
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Scan station</h2>
+      <div class="row">
+        <select id="scanMode" style="width:auto">
+          <option value="lookup">Mode: Check fitness for use</option>
+          ${can("asset.move") ? `<option value="move">Mode: Move assets to location</option>` : ""}
+        </select>
+        <button class="btn secondary" id="camBtn">Use camera</button>
+      </div>
+    </div>
+    <p class="muted" style="margin:8px 0">Scan with a USB/Bluetooth scanner (keyboard mode), a camera, or type the code and press Enter.
+      Supports Code 128/39 asset &amp; location tags and GS1-128 / GS1 DataMatrix / QR (GTIN, lot, expiry, serial, GIAI).</p>
+    <div id="moveInfo" class="pill warn hidden" style="margin-bottom:8px"></div>
+    <form id="scanForm"><input id="scanInput" autocomplete="off" placeholder="Scan barcode..." autofocus></form>
+    <div id="camWrap" class="hidden" style="margin-top:10px"><video id="camVideo" playsinline muted></video></div>
+  </div>
+  <div id="scanResult"></div>`;
+  $("#scanMode").value = state.scanMode;
+  $("#scanMode").onchange = (e) => { state.scanMode = e.target.value; state.moveTarget = null; updateMoveInfo(); refocusScan(); };
+  updateMoveInfo();
+  $("#scanForm").onsubmit = (e) => { e.preventDefault(); const v = $("#scanInput").value; $("#scanInput").value = ""; if (v.trim()) handleScan(v); };
+  // Most wedge scanners send GS (FNC1) as Ctrl+] which browsers drop - map it to the GS substitute.
+  $("#scanInput").addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === "]" || e.code === "BracketRight")) { e.preventDefault(); e.target.value += "|"; }
+  });
+  $("#scanInput").addEventListener("blur", () => setTimeout(() => { if (state.tab === "scan") refocusScan(); }, 150));
+  $("#camBtn").onclick = () => state.camera ? stopCamera() : startCamera();
+  refocusScan();
+};
+
+function updateMoveInfo() {
+  const el = $("#moveInfo"); if (!el) return;
+  el.classList.toggle("hidden", state.scanMode !== "move");
+  el.textContent = state.moveTarget ? `Moving scanned assets to ${state.moveTarget.code} - ${state.moveTarget.name}` : "Scan the destination LOCATION barcode first";
+}
+
+async function handleScan(raw) {
+  const out = $("#scanResult");
+  let r;
+  try { r = await api("POST", "/api/scan", { data: raw }); } catch (err) { toast(err.message); beep(false); return; }
+
+  if (state.scanMode === "move") {
+    if (r.match_type === "location") {
+      state.moveTarget = r.location; updateMoveInfo(); beep(true);
+      out.innerHTML = `<div class="panel"><div class="verdict neutral">Destination set: ${esc(r.location.code)}</div></div>`;
+      return;
+    }
+    if (r.match_type === "asset" && state.moveTarget) {
+      try {
+        await api("POST", `/api/assets/${encodeURIComponent(r.asset.asset_tag)}/move`, { location_code: state.moveTarget.code });
+        beep(true);
+        out.innerHTML = `<div class="panel"><div class="verdict ok">${esc(r.asset.asset_tag)} moved to ${esc(state.moveTarget.code)}</div></div>`;
+      } catch (err) { beep(false); out.innerHTML = `<div class="panel"><div class="verdict bad">${esc(err.message)}</div></div>`; }
+      return;
+    }
+  }
+
+  if (r.match_type === "asset") {
+    const a = r.asset, f = r.fitness;
+    beep(f.fit_for_use);
+    out.innerHTML = `<div class="panel">
+      <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
+      ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${f.warnings.length ? `<p>${f.warnings.map(x => `<span class="pill warn">${esc(x)}</span>`).join(" ")}</p>` : ""}
+      ${assetSummary(a)}
+      <div class="row" style="margin-top:12px">
+        <button class="btn" data-open>Open asset record</button>
+        ${can("asset.status.remove") && a.status !== "retired" ? `<button class="btn danger" data-issue>Report problem</button>` : ""}
+      </div>
+      <p class="muted" style="font-size:12px">Checked ${esc(f.checked_at)} UTC by ${esc(state.me.username)}</p></div>`;
+    $("[data-open]", out).onclick = () => openAsset(a.asset_tag);
+    const issue = $("[data-issue]", out); if (issue) issue.onclick = () => reportIssue(a.asset_tag);
+  } else if (r.match_type === "location") {
+    beep(true);
+    out.innerHTML = `<div class="panel"><div class="verdict neutral">Location ${esc(r.location.code)}</div>
+      <p>${esc(r.location.name)} ${r.location.area_class ? `<span class="pill">${esc(r.location.area_class)}</span>` : ""} - ${r.asset_count} active asset(s).</p>
+      <a class="link" data-list>Show assets at this location</a></div>`;
+    $("[data-list]", out).onclick = () => { state.assetFilter = { location: r.location.code }; openTab("assets"); };
+  } else {
+    const p = r.parsed;
+    beep(false);
+    out.innerHTML = `<div class="panel">
+      <div class="verdict ${p.valid ? (r.expired ? "bad" : "neutral") : "bad"}">${
+        !p.valid ? "INVALID / UNREADABLE BARCODE" : r.match_type === "gs1_item" ? (r.expired ? "EXPIRED GS1 ITEM" : "GS1 item - not a registered asset") : "Not found"}</div>
+      ${p.errors.length ? `<ul class="reasons">${p.errors.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${parsedTable(p)}
+      ${p.valid && can("asset.create") && (!p.is_gs1 || (p.gtin && p.serial)) ? `<button class="btn" data-induct>Register as new asset</button>` : ""}</div>`;
+    const ind = $("[data-induct]", out);
+    if (ind) ind.onclick = () => newAssetForm(p.is_gs1 ? { gtin: p.gtin, serial_number: p.serial } : { asset_tag: p.data });
+  }
+}
+
+function parsedTable(p) {
+  const rows = Object.entries(p.elements).map(([ai, v]) => `<tr><td>(${esc(ai)})</td><td>${esc(p.element_titles[ai] || "")}</td><td class="mono">${esc(v)}</td></tr>`).join("");
+  return `<p class="muted">Symbology: ${esc(p.symbology || "not transmitted")} - Data: <span class="mono">${esc(p.data)}</span></p>
+    ${rows ? `<div class="tbl"><table><tr><th>AI</th><th>Meaning</th><th>Value</th></tr>${rows}</table></div>` : ""}
+    ${p.expiry ? `<p>Expiry: <b>${esc(p.expiry)}</b></p>` : ""}`;
+}
+
+async function startCamera() {
+  const wrap = $("#camWrap"), video = $("#camVideo");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream; await video.play();
+    wrap.classList.remove("hidden"); $("#camBtn").textContent = "Stop camera";
+    let last = "", lastAt = 0;
+    const onCode = (text) => {
+      const now = Date.now();
+      if (text === last && now - lastAt < 2500) return;  // debounce repeat reads
+      last = text; lastAt = now; handleScan(text);
+    };
+    if ("BarcodeDetector" in window) {
+      const detector = new BarcodeDetector({ formats: ["code_128", "code_39", "data_matrix", "qr_code", "ean_13", "ean_8", "upc_a", "itf"] });
+      const cam = { stream, timer: setInterval(async () => {
+        try { const codes = await detector.detect(video); if (codes.length) onCode(codes[0].rawValue); } catch (_) {}
+      }, 300) };
+      state.camera = cam;
+    } else {
+      await loadScript("https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js");
+      const reader = new ZXing.BrowserMultiFormatReader();
+      stream.getTracks().forEach(t => t.stop());
+      state.camera = { reader };
+      reader.decodeFromConstraints({ video: { facingMode: "environment" } }, video, (res) => { if (res) onCode(res.getText()); });
+    }
+  } catch (err) {
+    toast("Camera unavailable: " + err.message + " (camera access requires HTTPS or localhost)", 6000);
+    stopCamera();
+  }
+}
+
+function stopCamera() {
+  const cam = state.camera; state.camera = null;
+  if (cam) {
+    if (cam.timer) clearInterval(cam.timer);
+    if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+    if (cam.reader) cam.reader.reset();
+  }
+  const wrap = $("#camWrap"); if (wrap) wrap.classList.add("hidden");
+  const btn = $("#camBtn"); if (btn) btn.textContent = "Use camera";
+}
+
+function loadScript(src) {
+  return new Promise((ok, fail) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => fail(new Error("could not load decoder")); document.head.appendChild(s); });
+}
+
+// ---- Assets --------------------------------------------------------------
+const STATUS_LABEL = {
+  in_service: ["Active", "ok"], commissioning: ["Inactive - new", "warn"], out_of_service: ["Inactive", "warn"],
+  quarantine: ["Quarantined", "bad"], retired: ["Retired", ""],
+};
+const statusPill = (s) => `<span class="pill ${STATUS_LABEL[s][1]}">${STATUS_LABEL[s][0]}</span>`;
+// New GMP equipment is activated only through QA induction approval
+const canActivate = (a) => a.gmp_impact === "none" ? can("asset.edit") : a.status !== "commissioning" && can("asset.status.release");
+
+function assetSummary(a) {
+  return `<div class="grid" style="margin-top:8px">
+    <div><label>Asset ID</label><b class="mono">${esc(a.asset_tag)}</b></div>
+    <div><label>Description</label>${esc(a.description)}</div>
+    <div><label>Status</label>${statusPill(a.status)}</div>
+    <div><label>Qualification</label>${esc(a.qualification_status.replace(/_/g, " "))}</div>
+    <div><label>GMP impact</label>${esc(a.gmp_impact)}</div>
+    <div><label>Department</label>${esc(a.department || "-")}</div>
+    <div><label>Location</label>${esc(a.location_code || "-")} ${a.location_name ? `<span class="muted">${esc(a.location_name)}</span>` : ""}</div>
+    <div><label>Calibration due</label>${a.calibration_required ? esc(a.calibration_due_on || "not calibrated") : "n/a"}</div>
+    <div><label>Next PM due</label>${a.pm_required ? esc(a.pm_due_on || "-") : "no PM plan"}</div>
+    <div><label>Manufacturer / model</label>${esc(a.manufacturer || "-")} ${esc(a.model || "")}</div>
+    <div><label>Serial / GTIN</label><span class="mono">${esc(a.serial_number || "-")} ${esc(a.gtin || "")}</span></div>
+  </div>`;
+}
+
+VIEWS.assets = async (c) => {
+  const filter = state.assetFilter || {}; state.assetFilter = null;
+  const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v)).toString();
+  const assets = await api("GET", "/api/assets" + (qs ? "?" + qs : ""));
+  c.innerHTML = `<div class="panel">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Asset register ${filter.location ? "- " + esc(filter.location) : ""}</h2>
+      ${can("asset.create") ? `<button class="btn" id="newAsset">+ Add new asset</button>` : ""}</div>
+    <div class="row" style="margin:10px 0"><input id="q" placeholder="Search ID, description, serial, model" style="max-width:360px" value="${esc(filter.q || "")}">
+      <select id="st" style="width:auto"><option value="">All statuses</option>${Object.entries(STATUS_LABEL).map(([s, [l]]) => `<option value="${s}" ${filter.status === s ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="tbl"><table><tr><th>Asset ID</th><th>Description</th><th>Location</th><th>Status</th><th>Next PM</th><th>Cal due</th><th>Fit for use</th></tr>
+    ${assets.map(a => `<tr><td><a class="link mono" data-tag="${esc(a.asset_tag)}">${esc(a.asset_tag)}</a></td><td>${esc(a.description)}</td>
+      <td>${esc(a.location_code || "-")}</td><td>${statusPill(a.status)}</td><td>${a.pm_required ? esc(a.pm_due_on) : "-"}</td>
+      <td>${a.calibration_required ? esc(a.calibration_due_on || "never") : "n/a"}</td>
+      <td>${a.fitness.fit_for_use ? `<span class="pill ok">Yes</span>` : `<span class="pill bad" title="${esc(a.fitness.reasons.join("; "))}">No</span>`}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">No assets yet${can("asset.create") ? ' - click "+ Add new asset" to register the first one'
+        : ` - your role (${esc(state.me.role)}) cannot register assets; ask an administrator or technician`}.</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  const reload = () => { state.assetFilter = { ...filter, q: $("#q").value, status: $("#st").value }; openTab("assets"); };
+  $("#q").onkeydown = (e) => { if (e.key === "Enter") reload(); };
+  $("#st").onchange = reload;
+  const nb = $("#newAsset"); if (nb) nb.onclick = newAssetForm;
+};
+
+async function newAssetForm(prefill = {}) {
+  const [locs, depts] = await Promise.all([api("GET", "/api/locations"), api("GET", "/api/departments")]);
+  modal(`<h2>Add new asset</h2>
+    <p class="muted" style="margin-top:0">The asset ID is generated automatically (${esc(state.company.asset_prefix)}-000001, ...).</p>
+    ${field("description", "Description", 'required placeholder="e.g. Analytical balance"')}
+    <div class="grid">${select("category", "Category", ["equipment", "instrument", "utility", "computerized_system", "facility", "reference_standard"])}
+    ${select("gmp_impact", "GMP impact", ["direct", "indirect", "none"])}
+    ${field("manufacturer", "Manufacturer")}${field("model", "Model")}${field("serial_number", "Serial number")}
+    <div>${selectPairs("department", "Department", deptPairs(depts))}${loadLink("department", depts)}</div>
+    <div>${selectPairs("location_code", "Location / site", locPairs(locs))}${loadLink("location_code", locs)}</div></div>
+    <label>Initial status</label>
+    <div class="row"><label class="check"><input type="radio" name="initial_state" value="inactive" checked> Inactive (default)</label>
+      <label class="check"><input type="radio" name="initial_state" value="active"> Active - ready for use</label></div>
+    <p class="muted" style="font-size:12px;margin:2px 0 0">GMP-impacting assets and assets needing calibration stay Inactive until qualified/calibrated and released by QA.</p>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="pm_required"> Create a preventive maintenance (PM) schedule</label>
+    <div class="grid">${field("pm_interval_days", "PM every (days)", 'type="number" min="1" placeholder="e.g. 90"')}</div>
+    <label class="check"><input type="checkbox" name="calibration_required"> Calibration required</label>
+    <div class="grid">${field("calibration_interval_days", "Calibration every (days)", 'type="number" min="1"')}</div>
+    <label class="check"><input type="checkbox" name="is_reference_standard"> This is a reference / calibration standard</label>
+    <details style="margin-top:8px"><summary class="muted">Existing label or GTIN (optional)</summary>
+      ${field("asset_tag", "Existing asset tag - leave blank to generate a new ID")}${field("gtin", "GTIN")}</details>`, async (d) => {
+    const body = { ...d, calibration_interval_days: d.calibration_interval_days ? +d.calibration_interval_days : null,
+      pm_interval_days: d.pm_interval_days ? +d.pm_interval_days : null, location_code: d.location_code || null,
+      gtin: d.gtin || null, asset_tag: d.asset_tag || null };
+    const a = await api("POST", "/api/assets", body);
+    assetCreatedDialog(a);
+  });
+  wireLoadLinks($(".modal"));
+  for (const [k, v] of Object.entries(prefill)) { const el = $(`.modal [name=${k}]`); if (el && v) el.value = v; }
+  if (prefill.asset_tag || prefill.gtin) $(".modal details").open = true;
+}
+
+function dialog(html) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal">${html}</div>`;
+  document.body.appendChild(bg);
+  return bg;
+}
+
+async function labelSvg(tag) {
+  return api("GET", `/api/assets/${encodeURIComponent(tag)}/label.svg`);
+}
+
+function printSvg(svg, title) {
+  const w = window.open("", "_blank", "width=480,height=360");
+  w.document.write(`<!doctype html><html><head><title>${esc(title)}</title><style>
+    @page { margin: 4mm; } body { margin: 0; display: flex; justify-content: center; } svg { width: 90mm; height: auto; }
+    </style></head><body>${svg}</body></html>`);
+  w.document.close(); w.focus();
+  setTimeout(() => w.print(), 250);
+}
+
+async function assetCreatedDialog(a) {
+  const svg = await labelSvg(a.asset_tag);
+  const bg = dialog(`<h2>Asset created</h2>
+    <p>Asset ID <b class="mono" style="font-size:20px">${esc(a.asset_tag)}</b> - ${esc(a.description)} ${statusPill(a.status)}</p>
+    <div class="label-img" style="text-align:center">${svg}</div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn secondary" data-pm>Add PM / trigger</button>
+      <button class="btn secondary" data-open>Open asset</button>
+      <button class="btn" data-print>Print barcode label</button></div>`);
+  $("[data-print]", bg).onclick = () => printSvg(svg, a.asset_tag);
+  $("[data-open]", bg).onclick = () => { bg.remove(); openAsset(a.asset_tag); };
+  const pmBtn = $("[data-pm]", bg);
+  if (can("maintenance.plan")) pmBtn.onclick = () => { bg.remove(); openAsset(a.asset_tag).then(() => pmScheduleForm(a.asset_tag)); };
+  else pmBtn.remove();
+  toast(`Asset ${a.asset_tag} registered`);
+}
+
+const triggerText = (s, events) => s.trigger_type === "time"
+  ? `Every ${s.interval_value} ${s.interval_unit}${s.lead_days ? ` (raised ${s.lead_days} days early)` : ""}`
+  : `On event: ${esc(events[s.event] || s.event)} - complete within ${s.interval_value} ${s.interval_unit}`;
+
+async function openAsset(tag) {
+  stopCamera();
+  state.tab = "assets"; renderTabs();
+  const [a, svg, opts] = await Promise.all([api("GET", "/api/assets/" + encodeURIComponent(tag)), labelSvg(tag), pmOptions()]);
+  const c = $("#content");
+  const f = a.fitness;
+  const actions = [];
+  const pendingInduction = a.approvals.find(r => r.request_type === "asset_induction" && r.status === "pending");
+  if (a.status !== "retired") {
+    if (a.status === "commissioning" && !pendingInduction && (can("asset.create") || can("asset.edit")))
+      actions.push(["induct", "Submit for QA approval", ""]);
+    if (a.status !== "in_service" && canActivate(a)) actions.push(["activate", "Activate", a.status === "commissioning" ? "secondary" : ""]);
+    if (a.status === "in_service" && can("asset.status.remove")) actions.push(["deactivate", "Deactivate", "secondary"]);
+    if (can("asset.edit")) actions.push(["edit", "Edit details", "secondary"]);
+    if (can("maintenance.plan")) actions.push(["schedule", "Add PM / trigger", "secondary"], ["wo", "New work order", "secondary"]);
+    if (can("calibration.record") && a.calibration_required) actions.push(["cal", "Record calibration", "secondary"]);
+    if (can("maintenance.record")) actions.push(["pm", "Record ad-hoc maintenance", "secondary"]);
+    if (can("asset.qualify") && a.gmp_impact !== "none") actions.push(["qual", "Set qualification", "secondary"]);
+    if (can("asset.status.remove") || can("asset.status.release")) actions.push(["status", "Quarantine / retire", "secondary"]);
+    if (can("asset.status.remove")) actions.push(["issue", "Report problem", "danger"]);
+  }
+  c.innerHTML = `<div class="panel">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.asset_tag)} - ${esc(a.description)}</h2>
+      <a class="link" id="back">Back to register</a></div>
+    <div class="verdict ${f.fit_for_use ? "ok" : "bad"}">${f.fit_for_use ? "FIT FOR USE" : "DO NOT USE"}</div>
+    ${f.reasons.length ? `<ul class="reasons">${f.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    ${f.warnings.length ? `<p>${f.warnings.map(x => `<span class="pill warn">${esc(x)}</span>`).join(" ")}</p>` : ""}
+    ${pendingInduction ? `<div class="sigbox" style="margin:10px 0">
+      <b>Awaiting QA induction approval</b> - ${esc(pendingInduction.number)} assigned to ${esc(pendingInduction.approver_name)}
+      ${pendingInduction.approver_email ? `&lt;${esc(pendingInduction.approver_email)}&gt;` : ""}, submitted by ${esc(pendingInduction.requested_by_name)} on ${esc(pendingInduction.requested_at)}
+      <div class="row" style="margin-top:8px">
+        ${pendingInduction.approver_id === state.me.id ? `<button class="btn" data-review-apr="${esc(pendingInduction.number)}">Review &amp; decide</button>` : ""}
+        ${[pendingInduction.requested_by, pendingInduction.approver_id].includes(state.me.id) || can("asset.status.release")
+          ? `<button class="btn secondary" data-reassign-apr="${esc(pendingInduction.number)}">Reassign approver</button>
+             <button class="btn secondary" data-withdraw-apr="${esc(pendingInduction.number)}">Withdraw</button>` : ""}</div></div>` : ""}
+    ${assetSummary(a)}
+    <p class="muted" style="font-size:12px">Version ${a.version} - created ${esc(a.created_at)} by ${esc(a.created_by)} - last change ${esc(a.updated_at)} by ${esc(a.updated_by)}</p>
+    <div class="row">${actions.map(([k, t, cls]) => `<button class="btn ${cls}" data-act="${k}">${t}</button>`).join("")}</div>
+    <div class="row" style="margin-top:12px;align-items:flex-end"><div class="label-img">${svg}</div>
+      <div><button class="btn secondary" id="printLabel">Print barcode label</button><br><a class="link" id="auditLink">View audit trail</a></div></div></div>
+  <div class="panel"><h2>Work orders</h2><div class="tbl"><table>${WO_HEAD(false)}
+    ${a.work_orders.map(w => woRow(w)).join("") || `<tr><td colspan="8" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>PM schedules &amp; event triggers</h2><div class="tbl"><table><tr><th>Title</th><th>Type</th><th>Trigger</th><th>Next due</th><th>Blocks use</th><th>State</th><th></th></tr>
+    ${a.pm_schedules.map(s => `<tr><td>${esc(s.title)}${s.instructions ? `<div class="muted" style="font-size:12px">${esc(s.instructions)}</div>` : ""}</td>
+      <td>${esc(s.work_type)}</td><td>${triggerText(s, opts.events)}</td><td>${esc(s.next_due_on || "-")}</td><td>${s.blocks_use ? "Yes" : "No"}</td>
+      <td>${s.active ? `<span class="pill ok">active</span>` : `<span class="pill">paused</span>`}</td>
+      <td>${can("maintenance.plan") && a.status !== "retired" ? `<button class="btn secondary" data-toggle-sch="${s.id}" data-active="${s.active}">${s.active ? "Pause" : "Resume"}</button>` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">No PM plan yet${can("maintenance.plan") ? ' - use "Add PM / trigger"' : ""}.</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Calibration history</h2><div class="tbl"><table><tr><th>#</th><th>Performed</th><th>By</th><th>As found</th><th>As left</th><th>Standards / cert</th><th>Status</th><th>Signatures</th></tr>
+    ${a.calibrations.map(r => `<tr><td>${r.id}</td><td>${esc(r.performed_on)}</td><td>${esc(r.performed_by)}</td><td>${pf(r.as_found)}</td><td>${pf(r.as_left)}</td>
+      <td>${esc(r.standards_used.join(", ") || r.certificate_ref || "")}</td><td>${esc(r.status.replace(/_/g, " "))}</td><td>${sigList(r.signatures)}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Maintenance history</h2><div class="tbl"><table><tr><th>Performed</th><th>Type</th><th>Description</th><th>Signatures</th></tr>
+    ${a.maintenance.map(m => `<tr><td>${esc(m.performed_on)}</td><td>${esc(m.maintenance_type)}</td><td>${esc(m.description)}${m.requalification_required ? ` <span class="pill warn">requalification</span>` : ""}</td><td>${sigList(m.signatures)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Deviations</h2><div class="tbl"><table><tr><th>Number</th><th>Status</th><th>Description</th><th>Opened</th></tr>
+    ${a.deviations.map(d => `<tr><td>${esc(d.number)}</td><td>${esc(d.status)}</td><td>${esc(d.description)}</td><td>${esc(d.opened_at)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Approvals</h2><div class="tbl"><table><tr><th>Number</th><th>Type</th><th>Requested by</th><th>Approver</th><th>Status</th><th>Decision</th></tr>
+    ${a.approvals.map(r => `<tr><td class="mono">${esc(r.number)}</td><td>${esc(REQUEST_TYPES[r.request_type])}${r.work_order_number ? " " + esc(r.work_order_number) : ""}</td>
+      <td>${esc(r.requested_by_name)}<div class="muted" style="font-size:12px">${esc(r.requested_at)}</div></td><td>${esc(r.approver_name)}</td>
+      <td>${aprPill(r.status)}</td><td>${esc(r.decision_comment || "")}${r.decided_at ? `<div class="muted" style="font-size:12px">${esc(r.decided_by_name || "")} ${esc(r.decided_at)}</div>` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="muted">None</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Status / qualification signatures</h2>${sigList(a.signatures) || `<span class="muted">None</span>`}</div>`;
+  $("#back").onclick = () => openTab("assets");
+  $("#auditLink").onclick = () => { state.auditFilter = { entity_type: "asset", entity_id: a.asset_tag }; openTab("audit"); };
+  $("#printLabel").onclick = () => printSvg(svg, a.asset_tag);
+  for (const b of c.querySelectorAll("[data-act]")) b.onclick = () => ASSET_ACTIONS[b.dataset.act](a);
+  for (const b of c.querySelectorAll("[data-toggle-sch]")) b.onclick = () => toggleSchedule(+b.dataset.toggleSch, b.dataset.active === "1", a.asset_tag);
+  wireWoButtons(c, () => openAsset(a.asset_tag));
+  wireApprovalButtons(c, () => openAsset(a.asset_tag));
+}
+
+async function pmOptions() {
+  return state.pmOptions || (state.pmOptions = await api("GET", "/api/pm/options"));
+}
+
+async function pmScheduleForm(tag) {
+  const [opts, assignees] = await Promise.all([pmOptions(), people("assignees")]);
+  const units = opts.interval_units;
+  modal(`<h2>Add PM schedule / event trigger - ${esc(tag)}</h2>
+    ${field("title", "Title", 'required placeholder="e.g. Quarterly PM, Post-move leak test"')}
+    <div class="grid">${select("work_type", "Work type", opts.work_types)}${select("trigger_type", "Trigger", ["time", "event"])}</div>
+    <div data-time>
+      <div class="grid">${field("t_value", "Repeat every", 'type="number" min="1" value="3"')}${select("t_unit", "Unit", units, "months")}
+      ${field("first_due_on", "First due on (optional)", 'type="date"')}${field("lead_days", "Raise work order days before due", 'type="number" min="0" value="7"')}</div>
+    </div>
+    <div data-event class="hidden">
+      <label>When this happens</label><select name="event">${Object.entries(opts.events).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
+      <div class="grid">${field("e_value", "Complete within", 'type="number" min="1" value="1"')}${select("e_unit", "Unit", units, "days")}</div>
+    </div>
+    ${selectPairs("default_assignee", "Assign work orders to", personPairs(assignees, "- unassigned (planner assigns later) -"))}
+    <label class="check"><input type="checkbox" name="blocks_use" checked> Asset is DO NOT USE while this work is open (event) or overdue (schedule)</label>
+    <label class="check"><input type="checkbox" name="requires_approval"> Completed work must be approved by QA</label>
+    <label>Instructions / checklist</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
+    const isTime = d.trigger_type === "time";
+    await api("POST", `/api/assets/${encodeURIComponent(tag)}/pm-schedules`, {
+      title: d.title, work_type: d.work_type, trigger_type: d.trigger_type, instructions: d.instructions || null,
+      interval_value: +(isTime ? d.t_value : d.e_value), interval_unit: isTime ? d.t_unit : d.e_unit,
+      event: isTime ? null : d.event, lead_days: isTime ? +(d.lead_days || 0) : 0, blocks_use: d.blocks_use,
+      first_due_on: isTime && d.first_due_on ? d.first_due_on : null,
+      default_assignee: d.default_assignee ? +d.default_assignee : null, requires_approval: d.requires_approval });
+    toast(isTime ? "PM schedule created - work orders will be raised automatically" : "Event trigger created");
+    openAsset(tag);
+  });
+  const sel = $(".modal select[name=trigger_type]");
+  sel.onchange = () => { $(".modal [data-time]").classList.toggle("hidden", sel.value !== "time"); $(".modal [data-event]").classList.toggle("hidden", sel.value !== "event"); };
+}
+
+function toggleSchedule(id, active, tag) {
+  modal(`<h2>${active ? "Pause" : "Resume"} PM schedule</h2><label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("PATCH", `/api/pm-schedules/${id}`, { changes: { active: !active }, reason: d.reason });
+    toast(active ? "Schedule paused" : "Schedule resumed"); openAsset(tag);
+  });
+}
+
+// ---- Work orders -------------------------------------------------------------
+const WO_HEAD = (showAsset) => `<tr><th>Number</th>${showAsset ? "<th>Asset</th>" : ""}<th>Title</th><th>Type</th><th>Raised by</th>
+  <th>Assigned to</th><th>Due</th><th>Status</th><th></th></tr>`;
+
+function woRow(w, showAsset = false) {
+  const trig = w.trigger === "schedule" ? "Schedule" : w.trigger === "manual" ? `Manual (${esc(w.created_by)})` : "Event: " + esc((state.pmOptions?.events || {})[w.trigger.slice(6)] || w.trigger.slice(6));
+  let st = w.status === "open" ? (w.overdue ? `<span class="pill bad">overdue</span>` : `<span class="pill warn">open</span>`)
+    : `<span class="pill ${w.status === "completed" ? "ok" : ""}">${w.status}</span>`;
+  if (w.approval_state === "pending") st = `<span class="pill warn">awaiting QA approval</span>`;
+  else if (w.approval_state === "approved") st += ` <span class="pill ok">QA approved</span>`;
+  else if (w.approval_state === "rejected" && w.status === "open") st += ` <span class="pill bad">rework - QA rejected</span>`;
+  const mine = !w.assigned_to || w.assigned_to === state.me.id;
+  const btns = w.status !== "open" ? (w.closure_notes ? `<span class="muted" style="font-size:12px">${esc(w.closure_notes)}</span>${sigList(w.signatures)}` : "")
+      + (w.approval && w.approval.status === "pending" && w.approval_state === "pending" ? `<div class="muted" style="font-size:12px">${esc(w.approval.number)} with ${esc(w.approval.approver_name)}</div>` : "")
+    : `${can("maintenance.record") && mine ? `<button class="btn" data-complete="${esc(w.number)}" data-needs-approval="${w.requires_approval ? 1 : 0}">Complete</button>` : ""}
+       ${can("maintenance.plan") ? `<button class="btn secondary" data-assign-wo="${esc(w.number)}" data-current="${w.assigned_to || ""}">${w.assigned_to ? "Reassign" : "Assign"}</button>
+         <button class="btn secondary" data-cancel-wo="${esc(w.number)}">Cancel</button>` : ""}`;
+  return `<tr><td class="mono">${esc(w.number)}</td>${showAsset ? `<td><a class="link mono" data-tag="${esc(w.asset_tag)}">${esc(w.asset_tag)}</a><div class="muted" style="font-size:12px">${esc(w.asset_description)}</div></td>` : ""}
+    <td>${esc(w.title)}${w.blocks_use ? ` <span class="pill bad" title="Asset may not be used while open/overdue">blocks use</span>` : ""}
+      ${w.instructions ? `<div class="muted" style="font-size:12px">${esc(w.instructions)}</div>` : ""}</td>
+    <td>${esc(w.work_type)}${w.requires_approval ? `<div class="muted" style="font-size:12px">QA sign-off</div>` : ""}</td><td>${trig}</td>
+    <td>${w.assigned_to ? esc(w.assignee_name) : `<span class="muted">unassigned</span>`}</td><td class="mono">${esc(w.due_on)}</td><td>${st}</td><td>${btns}</td></tr>`;
+}
+
+function wireWoButtons(c, after) {
+  for (const b of c.querySelectorAll("[data-complete]")) b.onclick = async () => {
+    const needsApproval = b.dataset.needsApproval === "1";
+    const approvers = needsApproval ? (await people("approvers")).filter(p => p.id !== state.me.id) : [];
+    modal(`<h2>Complete ${esc(b.dataset.complete)}</h2>
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <label>Work performed / results</label><textarea name="notes" rows="3" required></textarea>
+    <label class="check"><input type="checkbox" name="requalification_required"> Change affects qualified state - requalification required</label>
+    ${needsApproval ? selectPairs("approver_id", "QA approver (this work needs QA sign-off)", personPairs(approvers)) : ""}
+    ${sigBlock("performed")}`, async (d) => {
+      const wo = await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.complete)}/complete`, {
+        performed_on: d.performed_on, notes: d.notes, requalification_required: d.requalification_required,
+        approver_id: d.approver_id ? +d.approver_id : null, signature: { password: d.sig_password } });
+      toast(wo.approval_state === "pending" ? `${b.dataset.complete} completed - sent to QA for approval` : `${b.dataset.complete} completed`); after();
+    });
+  };
+  for (const b of c.querySelectorAll("[data-assign-wo]")) b.onclick = async () => {
+    const assignees = await people("assignees");
+    modal(`<h2>Assign ${esc(b.dataset.assignWo)}</h2>
+      ${selectPairs("assignee_id", "Assign to", personPairs(assignees, "- unassigned -"), b.dataset.current)}
+      <label>Reason / note (optional)</label><input name="reason">`, async (d) => {
+      await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.assignWo)}/assign`,
+        { assignee_id: d.assignee_id ? +d.assignee_id : null, reason: d.reason || null });
+      toast(`${b.dataset.assignWo} assigned - the assignee has been notified`); after();
+    });
+  };
+  for (const b of c.querySelectorAll("[data-cancel-wo]")) b.onclick = () => modal(`<h2>Cancel ${esc(b.dataset.cancelWo)}</h2>
+    <p class="muted">For a scheduled work order this skips the occurrence; the next one is planned one interval later.</p>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/work-orders/${encodeURIComponent(b.dataset.cancelWo)}/cancel`, d);
+    toast(`${b.dataset.cancelWo} cancelled`); after();
+  });
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+}
+
+VIEWS.workorders = async (c) => {
+  await pmOptions();
+  const status = state.woStatus ?? "open";
+  const wos = await api("GET", "/api/work-orders" + (status ? "?status=" + status : ""));
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Work orders</h2>
+    <select id="woSt" style="width:auto">${[["open", "Open"], ["completed", "Completed"], ["cancelled", "Cancelled"], ["", "All"]].map(([v, l]) => `<option value="${v}" ${v === status ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <p class="muted">Scheduled PM work orders are raised automatically when they come due; event triggers raise them instantly.</p>
+    <div class="tbl"><table>${WO_HEAD(true)}
+    ${wos.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">No work orders</td></tr>`}</table></div></div>`;
+  $("#woSt").onchange = (e) => { state.woStatus = e.target.value; openTab("workorders"); };
+  wireWoButtons(c, () => openTab("workorders"));
+};
+
+function wireApprovalButtons(c, after) {
+  for (const b of c.querySelectorAll("[data-review-apr]")) b.onclick = () => reviewApproval(b.dataset.reviewApr, after);
+  for (const b of c.querySelectorAll("[data-reassign-apr]")) b.onclick = async () => {
+    const approvers = await people("approvers");
+    modal(`<h2>Reassign ${esc(b.dataset.reassignApr)}</h2>${selectPairs("approver_id", "New approver", personPairs(approvers))}
+      <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+      await api("POST", `/api/approvals/${b.dataset.reassignApr}/reassign`, { approver_id: +d.approver_id, reason: d.reason });
+      toast("Approver changed and notified"); after();
+    });
+  };
+  for (const b of c.querySelectorAll("[data-withdraw-apr]")) b.onclick = () => modal(`<h2>Withdraw ${esc(b.dataset.withdrawApr)}</h2>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/approvals/${b.dataset.withdrawApr}/cancel`, d); toast("Request withdrawn"); after();
+  });
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+}
+
+async function reviewApproval(number, after) {
+  const r = await api("GET", `/api/approvals/${number}`);
+  const blockers = r.blockers || [];
+  modal(`<h2>${esc(r.number)} - ${esc(REQUEST_TYPES[r.request_type])}</h2>
+    <div class="grid"><div><label>Asset</label><b class="mono">${esc(r.asset_tag)}</b> ${esc(r.asset_description)}</div>
+      <div><label>Requested by</label>${esc(r.requested_by_name)} <span class="muted">${esc(r.requested_at)}</span></div>
+      ${r.work_order_number ? `<div><label>Work order</label>${esc(r.work_order_number)} ${esc(r.work_order_title)}</div>` : ""}</div>
+    <label>Requester's comment</label><div>${esc(r.request_comment || "-")}</div>
+    ${r.request_type === "asset_induction" ? `<p class="muted" style="font-size:13px">Approving qualifies the asset and makes it <b>Active</b> (released for use).</p>` : ""}
+    ${blockers.length ? `<div class="verdict bad" style="font-size:14px;text-align:left">Cannot be approved yet:<ul class="reasons">${blockers.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    ${select("decision", "Decision", blockers.length ? ["reject"] : ["approve", "reject"])}
+    <label>Comment (required to reject; e.g. documents reviewed)</label><textarea name="comment" rows="2"></textarea>
+    <div id="sigWrap">${sigBlock(blockers.length ? "rejected" : "approved")}</div>
+    <p><a class="link" data-open-asset>Open asset record</a></p>`, async (d) => {
+    await api("POST", `/api/approvals/${number}/decide`, { decision: d.decision, comment: d.comment || null, signature: { password: d.sig_password } });
+    toast(`${number} ${d.decision === "approve" ? "approved" : "rejected"}`);
+    state.taskCount = Math.max(0, (state.taskCount || 1) - 1); renderTabs(); after();
+  });
+  const sel = $(".modal select[name=decision]");
+  sel.onchange = () => $("#sigWrap").innerHTML = sigBlock(sel.value === "approve" ? "approved" : "rejected");
+  $(".modal [data-open-asset]").onclick = () => { $(".modal-bg").remove(); openAsset(r.asset_tag); };
+}
+
+VIEWS.mytasks = async (c) => {
+  await pmOptions();
+  const t = await api("GET", "/api/my-tasks");
+  state.taskCount = t.approvals.length + t.work_orders.length; renderTabs();
+  const aprRows = (list, review) => list.map(r => `<tr><td class="mono">${esc(r.number)}</td><td>${esc(REQUEST_TYPES[r.request_type])}${r.work_order_number ? " " + esc(r.work_order_number) : ""}</td>
+    <td><a class="link mono" data-tag="${esc(r.asset_tag)}">${esc(r.asset_tag)}</a><div class="muted" style="font-size:12px">${esc(r.asset_description)}</div></td>
+    <td>${esc(review ? r.requested_by_name : r.approver_name)}</td><td>${esc(r.request_comment || "")}</td><td>${esc(r.requested_at)}</td>
+    <td>${review ? `<button class="btn" data-review-apr="${esc(r.number)}">Review &amp; decide</button>` : aprPill(r.status)}</td></tr>`).join("");
+  c.innerHTML = `
+  <div class="panel"><h2>Approvals waiting for me (${t.approvals.length})</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Type</th><th>Asset</th><th>Requested by</th><th>Comment</th><th>Submitted</th><th></th></tr>
+    ${aprRows(t.approvals, true) || `<tr><td colspan="7" class="muted">Nothing to approve.</td></tr>`}</table></div></div>
+  <div class="panel"><h2>Work orders assigned to me (${t.work_orders.length})</h2><div class="tbl"><table>${WO_HEAD(true)}
+    ${t.work_orders.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">No open work orders assigned to you.</td></tr>`}</table></div></div>
+  ${can("maintenance.plan") ? `<div class="panel"><h2>Unassigned work orders (${t.unassigned_work_orders.length})</h2><div class="tbl"><table>${WO_HEAD(true)}
+    ${t.unassigned_work_orders.map(w => woRow(w, true)).join("") || `<tr><td colspan="9" class="muted">Everything is assigned.</td></tr>`}</table></div></div>` : ""}
+  <div class="panel"><h2>My requests awaiting approval (${t.my_requests.length})</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Type</th><th>Asset</th><th>Approver</th><th>Comment</th><th>Submitted</th><th>Status</th></tr>
+    ${aprRows(t.my_requests, false) || `<tr><td colspan="7" class="muted">None pending.</td></tr>`}</table></div></div>`;
+  wireWoButtons(c, () => openTab("mytasks"));
+  wireApprovalButtons(c, () => openTab("mytasks"));
+};
+
+const pf = (v) => `<span class="pill ${v === "pass" ? "ok" : v === "fail" ? "bad" : ""}">${esc(v.replace(/_/g, " "))}</span>`;
+const sigList = (sigs) => sigs.map(s => `<div style="font-size:12px">${esc(s.full_name)} (${esc(s.username)}) - <b>${esc(s.meaning)}</b> - ${esc(s.signed_at)}</div>`).join("");
+
+function reportIssue(tag) {
+  modal(`<h2>Report problem - ${esc(tag)}</h2><p class="muted">A deviation is opened and an active asset is deactivated.</p>
+    <label>Describe the problem</label><textarea name="description" rows="3" required></textarea>`, async (d) => {
+    const dev = await api("POST", `/api/assets/${encodeURIComponent(tag)}/issues`, d);
+    toast(`Deviation ${dev.number} opened`); openAsset(tag);
+  });
+}
+
+const ASSET_ACTIONS = {
+  induct: async (a) => {
+    const approvers = (await people("approvers")).filter(p => p.id !== state.me.id);
+    if (!approvers.length) return toast("No QA approvers yet - an administrator must add a user with the QA role", 6000);
+    const open = a.fitness.reasons.filter(r => !r.startsWith("Status") && !r.startsWith("Qualification"));
+    modal(`<h2>Submit ${esc(a.asset_tag)} for QA approval</h2>
+      <p class="muted">The approver is notified. When they approve with their e-signature the asset is qualified and becomes <b>Active</b>.</p>
+      ${open.length ? `<p class="pill bad">Must be resolved before QA can approve: ${esc(open.join("; "))}</p>` : ""}
+      ${selectPairs("approver_id", "QA approver", personPairs(approvers))}
+      <label>Comment for the approver (e.g. IQ/OQ references, documents attached)</label><textarea name="comment" rows="3"></textarea>`, async (d) => {
+      const r = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/induction`, { approver_id: +d.approver_id, comment: d.comment || null });
+      toast(`${r.number} sent to ${r.approver_name}`); openAsset(a.asset_tag);
+    });
+  },
+  activate: (a) => {
+    const gmp = a.gmp_impact !== "none";
+    modal(`<h2>Activate ${esc(a.asset_tag)}</h2>
+      <p class="muted">${gmp ? "GMP asset: release to service requires a QA electronic signature and a clean fitness check." : "The asset will be marked Active and fit for use."}</p>
+      ${a.fitness.reasons.filter(r => !r.startsWith("Status")).length ? `<p class="pill bad">Blocked: ${esc(a.fitness.reasons.filter(r => !r.startsWith("Status")).join("; "))}</p>` : ""}
+      <label>Reason (required)</label><input name="reason" required value="Released for use">${gmp ? sigBlock("released") : ""}`, async (d) => {
+      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: "in_service", reason: d.reason, signature: gmp ? { password: d.sig_password } : null });
+      toast(`${a.asset_tag} is now Active`); openAsset(a.asset_tag);
+    });
+  },
+  deactivate: (a) => modal(`<h2>Deactivate ${esc(a.asset_tag)}</h2><p class="muted">The asset will show DO NOT USE until it is activated again.</p>
+    <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: "out_of_service", reason: d.reason });
+    toast(`${a.asset_tag} is now Inactive`); openAsset(a.asset_tag);
+  }),
+  schedule: (a) => pmScheduleForm(a.asset_tag),
+  wo: async (a) => {
+    const [opts, assignees] = await Promise.all([pmOptions(), people("assignees")]);
+    modal(`<h2>New work order - ${esc(a.asset_tag)}</h2>
+      ${field("title", "Title", "required")}<div class="grid">${select("work_type", "Work type", opts.work_types, "corrective")}
+      ${field("due_on", "Due on", `type="date" value="${today()}" required`)}</div>
+      ${selectPairs("assigned_to", "Assign to", personPairs(assignees, "- unassigned -"))}
+      <label class="check"><input type="checkbox" name="blocks_use"> Asset is DO NOT USE until this is completed</label>
+      <label class="check"><input type="checkbox" name="requires_approval"> Completed work must be approved by QA</label>
+      <label>Instructions</label><textarea name="instructions" rows="3"></textarea>`, async (d) => {
+      const wo = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/work-orders`,
+        { ...d, assigned_to: d.assigned_to ? +d.assigned_to : null });
+      toast(`${wo.number} created`); openAsset(a.asset_tag);
+    });
+  },
+  edit: async (a) => {
+    const depts = await api("GET", "/api/departments");
+    modal(`<h2>Edit ${esc(a.asset_tag)}</h2>
+    ${field("description", "Description", `value="${esc(a.description)}" required`)}
+    <div class="grid">${field("manufacturer", "Manufacturer", `value="${esc(a.manufacturer || "")}"`)}${field("model", "Model", `value="${esc(a.model || "")}"`)}
+    ${field("serial_number", "Serial number", `value="${esc(a.serial_number || "")}"`)}<div>${selectPairs("department", "Department", deptPairs(depts, a.department), a.department || "")}${loadLink("department", depts)}</div>
+    ${a.calibration_required ? field("calibration_interval_days", "Calibration interval (days)", `type="number" value="${a.calibration_interval_days || ""}"`) : ""}</div>
+    <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
+    const changes = {};
+    for (const k of ["description", "manufacturer", "model", "serial_number", "department"]) if ((d[k] || null) !== (a[k] || null)) changes[k] = d[k] || null;
+    if (d.calibration_interval_days && +d.calibration_interval_days !== a.calibration_interval_days) changes.calibration_interval_days = +d.calibration_interval_days;
+    await api("PATCH", "/api/assets/" + encodeURIComponent(a.asset_tag), { changes, reason: d.reason, expected_version: a.version });
+    toast("Saved"); openAsset(a.asset_tag);
+    });
+    wireLoadLinks($(".modal"));
+  },
+  cal: (a) => modal(`<h2>Record calibration - ${esc(a.asset_tag)}</h2>
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <div class="grid">${select("as_found", "As found", ["pass", "fail", "not_applicable"])}${select("as_left", "As left", ["pass", "fail"])}</div>
+    ${field("standards", "Reference standards used (scan IDs, comma separated)")}
+    ${field("certificate_ref", "External certificate reference (if calibrated by vendor)")}
+    <label>Notes</label><textarea name="notes" rows="2"></textarea>${sigBlock("performed")}`, async (d) => {
+    const rec = await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/calibrations`, {
+      performed_on: d.performed_on, as_found: d.as_found, as_left: d.as_left,
+      standards: d.standards.split(/[,\s]+/).filter(Boolean), certificate_ref: d.certificate_ref || null, notes: d.notes || null,
+      signature: { password: d.sig_password } });
+    toast(rec.deviation_number ? `Out of tolerance: ${rec.deviation_number} opened, asset quarantined` : "Calibration recorded - awaiting QA approval", 6000);
+    openAsset(a.asset_tag);
+  }),
+  pm: (a) => modal(`<h2>Record ad-hoc maintenance - ${esc(a.asset_tag)}</h2>
+    <p class="muted" style="margin-top:0">Planned PM is completed from its work order.</p>
+    ${select("maintenance_type", "Type", ["preventive", "corrective"])}
+    ${field("performed_on", "Date performed", `type="date" value="${today()}" max="${today()}" required`)}
+    <label>Work performed</label><textarea name="description" rows="3" required></textarea>
+    <label class="check"><input type="checkbox" name="requalification_required"> Change affects qualified state - requalification required</label>
+    ${sigBlock("performed")}`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/maintenance`, { ...d, signature: { password: d.sig_password } });
+    toast("Maintenance recorded"); openAsset(a.asset_tag);
+  }),
+  status: (a) => {
+    const targets = { commissioning: ["retired"], in_service: ["quarantine", "retired"],
+      out_of_service: ["quarantine", "retired"], quarantine: ["out_of_service", "retired"] }[a.status] || [];
+    const allowed = targets.filter(t => can(t === "retired" ? "asset.status.release" : "asset.status.remove"));
+    if (!allowed.length) return toast("No status changes available for your role");
+    modal(`<h2>Quarantine / retire - ${esc(a.asset_tag)}</h2><p>Current: ${statusPill(a.status)}</p>
+      ${select("status", "New status", allowed)}<label>Reason (required)</label><input name="reason" required>
+      <div id="sigWrap"></div>`, async (d) => {
+      await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/status`, { status: d.status, reason: d.reason, signature: d.status === "retired" ? { password: d.sig_password } : null });
+      toast("Status changed"); openAsset(a.asset_tag);
+    });
+    const sel = $(".modal select[name=status]"), wrap = $("#sigWrap");
+    const upd = () => wrap.innerHTML = sel.value === "retired" ? sigBlock("approved") : "";
+    sel.onchange = upd; upd();
+  },
+  qual: (a) => modal(`<h2>Qualification - ${esc(a.asset_tag)}</h2>
+    ${select("qualification_status", "Qualification status", ["pending", "iq_complete", "oq_complete", "qualified", "requalification_required"], a.qualification_status)}
+    <label>Reason / protocol references (required)</label><input name="reason" required>${sigBlock("approved")}`, async (d) => {
+    await api("POST", `/api/assets/${encodeURIComponent(a.asset_tag)}/qualification`, { qualification_status: d.qualification_status, reason: d.reason, signature: { password: d.sig_password } });
+    toast("Qualification updated"); openAsset(a.asset_tag);
+  }),
+  issue: (a) => reportIssue(a.asset_tag),
+};
+
+// ---- QA approvals ----------------------------------------------------------
+VIEWS.approvals = async (c) => {
+  const recs = await api("GET", "/api/calibrations?status=pending_approval");
+  c.innerHTML = `<div class="panel"><h2>Calibrations awaiting QA approval</h2><div class="tbl"><table>
+    <tr><th>#</th><th>Asset</th><th>Performed</th><th>By</th><th>As found</th><th>As left</th><th>Standards / cert</th><th>Deviation</th><th></th></tr>
+    ${recs.map(r => `<tr><td>${r.id}</td><td><a class="link" data-tag="${esc(r.asset_tag)}">${esc(r.asset_tag)}</a></td><td>${esc(r.performed_on)}</td><td>${esc(r.performed_by)}</td>
+      <td>${pf(r.as_found)}</td><td>${pf(r.as_left)}</td><td>${esc(r.standards_used.join(", ") || r.certificate_ref || "")}</td><td>${esc(r.deviation_number || "")}</td>
+      <td><button class="btn" data-review="${r.id}">Review</button></td></tr>`).join("") || `<tr><td colspan="9" class="muted">Nothing pending</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  for (const b of c.querySelectorAll("[data-review]")) b.onclick = () => {
+    const r = recs.find(x => x.id === +b.dataset.review);
+    modal(`<h2>Review calibration #${r.id} - ${esc(r.asset_tag)}</h2>
+      <p>Performed ${esc(r.performed_on)} by ${esc(r.performed_by)}. As found ${pf(r.as_found)}, as left ${pf(r.as_left)}.</p>
+      ${r.notes ? `<p class="muted">${esc(r.notes)}</p>` : ""}
+      ${select("decision", "Decision", ["approve", "reject"])}<label>Comment (required to reject)</label><input name="comment">
+      <div id="sigWrap">${sigBlock("approved")}</div>`, async (d) => {
+      await api("POST", `/api/calibrations/${r.id}/review`, { decision: d.decision, comment: d.comment || null, signature: { password: d.sig_password } });
+      toast(`Calibration #${r.id} ${d.decision}d`); openTab("approvals");
+    });
+    const sel = $(".modal select[name=decision]");
+    sel.onchange = () => $("#sigWrap").innerHTML = sigBlock(sel.value === "approve" ? "approved" : "rejected");
+  };
+};
+
+// ---- Deviations ------------------------------------------------------------
+VIEWS.deviations = async (c) => {
+  const devs = await api("GET", "/api/deviations");
+  c.innerHTML = `<div class="panel"><h2>Deviations</h2><div class="tbl"><table>
+    <tr><th>Number</th><th>Asset</th><th>Source</th><th>Description</th><th>Status</th><th>Opened</th><th>Closure</th><th></th></tr>
+    ${devs.map(d => `<tr><td>${esc(d.number)}</td><td><a class="link" data-tag="${esc(d.asset_tag)}">${esc(d.asset_tag)}</a></td><td>${esc(d.source)}</td>
+      <td>${esc(d.description)}</td><td><span class="pill ${d.status === "open" ? "bad" : "ok"}">${d.status}</span></td><td>${esc(d.opened_at)}<br><span class="muted">${esc(d.opened_by)}</span></td>
+      <td>${d.closure_comment ? esc(d.closure_comment) + sigList(d.signatures) : ""}</td>
+      <td>${d.status === "open" && can("deviation.close") ? `<button class="btn" data-close="${esc(d.number)}">Close</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No deviations</td></tr>`}
+    </table></div></div>`;
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+  for (const b of c.querySelectorAll("[data-close]")) b.onclick = () => modal(`<h2>Close ${esc(b.dataset.close)}</h2>
+    <label>Investigation summary, impact assessment and CAPA (required)</label><textarea name="comment" rows="4" required></textarea>${sigBlock("approved")}`, async (d) => {
+    await api("POST", `/api/deviations/${encodeURIComponent(b.dataset.close)}/close`, { comment: d.comment, signature: { password: d.sig_password } });
+    toast("Deviation closed"); openTab("deviations");
+  });
+};
+
+// ---- Due list ----------------------------------------------------------------
+VIEWS.due = async (c) => {
+  const r = await api("GET", "/api/reports/due?days=" + (state.dueDays || 30));
+  const tbl = (rows) => `<div class="tbl"><table><tr><th>Asset</th><th>Description</th><th>Location</th><th>Status</th><th>Due</th></tr>
+    ${rows.map(x => `<tr><td><a class="link" data-tag="${esc(x.asset_tag)}">${esc(x.asset_tag)}</a></td><td>${esc(x.description)}</td><td>${esc(x.location || "-")}</td>
+      <td>${statusPill(x.status)}</td><td><span class="pill ${x.overdue ? "bad" : "warn"}">${esc(x.due_on || "never calibrated")}${x.overdue ? " overdue" : ""}</span></td></tr>`).join("") || `<tr><td colspan="5" class="muted">Nothing due</td></tr>`}</table></div>`;
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Due within</h2>
+    <select id="days" style="width:auto">${[7, 30, 60, 90].map(d => `<option value="${d}" ${d === r.horizon_days ? "selected" : ""}>${d} days</option>`).join("")}</select></div></div>
+    <div class="panel"><h2>Calibration</h2>${tbl(r.calibration)}</div><div class="panel"><h2>Preventive maintenance</h2>${tbl(r.maintenance)}</div>`;
+  $("#days").onchange = (e) => { state.dueDays = +e.target.value; openTab("due"); };
+  for (const a of c.querySelectorAll("[data-tag]")) a.onclick = () => openAsset(a.dataset.tag);
+};
+
+// ---- Audit trail ---------------------------------------------------------------
+VIEWS.audit = async (c) => {
+  const f = state.auditFilter || {}; state.auditFilter = null;
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const rows = await api("GET", "/api/audit?" + qs);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Audit trail ${f.entity_id ? "- " + esc(f.entity_id) : ""}</h2>
+    <div class="row"><button class="btn secondary" id="verify">Verify integrity</button><button class="btn secondary" id="export">Export CSV</button></div></div>
+    <div id="verifyResult"></div>
+    <div class="row" style="margin:10px 0">
+      <select id="fType" style="width:auto">${["", "asset", "calibration", "maintenance", "deviation", "user", "location", "audit_trail"].map(t => `<option ${t === f.entity_type ? "selected" : ""} value="${t}">${t || "All record types"}</option>`).join("")}</select>
+      <input id="fId" placeholder="Record ID / tag" value="${esc(f.entity_id || "")}" style="max-width:180px"><input id="fUser" placeholder="User" value="${esc(f.username || "")}" style="max-width:160px">
+      <button class="btn" id="apply">Filter</button></div>
+    <div class="tbl"><table><tr><th>#</th><th>Timestamp (UTC)</th><th>User</th><th>Action</th><th>Record</th><th>Old value</th><th>New value</th><th>Reason</th></tr>
+    ${rows.map(r => `<tr><td>${r.seq}</td><td>${esc(r.timestamp)}</td><td>${esc(r.username)}</td><td>${esc(r.action)}</td><td>${esc(r.entity_type)} ${esc(r.entity_id || "")}</td>
+      <td class="mono">${esc(r.old_value || "")}</td><td class="mono">${esc((r.new_value || "").slice(0, 400))}</td><td>${esc(r.reason || "")}</td></tr>`).join("")}</table></div></div>`;
+  const cur = () => ({ entity_type: $("#fType").value, entity_id: $("#fId").value.trim(), username: $("#fUser").value.trim() });
+  $("#apply").onclick = () => { state.auditFilter = cur(); openTab("audit"); };
+  $("#verify").onclick = async () => {
+    const v = await api("GET", "/api/audit/verify");
+    $("#verifyResult").innerHTML = `<div class="verdict ${v.valid ? "ok" : "bad"}" style="font-size:16px">${v.valid
+      ? `Audit trail intact - ${v.entries_checked} entries verified`
+      : `INTEGRITY FAILURE at entry #${v.broken_at_seq}: ${esc(v.problem)}`}</div>`;
+  };
+  $("#export").onclick = async () => {
+    const qs2 = new URLSearchParams(Object.entries(cur()).filter(([, v]) => v)).toString();
+    const blob = await (await api("GET", "/api/audit/export.csv?" + qs2, undefined, true)).blob();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "audit_trail.csv"; a.click();
+  };
+};
+
+// ---- Administration ----------------------------------------------------------
+// Add a user or approver; details can be picked from Microsoft 365 or a CSV export of it
+function newUserForm(roles, role, dir) {
+  modal(`<h2>${role === "qa" ? "Add approver (QA)" : "Add user"}</h2>
+    <div class="row" style="margin-bottom:6px">
+      <button type="button" class="btn secondary" data-m365 ${dir.m365_configured ? "" : 'disabled title="Ask IT to configure the Microsoft 365 app registration (see README)"'}>Find in Microsoft 365</button>
+      <label class="btn secondary" style="margin:0">Import from CSV<input type="file" accept=".csv,text/csv" data-csv hidden></label>
+    </div>
+    <div data-dir class="hidden" style="margin-bottom:8px">
+      <div class="row" data-m365-search><input data-q placeholder="Name or e-mail" style="max-width:260px"><button type="button" class="btn" data-go>Search</button></div>
+      <div data-results style="max-height:220px;overflow:auto;margin-top:6px"></div>
+    </div>
+    ${field("full_name", "Full name (shown on e-signatures)", 'required autocomplete="off"')}${field("email", "E-mail (for notifications)", 'type="email" autocomplete="off"')}
+    ${field("username", "User ID (never re-used)", 'required autocomplete="off"')}${select("role", "Role", roles, role)}
+    ${field("temporary_password", "Temporary password (must be changed at first login)", `type="password" required autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"`)}`, async (d) => {
+    await api("POST", "/api/users", { ...d, email: d.email || null }); toast(`${d.full_name} added`); openTab("admin");
+  });
+  const box = $(".modal [data-dir]"), results = $(".modal [data-results]");
+  const show = (list) => {
+    box.classList.remove("hidden");
+    results.innerHTML = list.length ? `<table>${list.map((p, i) => `<tr><td><a class="link" data-pick="${i}">${esc(p.full_name)}</a></td>
+      <td>${esc(p.email)}</td><td class="muted">${esc(p.department || "")}${p.job_title ? " - " + esc(p.job_title) : ""}</td></tr>`).join("")}</table>`
+      : `<span class="muted">No matches</span>`;
+    for (const a of results.querySelectorAll("[data-pick]")) a.onclick = () => {
+      const p = list[+a.dataset.pick];
+      for (const k of ["full_name", "email", "username"]) $(`.modal [name=${k}]`).value = p[k] || "";
+      box.classList.add("hidden"); $(".modal [name=temporary_password]").focus();
+    };
+  };
+  $(".modal [data-m365]").onclick = () => {
+    box.classList.remove("hidden"); results.innerHTML = "";
+    $(".modal [data-m365-search]").classList.remove("hidden");
+    const go = async () => { try { show(await api("GET", "/api/directory/search?q=" + encodeURIComponent($(".modal [data-q]").value))); } catch (e) { toast(e.message, 6000); } };
+    $(".modal [data-go]").onclick = go;
+    $(".modal [data-q]").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+    $(".modal [data-q]").focus();
+  };
+  $(".modal [data-csv]").onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const res = await fetch("/api/directory/csv", { method: "POST", body: await file.text(),
+      headers: { "Content-Type": "text/plain", Authorization: "Bearer " + state.token } });
+    const body = await res.json();
+    if (!res.ok) return toast(body.detail || "Could not read the CSV", 6000);
+    $(".modal [data-m365-search]")?.classList.add("hidden");
+    show(body);
+  };
+}
+
+VIEWS.admin = async (c) => {
+  const [users, locs, co, depts, dir] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/locations"),
+    api("GET", "/api/company"), api("GET", "/api/departments"), api("GET", "/api/directory/status")]);
+  for (const k of Object.keys(peopleCache)) delete peopleCache[k];
+  const approvers = users.filter(u => u.role === "qa" && u.active);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Company</h2>
+      <button class="btn secondary" id="editCompany">Edit</button></div>
+    <div class="grid"><div><label>Company</label>${esc(co.name)}</div><div><label>Site</label>${esc(co.site_name)}</div>
+      <div><label>Asset ID prefix</label><span class="mono">${esc(co.asset_prefix)}</span> <span class="muted">(next ${esc(co.asset_prefix)}-${String(co.next_asset_number).padStart(6, "0")})</span></div>
+      <div><label>Address</label>${esc(co.address || "-")}</div></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Approvers (QA)</h2>
+      <button class="btn" id="newApprover">Add approver</button></div>
+    <p class="muted" style="margin-top:4px">Approvers review asset inductions and work order sign-offs. They are notified by e-mail
+      ${dir.email_configured ? `<span class="pill ok">e-mail on</span>` : `<span class="pill warn">e-mail not configured - tasks still appear under My tasks</span>`}</p>
+    <div class="tbl"><table><tr><th>Name</th><th>User ID</th><th>E-mail</th></tr>
+    ${approvers.map(u => `<tr><td>${esc(u.full_name)}</td><td>${esc(u.username)}</td><td>${u.email ? esc(u.email) : `<span class="pill warn">no e-mail</span>`}</td></tr>`).join("")
+      || `<tr><td colspan="3" class="muted">No approvers yet - click "Add approver".</td></tr>`}</table></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Users</h2><button class="btn" id="newUser">Add user</button></div>
+    <div class="tbl"><table><tr><th>User ID</th><th>Name</th><th>E-mail</th><th>Role</th><th>State</th><th></th></tr>
+    ${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.email || "-")}</td><td>${esc(u.role)}</td>
+      <td>${u.active ? (u.locked ? `<span class="pill bad">locked</span>` : `<span class="pill ok">active</span>`) : `<span class="pill">inactive</span>`}</td>
+      <td><button class="btn secondary" data-user="${u.id}">Manage</button></td></tr>`).join("")}</table></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Departments</h2>
+      <div class="row"><button class="btn secondary" id="loadDepts">Load standard pharma departments</button><button class="btn" id="newDept">Add department</button></div></div>
+    <div class="tbl"><table><tr><th>Code</th><th>Name</th></tr>
+    ${depts.map(d => `<tr><td class="mono">${esc(d.code)}</td><td>${esc(d.name)}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No departments yet - click "Load standard pharma departments" or add your own.</td></tr>`}</table></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Locations / sites</h2>
+      <div class="row"><button class="btn secondary" id="loadLocs">Load standard sites</button><button class="btn" id="newLoc">Add location</button></div></div>
+    <div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Area class</th><th></th></tr>
+    ${locs.map(l => `<tr><td class="mono">${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.area_class || "")}</td><td><a class="link" data-loc="${esc(l.code)}">Label</a></td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted">No locations yet - click "Load standard sites" (USA - Maryland, China - Shanghai, Europe - ...) or add your own rooms/areas.</td></tr>`}</table></div></div>`;
+  for (const [id, url, what] of [["#loadDepts", "/api/departments/load-standard", "departments"], ["#loadLocs", "/api/locations/load-standard", "sites"]])
+    $(id).onclick = async () => { const r = await api("POST", url); toast(`${r.added} ${what} added, ${r.skipped} already present`); openTab("admin"); };
+  $("#newDept").onclick = () => modal(`<h2>Add department</h2>${field("code", "Code (e.g. QA)", 'required maxlength="20"')}${field("name", "Name", "required")}`, async (d) => {
+    await api("POST", "/api/departments", d); toast("Department added"); openTab("admin");
+  });
+  const roles = ["viewer", "operator", "technician", "qa", "admin"];
+  $("#editCompany").onclick = () => modal(`<h2>Edit company</h2>${field("name", "Company name", `value="${esc(co.name)}" required`)}
+    ${field("site_name", "Site name", `value="${esc(co.site_name)}" required`)}<label>Address</label><textarea name="address" rows="2">${esc(co.address || "")}</textarea>
+    ${field("asset_prefix", "Asset ID prefix (applies to new assets only)", `value="${esc(co.asset_prefix)}" required maxlength="10"`)}
+    <label>Reason for change (required)</label><input name="reason" required>`, async (d) => {
+    state.company = await api("PUT", "/api/company", d); setCompanyHeader(); toast("Company updated"); openTab("admin");
+  });
+  $("#newUser").onclick = () => newUserForm(roles, "technician", dir);
+  $("#newApprover").onclick = () => newUserForm(roles, "qa", dir);
+  for (const b of c.querySelectorAll("[data-user]")) b.onclick = () => {
+    const u = users.find(x => x.id === +b.dataset.user);
+    modal(`<h2>Manage ${esc(u.username)}</h2>
+      ${field("full_name", "Full name", `value="${esc(u.full_name)}" required autocomplete="off"`)}${field("email", "E-mail", `type="email" value="${esc(u.email || "")}" autocomplete="off"`)}
+      ${select("role", "Role", roles, u.role)}
+      <label class="check"><input type="checkbox" name="active" ${u.active ? "checked" : ""}> Active</label>
+      <label class="check"><input type="checkbox" name="unlock"> Unlock account / reset failed attempts</label>
+      ${field("temporary_password", "Reset to temporary password (optional)", `type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"`)}
+      <label>Reason (required)</label><input name="reason" required>`, async (d) => {
+      await api("PATCH", `/api/users/${u.id}`, { role: d.role !== u.role ? d.role : null, active: d.active !== !!u.active ? d.active : null,
+        full_name: d.full_name !== u.full_name ? d.full_name : null, email: (d.email || "") !== (u.email || "") ? d.email : null,
+        unlock: d.unlock, temporary_password: d.temporary_password || null, reason: d.reason });
+      toast("User updated"); openTab("admin");
+    });
+  };
+  $("#newLoc").onclick = () => modal(`<h2>Add location</h2>${field("code", "Location code (printed as barcode)", "required")}${field("name", "Name", "required")}
+    ${select("area_class", "Area classification", ["", "Site", "Grade A", "Grade B", "Grade C", "Grade D", "CNC", "Warehouse", "Laboratory", "Office"])}`, async (d) => {
+    await api("POST", "/api/locations", { ...d, area_class: d.area_class || null }); toast("Location created"); openTab("admin");
+  });
+  for (const a of c.querySelectorAll("[data-loc]")) a.onclick = async () => {
+    const blob = await (await api("GET", `/api/locations/${encodeURIComponent(a.dataset.loc)}/label.svg`, undefined, true)).blob();
+    const w = window.open(""); w.document.write(`<img src="${URL.createObjectURL(blob)}" onload="print()">`);
+  };
+};
+
+// ---- Boot ----------------------------------------------------------------------
+$("#loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api("POST", "/api/auth/login", d);
+    state.token = r.token; sessionStorage.setItem("gmp_token", r.token);
+    e.target.reset(); await boot();
+  } catch (err) { toast(err.message); }
+};
+$("#pwForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  if (d.new_password !== d.confirm) return toast("Passwords do not match");
+  try { await api("POST", "/api/auth/change-password", { old_password: d.old_password, new_password: d.new_password }); e.target.reset(); toast("Password changed"); await boot(); }
+  catch (err) { toast(err.message, 6000); }
+};
+$("#logoutBtn").onclick = async () => { try { await api("POST", "/api/auth/logout"); } catch (_) {} logoutLocal("Signed out"); };
+
+$("#setupForm [name=asset_prefix]").oninput = (e) => $("#prefixPreview").textContent = (e.target.value.toUpperCase() || "ACME") + "-000001";
+$("#setupForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try { state.company = await api("PUT", "/api/company", Object.fromEntries(new FormData(e.target))); toast("Company set up"); await boot(); }
+  catch (err) { toast(err.message, 6000); }
+};
+for (const id of ["#setupLogout", "#waitLogout"]) $(id).onclick = () => $("#logoutBtn").onclick();
+
+function setCompanyHeader() {
+  $("#companyName").textContent = state.company ? `- ${state.company.name}, ${state.company.site_name}` : "";
+}
+
+async function boot() {
+  try {
+    const pub = await api("GET", "/api/company/public");
+    $("#loginCompany").textContent = pub.configured ? `${pub.name} - ${pub.site_name}` : "";
+  } catch (_) { /* server unreachable: the login attempt will report it */ }
+  if (!state.token) return show("login");
+  try { state.me = await api("GET", "/api/me"); } catch (_) { return logoutLocal(); }
+  if (state.me.must_change_password) return show("pw");
+  state.company = await api("GET", "/api/company");
+  if (!state.company) return show(can("company.manage") ? "setup" : "wait");
+  setCompanyHeader();
+  $("#who").textContent = `${state.me.full_name} (${state.me.username}) - ${state.me.role}`;
+  // People who register or maintain assets start on the register; operators start at the scan station
+  try { const t = await api("GET", "/api/my-tasks"); state.taskCount = t.approvals.length + t.work_orders.length; } catch (_) { state.taskCount = 0; }
+  state.tab = state.tab || (state.taskCount ? "mytasks" : can("asset.create") || can("maintenance.plan") || can("user.manage") ? "assets" : "scan");
+  show("app"); openTab(state.tab);
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+# Optional: serial / COM-port scanner bridge
+pyserial>=3.5
+# Tests
+pytest>=8
+httpx>=0.27
