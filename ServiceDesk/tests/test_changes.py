@@ -73,7 +73,7 @@ CHANGE_FORM = {
     "title": "Allow TCP 443 warehouse -> ERP", "description": "Add firewall rule",
     "change_type": "normal", "risk": "medium", "impact": "low",
     "implementation_plan": "1. Add rule 2. Save", "backout_plan": "Delete rule",
-    "planned_start": "2026-11-05T19:00", "planned_end": "2026-11-05T20:00",
+    "planned_start": "2030-11-05T19:00", "planned_end": "2030-11-05T20:00",
 }
 
 
@@ -123,7 +123,7 @@ def test_firewall_ticket_needs_completed_change(client, manager):
     alice.post(f"/changes/{c.number}/decide", {"decision": "approve", "comment": "Looks good"})
     assert change(c.number).state == ChangeState.APPROVED
     approved = [e for e in emails("rita@example.com") if "was approved" in e.subject]
-    assert approved and "2026-11-05 19:00" in approved[0].body
+    assert approved and "2030-11-05 19:00" in approved[0].body
 
     # Implement and complete -> ticket back to Bob, who can now resolve it.
     bob.post(f"/changes/{c.number}/start")
@@ -149,7 +149,7 @@ def test_submit_validation_and_drafts(client, manager):
     assert c.state == ChangeState.DRAFT
     r = bob.post(f"/changes/{c.number}/submit")
     assert "backout plan" in r.text
-    r = raise_change(bob, planned_start="2026-11-05T21:00", planned_end="2026-11-05T20:00")
+    r = raise_change(bob, planned_start="2030-11-05T21:00", planned_end="2030-11-05T20:00")
     assert "end must be after" in r.text
 
 
@@ -265,20 +265,20 @@ def test_impact_and_conflicts(client, manager):
     assert re.search(r"ERP</a> <span class=\"muted small\">Application · via SQL01", page)
 
     # Overlapping window on the same firewall -> conflict warning both ways.
-    raise_change(alice, planned_start="2026-11-05T19:30", planned_end="2026-11-05T21:00", title="Upgrade firmware")
+    raise_change(alice, planned_start="2030-11-05T19:30", planned_end="2030-11-05T21:00", title="Upgrade firmware")
     second = change().number
     assert "Schedule conflict" in alice.get(f"/changes/{second}").text and "same item: Core Firewall 1" in alice.get(f"/changes/{second}").text
     assert first in alice.get(f"/changes/{second}").text
     sched = manager.get("/changes?view=schedule").text
-    assert "Thursday 05 November 2026" in sched and "conflict" in sched
+    assert "Tuesday 05 November 2030" in sched and "conflict" in sched
 
     # Different item, but it depends on the firewall being changed -> dependency conflict.
-    raise_change(alice, items=("ERP",), planned_start="2026-11-05T19:45", planned_end="2026-11-05T20:30",
+    raise_change(alice, items=("ERP",), planned_start="2030-11-05T19:45", planned_end="2030-11-05T20:30",
                  title="ERP upgrade")
     page = alice.get(f"/changes/{change().number}").text
     assert "ERP depends on Core Firewall 1 (via SQL01)" in page
     # Non-overlapping window -> no conflict.
-    raise_change(alice, items=("ERP",), planned_start="2026-11-06T19:45", planned_end="2026-11-06T20:30",
+    raise_change(alice, items=("ERP",), planned_start="2030-11-06T19:45", planned_end="2030-11-06T20:30",
                  title="ERP follow-up")
     assert "Schedule conflict" not in alice.get(f"/changes/{change().number}").text
 

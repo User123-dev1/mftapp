@@ -33,7 +33,7 @@ def add_lists(manager):
 def draft(browser, lists, **over):
     data = {"kind": "maintenance", "severity": "warning", "title": "Email unavailable Saturday 8-10pm",
             "message": "Exchange is being upgraded.", "impact": "Outlook and webmail.",
-            "user_action": "Save drafts before 8pm.", "start_at": "2026-11-07T20:00", "end_at": "2026-11-07T22:00",
+            "user_action": "Save drafts before 8pm.", "start_at": "2030-11-07T20:00", "end_at": "2030-11-07T22:00",
             "show_banner": "true", "list_ids": lists}
     data.update(over)
     return browser.client.post("/notices/new", data=dict(data, csrf_token=browser.csrf()))
@@ -140,7 +140,7 @@ def test_notice_from_change_prefills(client, manager):
     c = change()
     assert f"/notices/new?change={c.number}" in manager.get(f"/changes/{c.number}").text
     form = manager.get(f"/notices/new?change={c.number}").text
-    assert "2026-11-05T19:00" in form and "2026-11-05T20:00" in form and 'value="maintenance" selected' in form
+    assert "2030-11-05T19:00" in form and "2030-11-05T20:00" in form and 'value="maintenance" selected' in form
 
 
 def test_permissions_and_validation(client, manager):
@@ -152,7 +152,7 @@ def test_permissions_and_validation(client, manager):
     n = latest()
     r = manager.post(f"/notices/{n.number}/send", {"confirm": "true"})
     assert "Choose at least one distribution list" in r.text
-    r = draft(manager, [lists["All Staff"]], start_at="2026-11-07T22:00", end_at="2026-11-07T20:00")
+    r = draft(manager, [lists["All Staff"]], start_at="2030-11-07T22:00", end_at="2030-11-07T20:00")
     assert "end time must be after" in r.text
     # Ended windows drop off the banner even if nobody resolved the notice.
     draft(manager, [lists["All Staff"]], title="Old work", start_at="2020-01-01T20:00", end_at="2020-01-01T21:00")
