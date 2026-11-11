@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise App Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --surface: #ffffff;
+      --border: #e3e5ec;
+      --text: #1b1d24;
+      --muted: #646a7a;
+      --accent: #4f46e5;
+      --up: #16a34a;
+      --down: #dc2626;
+      --unknown: #9ca3af;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+      --shadow-hover: 0 8px 24px rgba(16, 24, 40, .12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0f1117; --surface: #181b23; --border: #2a2e3a;
+        --text: #e8eaf0; --muted: #9aa1b2; --accent: #818cf8;
+        --shadow: none; --shadow-hover: 0 8px 24px rgba(0, 0, 0, .4);
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0f1117; --surface: #181b23; --border: #2a2e3a;
+      --text: #e8eaf0; --muted: #9aa1b2; --accent: #818cf8;
+      --shadow: none; --shadow-hover: 0 8px 24px rgba(0, 0, 0, .4);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 15px; line-height: 1.5;
+    }
+    .material-symbols-outlined { font-size: 22px; line-height: 1; }
+    /* Icon font is external: keep ligature names hidden until it loads, and
+       fall back to a symbol/initial if it never does (e.g. no internet). */
+    html:not(.icons-ready) .material-symbols-outlined { visibility: hidden; }
+    html.no-icons .material-symbols-outlined { visibility: visible; font-size: 0 !important; }
+    html.no-icons .material-symbols-outlined::after {
+      content: attr(data-fallback); font: 600 18px Inter, system-ui, sans-serif;
+    }
+    html.no-icons .search .material-symbols-outlined { display: none; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .bar {
+      max-width: 1200px; margin: 0 auto; padding: 14px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; }
+    .brand .logo {
+      width: 34px; height: 34px; border-radius: 8px; background: var(--accent); color: #fff;
+      display: grid; place-items: center;
+    }
+    .brand small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); }
+    .spacer { flex: 1; }
+    .icon-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; width: 36px; height: 36px; cursor: pointer;
+      display: grid; place-items: center;
+    }
+    .icon-btn:hover { color: var(--text); }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 48px; }
+    h1 { font-size: 26px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 24px; }
+    .search {
+      flex: 1 1 280px; display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0 12px;
+    }
+    .search:focus-within { border-color: var(--accent); }
+    .search input {
+      flex: 1; border: 0; outline: 0; background: transparent; color: var(--text);
+      font: inherit; padding: 10px 0;
+    }
+    .search kbd {
+      font: 12px Inter, sans-serif; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+      border-radius: 999px; padding: 6px 14px; font: 500 13px Inter, sans-serif; cursor: pointer;
+    }
+    .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .section-title {
+      font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--muted); margin: 8px 0 12px;
+    }
+    .grid {
+      display: grid; gap: 16px; margin-bottom: 28px;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+    .card {
+      position: relative; display: flex; flex-direction: column; gap: 12px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 18px; box-shadow: var(--shadow); text-decoration: none; color: inherit;
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+    }
+    .card:hover, .card:focus-visible { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: var(--accent); outline: none; }
+    .card-top { display: flex; align-items: center; gap: 12px; padding-right: 24px; }
+    .app-icon {
+      width: 44px; height: 44px; border-radius: 10px; color: #fff; flex-shrink: 0;
+      display: grid; place-items: center;
+    }
+    .app-icon .material-symbols-outlined { font-size: 26px; }
+    .card h3 { margin: 0; font-size: 16px; }
+    .card .cat { font-size: 12px; color: var(--muted); }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; flex: 1; }
+    .card-foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
+    .dot.up { background: var(--up); }
+    .dot.down { background: var(--down); }
+    .fav {
+      position: absolute; top: 12px; right: 12px; background: none; border: 0;
+      color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px;
+    }
+    .fav:hover { color: #f59e0b; }
+    .fav.on { color: #f59e0b; }
+    .fav.on .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+
+    .empty, .error {
+      text-align: center; color: var(--muted); padding: 48px 16px;
+      border: 1px dashed var(--border); border-radius: 14px;
+    }
+    .error { color: var(--down); }
+    footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 24px 32px; }
+    footer a { color: var(--accent); }
+
+    @media (max-width: 600px) {
+      .bar, main { padding-left: 16px; padding-right: 16px; }
+      .search kbd { display: none; }
+      h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div class="logo"><span class="material-symbols-outlined" data-fallback="▦">apps</span></div>
+        <div><span id="portal-title">Enterprise App Portal</span><small id="portal-org"></small></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="refresh" title="Refresh status" aria-label="Refresh status">
+        <span class="material-symbols-outlined" data-fallback="↻">refresh</span>
+      </button>
+      <button class="icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme">
+        <span class="material-symbols-outlined" data-fallback="☾">dark_mode</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <h1 id="greeting">Welcome</h1>
+    <p class="sub">All your enterprise applications in one place.</p>
+
+    <div class="controls">
+      <label class="search">
+        <span class="material-symbols-outlined" data-fallback="⌕">search</span>
+        <input id="q" type="search" placeholder="Search apps..." autocomplete="off" aria-label="Search apps">
+        <kbd>/</kbd>
+      </label>
+      <div class="chips" id="chips" role="group" aria-label="Filter by category"></div>
+    </div>
+
+    <div id="content"></div>
+  </main>
+
+  <footer id="footer"></footer>
+
+  <script>
+    const FAV_KEY = 'portal.favorites';
+    const THEME_KEY = 'portal.theme';
+    const STATUS_POLL_MS = 60000;
+
+    const state = { apps: [], status: {}, query: '', category: 'All', favorites: loadFavorites() };
+
+    function store(key, value) {
+      try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
+    }
+    function read(key) {
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function loadFavorites() {
+      try { return new Set(JSON.parse(read(FAV_KEY) || '[]')); } catch (e) { return new Set(); }
+    }
+
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'class') node.className = v;
+        else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+        else node.setAttribute(k, v);
+      }
+      for (const c of children) node.append(c);
+      return node;
+    }
+    const icon = (name, fallback = '') =>
+      el('span', { class: 'material-symbols-outlined', 'aria-hidden': 'true', 'data-fallback': fallback }, name);
+
+    function statusLabel(id) {
+      const s = state.status[id];
+      if (!s) return ['', 'Checking...'];
+      return s.status === 'up' ? ['up', 'Online'] : ['down', 'Unreachable'];
+    }
+
+    function card(app) {
+      const [cls, label] = statusLabel(app.id);
+      const isFav = state.favorites.has(app.id);
+      const favBtn = el('button', {
+        class: 'fav' + (isFav ? ' on' : ''),
+        title: isFav ? 'Remove from favorites' : 'Add to favorites',
+        'aria-label': (isFav ? 'Remove ' : 'Add ') + app.name + (isFav ? ' from' : ' to') + ' favorites',
+        onclick: e => { e.preventDefault(); e.stopPropagation(); toggleFav(app.id); }
+      }, icon('star', '★'));
+
+      return el('a', { class: 'card', href: app.url, target: '_blank', rel: 'noopener' },
+        favBtn,
+        el('div', { class: 'card-top' },
+          el('div', { class: 'app-icon', style: 'background:' + app.color }, icon(app.icon, app.name.charAt(0).toUpperCase())),
+          el('div', {}, el('h3', {}, app.name), el('div', { class: 'cat' }, app.category))
+        ),
+        el('p', {}, app.description),
+        el('div', { class: 'card-foot' },
+          el('span', { class: 'status' }, el('span', { class: 'dot ' + cls }), label),
+          el('span', {}, app.owner)
+        )
+      );
+    }
+
+    function matches(app) {
+      const q = state.query.trim().toLowerCase();
+      if (state.category !== 'All' && app.category !== state.category) return false;
+      if (!q) return true;
+      return [app.name, app.description, app.category, app.owner].join(' ').toLowerCase().includes(q);
+    }
+
+    function renderChips() {
+      const cats = ['All', ...new Set(state.apps.map(a => a.category))];
+      const chips = document.getElementById('chips');
+      chips.replaceChildren(...cats.map(c => el('button', {
+        class: 'chip', 'aria-pressed': String(c === state.category),
+        onclick: () => { state.category = c; renderChips(); render(); }
+      }, c)));
+    }
+
+    function render() {
+      const content = document.getElementById('content');
+      const visible = state.apps.filter(matches);
+      if (!visible.length) {
+        content.replaceChildren(el('div', { class: 'empty' }, 'No apps match your search.'));
+        return;
+      }
+      const favs = visible.filter(a => state.favorites.has(a.id));
+      const sections = [];
+      if (favs.length) {
+        sections.push(el('div', { class: 'section-title' }, 'Favorites'),
+                      el('div', { class: 'grid' }, ...favs.map(card)));
+      }
+      sections.push(el('div', { class: 'section-title' }, 'All applications'),
+                    el('div', { class: 'grid' }, ...visible.map(card)));
+      content.replaceChildren(...sections);
+    }
+
+    function toggleFav(id) {
+      state.favorites.has(id) ? state.favorites.delete(id) : state.favorites.add(id);
+      store(FAV_KEY, JSON.stringify([...state.favorites]));
+      render();
+    }
+
+    async function loadStatus(refresh = false) {
+      try {
+        const res = await fetch('/api/status' + (refresh ? '?refresh=true' : ''));
+        if (!res.ok) return;
+        for (const s of await res.json()) state.status[s.id] = s;
+        render();
+      } catch (e) { /* keep last known status */ }
+    }
+
+    async function init() {
+      const hour = new Date().getHours();
+      document.getElementById('greeting').textContent =
+        hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+      try {
+        const res = await fetch('/api/apps');
+        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+        const data = await res.json();
+        state.apps = data.apps;
+
+        const p = data.portal;
+        document.title = p.title;
+        document.getElementById('portal-title').textContent = p.title;
+        document.getElementById('portal-org').textContent = p.organization;
+        if (p.support_email) {
+          document.getElementById('footer').replaceChildren(
+            'Need help or missing an app? Contact ',
+            el('a', { href: 'mailto:' + p.support_email }, p.support_email));
+        }
+      } catch (e) {
+        document.getElementById('content').replaceChildren(
+          el('div', { class: 'error' }, 'Could not load the app catalog: ' + e.message));
+        return;
+      }
+
+      renderChips();
+      render();
+      loadStatus();
+      setInterval(loadStatus, STATUS_POLL_MS);
+    }
+
+    document.getElementById('q').addEventListener('input', e => { state.query = e.target.value; render(); });
+    document.getElementById('refresh').addEventListener('click', () => loadStatus(true));
+    document.addEventListener('keydown', e => {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault(); document.getElementById('q').focus();
+      }
+    });
+
+    const savedTheme = read(THEME_KEY);
+    if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    document.getElementById('theme').addEventListener('click', () => {
+      const dark = document.documentElement.dataset.theme === 'dark' ||
+        (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+      const next = dark ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      store(THEME_KEY, next);
+    });
+
+    const iconFont = '24px "Material Symbols Outlined"';
+    Promise.race([
+      document.fonts.load(iconFont, 'apps'),
+      new Promise(resolve => setTimeout(() => resolve([]), 3000))
+    ]).then(faces => {
+      document.documentElement.classList.add(faces.length ? 'icons-ready' : 'no-icons');
+    }, () => document.documentElement.classList.add('no-icons'));
+
+    init();
+  </script>
+</body>
+</html>

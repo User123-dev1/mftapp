@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Enterprise App Portal on a single EC2 instance (proof of concept).
+  Creates one Amazon Linux 2023 server in the default VPC that serves the
+  portal over HTTP on port 80, reachable only from the IP range you allow.
+
+Parameters:
+  AllowedCidr:
+    Type: String
+    Description: >
+      Who may open the portal, as a CIDR range. Use your public IP followed
+      by /32 (e.g. 203.0.113.25/32), or your office range.
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Must be a CIDR range such as 203.0.113.25/32.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small]
+  Branch:
+    Type: String
+    Default: ccr-29e25baa-7eimra
+    Description: Git branch of User123-dev1/mftapp to install the portal from.
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  PortalSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enterprise App Portal - HTTP from allowed range only
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+
+  # Lets you open a shell on the server from the console (Session Manager)
+  # without SSH keys or an open SSH port.
+  PortalRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  PortalInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref PortalRole]
+
+  PortalInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref PortalInstanceProfile
+      SecurityGroupIds: [!GetAtt PortalSecurityGroup.GroupId]
+      Tags:
+        - Key: Name
+          Value: enterprise-portal
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          export BRANCH=${Branch}
+          curl -fsSL https://raw.githubusercontent.com/User123-dev1/mftapp/${Branch}/enterprise_portal/aws/install_portal.sh | bash
+
+Outputs:
+  PortalUrl:
+    Description: Open this in your browser (allow 3-5 minutes after creation for install)
+    Value: !Sub http://${PortalInstance.PublicDnsName}
+  InstanceId:
+    Description: Use with Session Manager to connect to the server
+    Value: !Ref PortalInstance
