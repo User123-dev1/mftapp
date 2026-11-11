@@ -25,7 +25,8 @@ One address for every internal app. This folder deploys the **portal** and the a
 1. Find your public IP (search "what is my ip").
 2. AWS console → **CloudFormation** → **Create stack** → **With new resources**.
 3. **Upload a template file** → choose `deploy/aws/abelzeta-portal.yaml` → **Next**.
-4. Stack name `abelzeta-portal`. **AllowedCidr**: your IP followed by `/32`. Leave the rest. **Next**.
+4. Stack name `abelzeta-portal`. **AllowedCidr**: your IP followed by `/32`. Leave the rest (the default
+   server, t3.small, works on AWS Free plan accounts). **Next**.
 5. **Next** again, tick **I acknowledge that AWS CloudFormation might create IAM resources**, **Submit**.
 6. Wait for `CREATE_COMPLETE`, then give the server **about 10 minutes** to build the apps.
 7. **Outputs** tab → open **PortalUrl**. Your browser warns that the certificate isn't trusted: the trial
@@ -65,8 +66,8 @@ backups. That's why the secret is kept even if you delete the stack.
   (EC2 → Snapshots). To restore, create a volume from a snapshot and swap it in, or ask for a
   restore runbook before you need it.
 
-**Approximate cost** (us-east-1, on-demand): t3.medium ≈ $30/month, 30 GB disk ≈ $2.40, public IP
-≈ $3.60, snapshots a few dollars, Secrets Manager $0.40. About **$37–40/month**. Stopping the
+**Approximate cost** (us-east-1, on-demand, outside Free Tier credits): t3.small ≈ $15/month (t3.medium ≈ $30), 30 GB disk ≈ $2.40, public IP
+≈ $3.60, snapshots a few dollars, Secrets Manager $0.40. About **$22–25/month** on t3.small. Stopping the
 instance stops the server charge but keeps the address and disk.
 
 **Remove everything:** delete the `abelzeta-portal` stack. The secret and any snapshots are kept on

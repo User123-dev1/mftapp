@@ -23,11 +23,11 @@ Parameters:
     ConstraintDescription: Must be a CIDR range such as 203.0.113.25/32.
   InstanceType:
     Type: String
-    Default: t3.medium
-    AllowedValues: [t3.small, t3.medium, t3.large, m7i-flex.large, c7i-flex.large]
+    Default: t3.small
+    AllowedValues: [t3.small, m7i-flex.large, c7i-flex.large, t3.medium, t3.large]
     Description: >
-      t3.medium (2 vCPU, 4 GB) is comfortable for all four apps. On an AWS Free plan account choose
-      t3.small (2 GB, swap is added automatically) or m7i-flex.large (8 GB), which are Free Tier eligible.
+      t3.small (2 GB; a swap file is added automatically) and m7i-flex.large (8 GB) are Free Tier
+      eligible. Paid accounts can choose t3.medium (4 GB) for more headroom.
   VolumeSize:
     Type: Number
     Default: 30
