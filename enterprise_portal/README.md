@@ -36,6 +36,39 @@ docker run -p 8080:8080 enterprise-portal
 
 ## Hosting on AWS
 
+### Quick start: one EC2 server (proof of concept)
+
+`aws/portal-ec2.yaml` is a CloudFormation template that creates one small
+Amazon Linux server in your default VPC, installs the portal from this
+GitHub repo (`aws/install_portal.sh`) and serves it on port 80. Only the IP
+range you give can open it.
+
+1. Find your public IP, e.g. by searching "what is my ip".
+2. In the AWS console, open **CloudFormation**, then **Create stack** and
+   **With new resources**.
+3. Choose **Upload a template file**, pick `enterprise_portal/aws/portal-ec2.yaml`,
+   and click **Next**.
+4. Stack name: `enterprise-portal`. `AllowedCidr`: your IP followed by `/32`.
+   Leave the rest as they are.
+5. Click **Next** through the options page, tick **I acknowledge that AWS
+   CloudFormation might create IAM resources**, and click **Submit**.
+6. When the status reads `CREATE_COMPLETE`, open the **Outputs** tab and
+   click `PortalUrl`. Give the install 3–5 minutes after that.
+
+To update the portal later, connect from **EC2 → Instances → Connect →
+Session Manager** and run:
+
+```bash
+sudo BRANCH=<branch> bash /opt/mftapp/enterprise_portal/aws/install_portal.sh
+```
+
+To remove everything, delete the `enterprise-portal` stack.
+
+This is plain HTTP limited to your IP: fine for a trial, not for staff
+use. For production, use the ECS setup below with HTTPS and sign-in.
+
+### Production: ECS Fargate
+
 The portal is one small container, so it runs on any AWS container service.
 The recommended setup is **ECS Fargate behind an Application Load Balancer**:
 
