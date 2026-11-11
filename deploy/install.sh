@@ -13,6 +13,7 @@ set -euo pipefail
 
 BASE=/opt/abelzeta
 CONF=$BASE/install.conf
+SELF_SUM=$(sha256sum "$0" | cut -d' ' -f1)   # to notice when the update below changes this script
 mkdir -p "$BASE"
 # Remembered settings first; anything passed in the environment wins.
 _env_branch=${BRANCH-}; _env_secret=${SECRET_ID-}; _env_host=${PUBLIC_HOST-}; _env_domain=${DOMAIN-}; _env_le=${LE_EMAIL-}
@@ -57,6 +58,15 @@ if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" reset --hard FETCH_HEAD
 else
   git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+fi
+
+# If the update brought a newer version of this script, continue with that version
+# (bash would otherwise keep running the old copy it has already loaded).
+NEW_SCRIPT=$APP_DIR/deploy/install.sh
+if [ -z "${ABELZETA_REEXEC:-}" ] && [ "$(sha256sum "$NEW_SCRIPT" | cut -d' ' -f1)" != "$SELF_SUM" ]; then
+  log "The installer itself was updated - restarting with the new version"
+  exec env ABELZETA_REEXEC=1 BRANCH="$BRANCH" SECRET_ID="$SECRET_ID" PUBLIC_HOST="$PUBLIC_HOST" \
+    DOMAIN="$DOMAIN" LE_EMAIL="$LE_EMAIL" REPO_URL="$REPO_URL" bash "$NEW_SCRIPT"
 fi
 
 # Instance metadata (IMDSv2)
