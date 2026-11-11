@@ -108,7 +108,21 @@ chmod 0750 "$DATA_DIR"
 log "Building and starting containers (first build takes a few minutes)"
 cd "$APP_DIR/deploy"
 docker compose up -d --build --remove-orphans
+# The Caddyfile is regenerated on every run; restart the proxy so it is actually loaded.
+docker compose restart proxy >/dev/null
 docker image prune -f >/dev/null
+
+# Check that each address completes an HTTPS handshake from this server (no SNI, as browsers do for an IP).
+CHECK_HOST=${DOMAIN:+portal.$DOMAIN}; CHECK_HOST=${CHECK_HOST:-$PUBLIC_HOST}
+sleep 5
+failed=0
+for port in 443 8443 8444 8445; do
+  [ -n "$DOMAIN" ] && [ "$port" != 443 ] && continue   # domain mode: one port, one name per app
+  code=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$CHECK_HOST:$port:127.0.0.1" \
+         "https://$CHECK_HOST:$port/" || true)
+  if [ "$code" = "000" ]; then log "WARNING: HTTPS on port $port is not answering correctly"; failed=1; fi
+done
+[ "$failed" = 0 ] && log "HTTPS check passed"
 
 log "Done. Addresses:"
 python3 -c 'import json,sys; [print(f"  {k:15} {v}") for k, v in json.loads(sys.argv[1])["urls"].items()]' "$RESULT"
