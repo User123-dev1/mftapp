@@ -24,8 +24,10 @@ Parameters:
   InstanceType:
     Type: String
     Default: t3.medium
-    AllowedValues: [t3.small, t3.medium, t3.large]
-    Description: t3.medium (2 vCPU, 4 GB) is comfortable for all four apps.
+    AllowedValues: [t3.small, t3.medium, t3.large, m7i-flex.large, c7i-flex.large]
+    Description: >
+      t3.medium (2 vCPU, 4 GB) is comfortable for all four apps. On an AWS Free plan account choose
+      t3.small (2 GB, swap is added automatically) or m7i-flex.large (8 GB), which are Free Tier eligible.
   VolumeSize:
     Type: Number
     Default: 30

@@ -43,6 +43,14 @@ if ! docker compose version >/dev/null 2>&1; then
   chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
 fi
 
+# Small servers (t3.small, 2 GB) need swap to build all the images without running out of memory.
+if [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 3500000 ] && ! swapon --show | grep -q /swapfile; then
+  log "Adding a 2 GB swap file (small server)"
+  [ -f /swapfile ] || { fallocate -l 2G /swapfile && chmod 0600 /swapfile && mkswap /swapfile >/dev/null; }
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap defaults 0 0' >> /etc/fstab
+fi
+
 log "Fetching branch $BRANCH"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
