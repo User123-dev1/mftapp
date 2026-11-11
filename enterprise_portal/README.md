@@ -1,5 +1,8 @@
 # Enterprise App Portal
 
+> **To host the portal together with the Service Desk, GMP Asset Manager and password vault on AWS,
+> use [`deploy/`](../deploy/README.md).** The single-portal EC2 template below only hosts the portal.
+
 One landing page for every internal application: Managed File Transfer, Asset
 Manager, Label Generator, Service Desk, and anything added later.
 
