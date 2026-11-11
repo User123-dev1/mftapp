@@ -1,0 +1,64 @@
+# The AbelZeta app portal: a reverse proxy (HTTPS) in front of the portal and three apps.
+# Generate .env, env/*.env, Caddyfile and apps.json first with configure.py (install.sh does this).
+#   docker compose -p abelzeta up -d --build
+name: abelzeta
+
+x-app: &app
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  proxy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"     # trial mode: Service Desk
+      - "8444:8444"     # trial mode: GMP Asset Manager
+      - "8445:8445"     # trial mode: Password Vault
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # certificates (and Caddy's own CA in trial mode)
+      - caddy_config:/config
+    depends_on: [portal, servicedesk, gmp, vault]
+
+  portal:
+    <<: *app
+    build: ../enterprise_portal
+    environment:
+      PORTAL_APPS_FILE: /config/apps.json
+      # Health checks go straight to the apps on the internal Docker network, never via a proxy.
+      NO_PROXY: servicedesk,gmp,vault,localhost,127.0.0.1
+      no_proxy: servicedesk,gmp,vault,localhost,127.0.0.1
+    volumes:
+      - ./apps.json:/config/apps.json:ro
+
+  servicedesk:
+    <<: *app
+    build: ../ServiceDesk
+    env_file: env/servicedesk.env
+    volumes:
+      - ${DATA_DIR:-./data}/servicedesk:/data
+
+  gmp:
+    <<: *app
+    build: ../GMP_ASSET_MANAGER
+    env_file: env/gmp.env
+    volumes:
+      - ${DATA_DIR:-./data}/gmp:/data
+
+  vault:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: secret_server/Dockerfile
+    env_file: env/vault.env
+    volumes:
+      - ${DATA_DIR:-./data}/vault:/data
+
+volumes:
+  caddy_data:
+  caddy_config:

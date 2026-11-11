@@ -1,0 +1,12 @@
+# Root build context is only used by secret_server/Dockerfile.
+**/__pycache__
+**/*.pyc
+**/*.db
+**/.venv
+MFT_PRO
+ServiceDesk
+GMP_ASSET_MANAGER
+enterprise_portal
+deploy
+secret_server/tests
+.git

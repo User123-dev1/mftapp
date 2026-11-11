@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AbelZeta app portal (trial): the portal, IT Service Desk, GMP Asset Manager and the
+  password vault on one Amazon Linux 2023 server, behind an HTTPS reverse proxy, reachable
+  only from the IP range you allow. Passwords and the vault master key are generated on
+  first start and kept in AWS Secrets Manager. The disk is encrypted and snapshotted daily.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Who can connect }
+        Parameters: [AllowedCidr]
+      - Label: { default: Server }
+        Parameters: [InstanceType, VolumeSize, Branch, LatestAmiId]
+
+Parameters:
+  AllowedCidr:
+    Type: String
+    Description: >
+      Who may open the portal and apps: your public IP followed by /32
+      (e.g. 203.0.113.25/32), or your office range.
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Must be a CIDR range such as 203.0.113.25/32.
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.small, t3.medium, t3.large]
+    Description: t3.medium (2 vCPU, 4 GB) is comfortable for all four apps.
+  VolumeSize:
+    Type: Number
+    Default: 30
+    MinValue: 20
+    MaxValue: 500
+    Description: Disk size in GB (apps, databases, uploaded files).
+  Branch:
+    Type: String
+    Default: claude/service-desk-tickets-xypu1p
+    Description: Git branch of User123-dev1/mftapp to install.
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  PortalSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AbelZeta portal - HTTPS (portal 443, apps 8443-8445) from the allowed range only
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr, Description: Portal }
+        - { IpProtocol: tcp, FromPort: 8443, ToPort: 8445, CidrIp: !Ref AllowedCidr, Description: Apps }
+
+  # Generated passwords + vault master key. Kept if the stack is deleted, because database
+  # snapshots can't be decrypted without the vault key. Delete it by hand when no longer needed.
+  PortalSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: AbelZeta portal - initial admin passwords and the password vault master key (filled in by the server on first start)
+      SecretString: "{}"
+
+  PortalRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Shell access from the console (Session Manager) - no SSH keys, no open SSH port.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-write-own-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+                Resource: !Ref PortalSecret
+
+  PortalInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref PortalRole]
+
+  # Fixed public address, so links and certificates survive a stop/start.
+  PortalIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags: [{ Key: Name, Value: abelzeta-portal }]
+
+  PortalInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref PortalInstanceProfile
+      SecurityGroupIds: [!GetAtt PortalSecurityGroup.GroupId]
+      MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeType: gp3, VolumeSize: !Ref VolumeSize, Encrypted: true, DeleteOnTermination: true }
+      PropagateTagsToVolumeOnCreation: true
+      Tags:
+        - { Key: Name, Value: abelzeta-portal }
+        - { Key: Backup, Value: abelzeta-portal }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee -a /var/log/abelzeta-install.log) 2>&1
+          dnf install -y -q git
+          git clone --depth 1 --branch "${Branch}" https://github.com/User123-dev1/mftapp.git /opt/abelzeta/mftapp
+          BRANCH="${Branch}" SECRET_ID="${PortalSecret}" PUBLIC_HOST="${PortalIP}" \
+            bash /opt/abelzeta/mftapp/deploy/install.sh
+
+  PortalIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt PortalIP.AllocationId
+      InstanceId: !Ref PortalInstance
+
+  # Daily disk snapshots, 7 kept (databases, uploads, certificates).
+  SnapshotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: dlm.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  DailySnapshots:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: AbelZeta portal daily snapshots
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt SnapshotRole.Arn
+      PolicyDetails:
+        ResourceTypes: [VOLUME]
+        TargetTags: [{ Key: Backup, Value: abelzeta-portal }]
+        Schedules:
+          - Name: daily-7
+            CreateRule: { Interval: 24, IntervalUnit: HOURS, Times: ["03:00"] }
+            RetainRule: { Count: 7 }
+            CopyTags: true
+
+Outputs:
+  PortalUrl:
+    Description: Start here. Allow ~10 minutes after creation for the first build. Your browser will warn about the trial certificate.
+    Value: !Sub https://${PortalIP}
+  ServiceDeskUrl:
+    Value: !Sub https://${PortalIP}:8443
+  GmpAssetManagerUrl:
+    Value: !Sub https://${PortalIP}:8444
+  PasswordVaultUrl:
+    Value: !Sub https://${PortalIP}:8445/docs
+  InitialPasswordsSecret:
+    Description: >
+      First admin passwords. In Secrets Manager open the secret with this ARN and click
+      "Retrieve secret value".
+    Value: !Ref PortalSecret
+  SecretsManagerConsole:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/secretsmanager/listsecrets?region=${AWS::Region}
+  InstanceId:
+    Description: EC2 > Instances > this instance > Connect > Session Manager, for a shell.
+    Value: !Ref PortalInstance
