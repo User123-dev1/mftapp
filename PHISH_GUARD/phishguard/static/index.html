@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhishGuard Console</title>
+<style>
+:root { --bg:#f4f6f8; --panel:#fff; --text:#1b2430; --muted:#5d6b7a; --line:#d9e0e6; --accent:#0b5cad;
+  --ok:#127a3a; --ok-bg:#e3f5ea; --bad:#b42318; --bad-bg:#fde8e6; --warn:#8a5a00; --warn-bg:#fff4d6; }
+@media (prefers-color-scheme: dark) { :root { --bg:#11161c; --panel:#1a2129; --text:#e6edf3; --muted:#93a1b0; --line:#2c3743;
+  --accent:#5aa7f0; --ok:#4cc17a; --ok-bg:#12301f; --bad:#ff7b6e; --bad-bg:#3a1714; --warn:#f0c050; --warn-bg:#352a0e; } }
+* { box-sizing:border-box } body { margin:0; font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text) }
+header { display:flex; gap:12px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap }
+header h1 { font-size:17px; margin:0; flex:1 } nav { display:flex; gap:4px; padding:8px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap }
+nav button { background:none; border:0; padding:8px 12px; border-radius:6px; color:var(--muted); cursor:pointer; font:inherit; font-size:14px }
+nav button.active { background:var(--accent); color:#fff } main { padding:16px; max-width:1200px; margin:0 auto }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px } h2 { font-size:16px; margin:0 0 12px }
+input,select,textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit }
+label { display:block; font-size:13px; color:var(--muted); margin:8px 0 3px } label.check { display:flex; gap:6px; align-items:center; color:var(--text) } label.check input { width:auto }
+.btn { padding:8px 14px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; font:inherit }
+.btn.secondary { background:none; color:var(--accent) } .btn.danger { background:var(--bad); border-color:var(--bad) }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px 14px }
+table { width:100%; border-collapse:collapse; font-size:14px } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top }
+th { color:var(--muted); font-weight:600 } .tbl { overflow-x:auto } tr.click { cursor:pointer } tr.click:hover td { background:var(--bg) }
+.pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; background:var(--bg); border:1px solid var(--line); white-space:nowrap }
+.pill.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent } .pill.bad { background:var(--bad-bg); color:var(--bad); border-color:transparent }
+.pill.warn { background:var(--warn-bg); color:var(--warn); border-color:transparent } .muted { color:var(--muted) } .mono { font-family:ui-monospace,monospace; font-size:13px; word-break:break-all }
+.tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px } .tile b { display:block; font-size:28px } .tile span { color:var(--muted); font-size:13px }
+.verdict { border-radius:10px; padding:14px 18px; font-size:20px; font-weight:700; margin-bottom:12px } .verdict.malicious { background:var(--bad-bg); color:var(--bad) }
+.verdict.suspicious { background:var(--warn-bg); color:var(--warn) } .verdict.clean { background:var(--ok-bg); color:var(--ok) }
+.sig { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--line) } .sig .pts { min-width:42px; text-align:right; font-weight:700 }
+#toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); padding:10px 16px; border-radius:8px; background:var(--text); color:var(--bg); display:none; z-index:50; max-width:90vw }
+.modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; padding:16px; z-index:40 }
+.modal { background:var(--panel); border-radius:10px; padding:18px; width:100%; max-width:540px; max-height:92vh; overflow:auto } .hidden { display:none !important }
+</style>
+</head>
+<body>
+<div id="loginView" class="hidden"><main style="max-width:420px"><div class="panel"><h2>PhishGuard - Security console</h2>
+  <form id="loginForm"><label>User name</label><input name="username" autocomplete="username" required>
+  <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+  <div class="row" style="margin-top:14px"><button class="btn">Sign in</button></div></form></div></main></div>
+<div id="pwView" class="hidden"><main style="max-width:420px"><div class="panel"><h2>Change your password</h2>
+  <form id="pwForm"><label>Current password</label><input name="old_password" type="password" autocomplete="current-password" required>
+  <label>New password (12+ characters, upper, lower, digit)</label><input name="new_password" type="password" autocomplete="new-password" required>
+  <div class="row" style="margin-top:14px"><button class="btn">Change password</button></div></form></div></main></div>
+<div id="appView" class="hidden">
+  <header><h1>PhishGuard <span class="muted" style="font-weight:400">security console</span></h1><span id="who" class="muted"></span>
+    <button class="btn secondary" id="logoutBtn">Sign out</button></header>
+  <nav id="tabs"></nav><main id="content"></main>
+</div>
+<div id="toast"></div>
+<script>
+"use strict";
+const S = { token: sessionStorage.getItem("pg_token"), me: null };
+const $ = (q, el = document) => el.querySelector(q);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const can = (p) => S.me && S.me.permissions.includes(p);
+function toast(m, ms = 4000) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", ms); }
+async function api(method, url, body, opts = {}) {
+  const res = await fetch(url, { method, headers: { ...(opts.raw ? { "Content-Type": "text/plain" } : { "Content-Type": "application/json" }),
+    ...(S.token ? { Authorization: "Bearer " + S.token } : {}) }, body: body === undefined ? undefined : (opts.raw ? body : JSON.stringify(body)) });
+  let data = null; try { data = await res.json(); } catch (_) {}
+  if (!res.ok) { const d = data && data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : res.statusText;
+    if (res.status === 401 && S.me && /signed in|expired/i.test(d)) { signOut(d); } throw new Error(d); }
+  return data;
+}
+function show(v) { for (const x of ["login", "pw", "app"]) $("#" + x + "View").classList.toggle("hidden", x !== v); }
+function signOut(msg) { S.token = null; S.me = null; sessionStorage.removeItem("pg_token"); show("login"); if (msg) toast(msg); }
+function modal(html, onSubmit) {
+  const bg = document.createElement("div"); bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal"><form>${html}<div class="row" style="margin-top:14px;justify-content:flex-end">
+    <button type="button" class="btn secondary" data-x>Cancel</button><button class="btn">Confirm</button></div></form></div>`;
+  document.body.appendChild(bg); $("[data-x]", bg).onclick = () => bg.remove();
+  $("form", bg).onsubmit = async (e) => { e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
+    for (const cb of e.target.querySelectorAll("input[type=checkbox]")) d[cb.name] = cb.checked;
+    try { await onSubmit(d); bg.remove(); } catch (err) { toast(err.message, 6000); } };
+}
+const verdictPill = (v) => `<span class="pill ${v === "malicious" ? "bad" : v === "suspicious" ? "warn" : "ok"}">${esc(v)}</span>`;
+const statusPill = (s) => `<span class="pill ${s === "quarantined" || s === "purged" || s === "deleted" ? "bad" : s === "warned" ? "warn" : ""}">${esc(s)}</span>`;
+const when = (t) => esc((t || "").replace("T", " ").slice(0, 16));
+
+const TABS = [["dashboard", "Dashboard", "view"], ["messages", "Messages", "view"], ["reports", "Reported", "view"],
+  ["intel", "Threat intel", "view"], ["clicks", "Link clicks", "view"], ["test", "Test a message", "review"],
+  ["activity", "Activity", "view"], ["users", "Users", "users"], ["setup", "Setup", "view"]];
+function renderTabs(active) {
+  $("#tabs").innerHTML = TABS.filter(t => can(t[2])).map(([id, n]) => `<button data-t="${id}" class="${id === active ? "active" : ""}">${n}</button>`).join("");
+  for (const b of document.querySelectorAll("#tabs button")) b.onclick = () => go(b.dataset.t);
+}
+function go(route) { location.hash = route; }
+async function route() {
+  if (!S.me) return;
+  const [view, arg] = (location.hash.slice(1) || "dashboard").split("/");
+  renderTabs(view === "message" ? "messages" : view);
+  const c = $("#content"); c.innerHTML = `<div class="panel muted">Loading...</div>`;
+  try { await (V[view] || V.dashboard)(c, arg); } catch (e) { c.innerHTML = `<div class="panel">${esc(e.message)}</div>`; }
+}
+window.addEventListener("hashchange", route);
+
+const V = {};
+V.dashboard = async (c) => {
+  const [st, sys] = await Promise.all([api("GET", "/api/stats"), api("GET", "/api/status")]);
+  const tile = (n, l, cls = "") => `<div class="tile"><b class="${cls}">${n}</b><span>${l}</span></div>`;
+  const on = (x) => x ? `<span class="pill ok">on</span>` : `<span class="pill">off</span>`;
+  c.innerHTML = `<div class="grid" style="margin-bottom:16px">${tile(st.scanned, "messages scanned (7 days)")}${tile(st.malicious, "malicious - quarantined")}
+    ${tile(st.suspicious, "suspicious - users warned")}${tile(st.quarantined_now, "in quarantine now")}
+    ${tile(st.open_reports, "user reports to review")}${tile(st.blocked_clicks, "dangerous clicks blocked")}${tile(st.indicators, "block-list indicators")}</div>
+  <div class="panel"><h2>Threats by type (7 days)</h2>${Object.entries(st.by_category).map(([k, v]) => `<span class="pill" style="margin:2px">${esc(k)}: ${v}</span>`).join(" ") || `<span class="muted">None</span>`}</div>
+  <div class="panel"><h2>Protection status</h2><div class="grid">
+    <div><label>Microsoft 365 (Graph)</label>${on(sys.m365)}</div><div><label>SMTP gateway</label>${sys.gateway_next_hop ? `<span class="pill ok">relays to ${esc(sys.gateway_next_hop)}</span>` : on(false)}</div>
+    <div><label>AI analysis</label>${on(sys.ai)} <span class="muted">${esc(sys.ai_model || "")}</span></div><div><label>Attachment sandbox (CAPE)</label>${on(sys.sandbox)}</div>
+    <div><label>Time-of-click page checks</label>${on(sys.click_fetch)}</div><div><label>Report mailbox</label>${esc(sys.report_mailbox || "-")}</div>
+    <div><label>Thresholds</label>warn ${sys.thresholds.warn} / quarantine ${sys.thresholds.quarantine}</div><div><label>Your domains</label>${esc(sys.org_domains.join(", ") || "not set")}</div></div></div>
+  ${st.open_reports ? `<div class="panel"><a href="#reports">${st.open_reports} reported message(s) waiting for review</a></div>` : ""}`;
+};
+
+V.messages = async (c) => {
+  const f = V.messages.f || {};
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const rows = await api("GET", "/api/messages?" + qs);
+  c.innerHTML = `<div class="panel"><div class="row" style="margin-bottom:10px">
+    <input id="q" placeholder="Search subject, sender, mailbox" style="max-width:320px" value="${esc(f.q || "")}">
+    <select id="fv" style="width:auto"><option value="">All verdicts</option>${["malicious", "suspicious", "clean"].map(v => `<option ${f.verdict === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <select id="fs" style="width:auto"><option value="">All statuses</option>${["quarantined", "warned", "delivered", "released", "purged", "deleted"].map(v => `<option ${f.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+    <div class="tbl"><table><tr><th>When</th><th>From</th><th>Subject</th><th>Mailbox</th><th>Score</th><th>Verdict</th><th>Status</th></tr>
+    ${rows.map(m => `<tr class="click" data-id="${m.id}"><td>${when(m.scanned_at)}</td><td>${esc(m.from_display || "")}<div class="muted mono">${esc(m.from_address)}</div></td>
+      <td>${esc(m.subject)}<div class="muted" style="font-size:12px">${esc(m.category !== "clean" ? m.category : "")}</div></td><td class="mono">${esc(m.mailbox || m.source)}</td>
+      <td><b>${m.score}</b></td><td>${verdictPill(m.verdict)}</td><td>${statusPill(m.status)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No messages yet</td></tr>`}</table></div></div>`;
+  const reload = () => { V.messages.f = { q: $("#q").value, verdict: $("#fv").value, status: $("#fs").value }; route(); };
+  $("#q").onkeydown = (e) => { if (e.key === "Enter") reload(); }; $("#fv").onchange = reload; $("#fs").onchange = reload;
+  for (const r of c.querySelectorAll("tr[data-id]")) r.onclick = () => go("message/" + r.dataset.id);
+};
+
+V.message = async (c, id) => {
+  const m = await api("GET", "/api/messages/" + id);
+  const ai = m.llm;
+  const acts = [];
+  if (can("act")) {
+    if (["delivered", "warned", "released"].includes(m.status)) acts.push(`<button class="btn danger" data-a="quarantine">Quarantine</button>`);
+    if (m.status === "quarantined") acts.push(`<button class="btn secondary" data-a="release">Release to inbox</button>`);
+    if (!["purged", "deleted"].includes(m.status)) acts.push(`<button class="btn danger" data-a="purge">Purge from all mailboxes</button>`);
+  }
+  if (can("intel") && m.from_address) acts.push(`<button class="btn secondary" data-a="block">Block sender</button>`);
+  if (can("review") && m.has_copy) acts.push(`<a class="btn secondary" style="text-decoration:none" data-a="raw">Download .eml</a>`);
+  c.innerHTML = `<div class="panel"><a href="#messages">&larr; Messages</a>
+    <div class="verdict ${m.verdict}" style="margin-top:10px">${m.verdict.toUpperCase()} - score ${m.score}/100 <span style="font-weight:400;font-size:15px">(${esc(m.category)})</span></div>
+    <p>${esc(m.summary)}</p>
+    <div class="grid"><div><label>From</label>${esc(m.from_display)} <span class="mono">&lt;${esc(m.from_address)}&gt;</span></div><div><label>Subject</label>${esc(m.subject)}</div>
+      <div><label>Mailbox</label><span class="mono">${esc(m.mailbox || "-")}</span></div><div><label>Status</label>${statusPill(m.status)} <span class="muted">via ${esc(m.source)}</span></div>
+      <div><label>Scanned</label>${when(m.scanned_at)}</div><div><label>Message-ID</label><span class="mono">${esc(m.internet_message_id)}</span></div></div>
+    <div class="row" style="margin-top:12px">${acts.join("")}</div></div>
+  <div class="panel"><h2>Why</h2>${m.signals.map(s => `<div class="sig"><span class="pts">${s.points ? "+" + s.points : ""}</span><span class="pill">${esc(s.area)}</span><span>${esc(s.text)}</span></div>`).join("") || `<span class="muted">No findings</span>`}</div>
+  ${ai ? `<div class="panel"><h2>AI assessment <span class="muted" style="font-weight:400">${esc(ai.model)}</span></h2><div class="grid">
+    <div><label>Category</label>${esc(ai.category)}</div><div><label>Risk</label>${ai.risk} (${esc(ai.confidence)} confidence)</div>
+    <div><label>Impersonating</label>${esc(ai.impersonated_entity || "-")}</div><div><label>Asks the recipient to</label>${esc(ai.requested_action)}</div></div>
+    <label>Tactics</label>${ai.tactics.map(t => `<span class="pill">${esc(t)}</span>`).join(" ")}<label>For the recipient</label><p>${esc(ai.user_summary)}</p><label>Analyst notes</label><p>${esc(ai.analyst_notes)}</p></div>` : ""}
+  <div class="panel"><h2>Indicators</h2><div class="grid"><div><label>Sender</label><span class="mono">${esc(m.indicators.sender.join(", "))}</span></div>
+    <div><label>Domains</label><span class="mono">${esc(m.indicators.domain.join(", "))}</span></div></div>
+    <label>Links (${m.indicators.url.length})</label><div class="mono">${m.indicators.url.slice(0, 20).map(esc).join("<br>") || "-"}</div>
+    <label>Attachment SHA-256</label><div class="mono">${m.indicators.hash.map(esc).join("<br>") || "-"}</div></div>
+  ${m.sandbox.length ? `<div class="panel"><h2>Sandbox detonation</h2><table><tr><th>File</th><th>Status</th><th>Malscore</th><th>Findings</th></tr>${m.sandbox.map(j => `<tr><td>${esc(j.filename)}</td><td>${esc(j.status)}</td><td>${j.malscore ?? "-"}</td><td>${esc(j.report || "")}</td></tr>`).join("")}</table></div>` : ""}
+  ${m.reports.length ? `<div class="panel"><h2>User reports</h2><table><tr><th>Reporter</th><th>Via</th><th>Comment</th><th>Status</th></tr>${m.reports.map(r => `<tr><td>${esc(r.reporter)}</td><td>${esc(r.channel)}</td><td>${esc(r.comment)}</td><td>${esc(r.status)}</td></tr>`).join("")}</table></div>` : ""}
+  ${m.clicks.length ? `<div class="panel"><h2>Link clicks</h2><table><tr><th>When</th><th>Who</th><th>URL</th><th>Result</th></tr>${m.clicks.map(k => `<tr><td>${when(k.clicked_at)}</td><td>${esc(k.recipient)}</td><td class="mono">${esc(k.url)}</td><td>${esc(k.verdict)} (${k.score})</td></tr>`).join("")}</table></div>` : ""}
+  ${m.copies.length ? `<div class="panel"><h2>Same message in other mailboxes</h2>${m.copies.map(x => `<a href="#message/${x.id}">${esc(x.mailbox)}</a> ${statusPill(x.status)}`).join("<br>")}</div>` : ""}`;
+  for (const b of c.querySelectorAll("[data-a]")) b.onclick = async () => {
+    const a = b.dataset.a;
+    if (a === "raw") { const r = await fetch(`/api/messages/${id}/raw`, { headers: { Authorization: "Bearer " + S.token } });
+      const url = URL.createObjectURL(await r.blob()); const l = document.createElement("a"); l.href = url; l.download = `message-${id}.eml.txt`; l.click(); return; }
+    if (a === "block") return modal(`<h2>Block sender</h2><p class="mono">${esc(m.from_address)}</p><label class="check"><input type="checkbox" name="hunt" checked> Also quarantine delivered mail from this sender</label><label>Note</label><input name="note">`,
+      async (d) => { const r = await api("POST", "/api/indicators", { kind: "sender", value: m.from_address, action: "block", note: d.note, hunt: d.hunt }); toast(`Blocked. ${r.remediated.length} delivered message(s) pulled.`); route(); });
+    if (a === "purge") return modal(`<h2>Purge from every mailbox</h2><p>Every copy of this message (same Message-ID) is pulled out of all mailboxes.</p>
+      <label>Action</label><select name="mode"><option value="quarantine">Move to quarantine (reversible)</option><option value="delete">Delete permanently</option></select><label>Reason</label><input name="reason" required>`,
+      async (d) => { const r = await api("POST", `/api/messages/${id}/purge`, d); toast(`Purged from ${r.mailboxes.length} mailbox(es)`); route(); });
+    modal(`<h2>${a === "release" ? "Release to inbox" : "Quarantine"}</h2><label>Reason</label><input name="reason" required>`,
+      async (d) => { await api("POST", `/api/messages/${id}/${a}`, d); toast("Done"); route(); });
+  };
+};
+
+V.reports = async (c) => {
+  const status = V.reports.s ?? "new";
+  const rows = await api("GET", "/api/reports?status=" + status);
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Messages reported by users</h2>
+    <select id="rs" style="width:auto">${[["new", "Waiting for review"], ["confirmed", "Confirmed malicious"], ["false_positive", "False positives"], ["", "All"]].map(([v, l]) => `<option value="${v}" ${v === status ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <p class="muted">Confirming a report blocks the sender, links and attachments, pulls every copy from all mailboxes, and thanks the reporter.</p>
+    <div class="tbl"><table><tr><th>Reported</th><th>By</th><th>Message</th><th>PhishGuard said</th><th>Comment</th><th></th></tr>
+    ${rows.map(r => `<tr><td>${when(r.reported_at)}<div class="muted" style="font-size:12px">${esc(r.channel)}</div></td><td>${esc(r.reporter)}</td>
+      <td><a href="#message/${r.message_id}">${esc(r.subject)}</a><div class="mono muted">${esc(r.from_address)}</div></td><td>${verdictPill(r.verdict)} ${r.score}</td>
+      <td>${esc(r.comment || "")}</td><td>${r.status === "new" && can("review") ? `<button class="btn" data-r="${r.id}">Review</button>` : esc(r.status) + (r.reviewed_by ? `<div class="muted" style="font-size:12px">${esc(r.reviewed_by)}</div>` : "")}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Nothing here</td></tr>`}</table></div></div>`;
+  $("#rs").onchange = (e) => { V.reports.s = e.target.value; route(); };
+  for (const b of c.querySelectorAll("[data-r]")) b.onclick = () => modal(`<h2>Review report</h2>
+    <label>Decision</label><select name="decision"><option value="confirmed">Malicious - block and purge</option><option value="false_positive">Safe - false positive</option></select>
+    <label class="check"><input type="checkbox" name="block" checked> Add sender, links and attachments to the block list</label>
+    <label class="check"><input type="checkbox" name="purge" checked> Pull every copy from all mailboxes</label><label>Note to reporter / log</label><input name="note">`,
+    async (d) => { const r = await api("POST", `/api/reports/${b.dataset.r}/review`, d);
+      toast(d.decision === "confirmed" ? `Blocked ${r.indicators_added.length} indicator(s); pulled from ${(r.purge.mailboxes || []).length} mailbox(es)` : "Marked safe"); route(); });
+};
+
+V.intel = async (c) => {
+  const rows = await api("GET", "/api/indicators");
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Threat intelligence</h2>
+    ${can("intel") ? `<button class="btn" id="addInd">Add indicator</button>` : ""}</div>
+    <p class="muted">Block-listed senders, domains, URLs and file hashes stop matching mail on arrival and at click time. Adding one also hunts for it in mail already delivered.</p>
+    <div class="tbl"><table><tr><th>Type</th><th>Value</th><th>Action</th><th>Source</th><th>Note</th><th>Added</th><th></th></tr>
+    ${rows.map(i => `<tr><td>${esc(i.kind)}</td><td class="mono">${esc(i.value)}</td><td><span class="pill ${i.action === "block" ? "bad" : "ok"}">${i.action}</span></td><td>${esc(i.source)}</td>
+      <td>${esc(i.note || "")}</td><td>${when(i.added_at)}<div class="muted" style="font-size:12px">${esc(i.added_by)}</div></td><td>${can("intel") ? `<a href="#" data-del="${i.id}">remove</a>` : ""}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No indicators yet</td></tr>`}</table></div></div>`;
+  const add = $("#addInd"); if (add) add.onclick = () => modal(`<h2>Add indicator</h2><div class="grid"><div><label>Type</label><select name="kind">${["sender", "domain", "url", "hash", "ip"].map(k => `<option>${k}</option>`).join("")}</select></div>
+    <div><label>Action</label><select name="action"><option value="block">block</option><option value="allow">allow (trusted)</option></select></div></div><label>Value</label><input name="value" required>
+    <label>Note</label><input name="note"><label class="check"><input type="checkbox" name="hunt" checked> Quarantine matching mail already delivered</label>`,
+    async (d) => { const r = await api("POST", "/api/indicators", d); toast(`Added. ${r.remediated.length} delivered message(s) pulled.`); route(); });
+  for (const a of c.querySelectorAll("[data-del]")) a.onclick = async (e) => { e.preventDefault(); await api("DELETE", "/api/indicators/" + a.dataset.del); route(); };
+};
+
+V.clicks = async (c) => {
+  const rows = await api("GET", "/api/clicks");
+  c.innerHTML = `<div class="panel"><h2>Link clicks (time-of-click protection)</h2><div class="tbl"><table><tr><th>When</th><th>Who</th><th>Link</th><th>Landed on</th><th>Result</th><th>Why</th></tr>
+    ${rows.map(k => `<tr><td>${when(k.clicked_at)}</td><td>${esc(k.recipient)}</td><td class="mono">${esc(k.url)}</td><td class="mono">${esc(k.final_url && k.final_url !== k.url ? k.final_url : "")}</td>
+      <td><span class="pill ${k.verdict === "blocked" ? "bad" : k.verdict === "warned" ? "warn" : "ok"}">${esc(k.verdict)}</span> ${k.score}</td><td style="font-size:13px">${JSON.parse(k.reasons).slice(0, 2).map(esc).join("<br>")}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No clicks yet</td></tr>`}</table></div></div>`;
+};
+
+V.test = async (c) => {
+  c.innerHTML = `<div class="panel"><h2>Test a message</h2><p class="muted">Paste the full source of an e-mail (in Outlook: File &gt; Properties &gt; Internet headers is not enough - save the message as .eml) or choose a .eml file. It is scanned but no action is taken.</p>
+    <input type="file" id="eml" accept=".eml,.txt,message/rfc822" style="margin-bottom:8px"><textarea id="src" rows="12" class="mono" placeholder="From: ...&#10;To: ...&#10;Subject: ...&#10;&#10;Body"></textarea>
+    <div class="row" style="margin-top:10px"><button class="btn" id="scanBtn">Scan</button></div></div>`;
+  $("#eml").onchange = async (e) => { const f = e.target.files[0]; if (f) $("#src").value = await f.text(); };
+  $("#scanBtn").onclick = async () => { try { const m = await api("POST", "/api/scan", $("#src").value, { raw: true }); go("message/" + m.id); } catch (e) { toast(e.message); } };
+};
+
+V.activity = async (c) => {
+  const rows = await api("GET", "/api/activity");
+  c.innerHTML = `<div class="panel"><h2>Activity log</h2><div class="tbl"><table><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+    ${rows.map(a => `<tr><td>${when(a.at)}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td class="mono">${esc(a.target)}</td><td style="font-size:13px">${esc(a.detail)}</td></tr>`).join("")}</table></div></div>`;
+};
+
+V.users = async (c) => {
+  const rows = await api("GET", "/api/users");
+  c.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Console users</h2><button class="btn" id="addU">Add user</button></div>
+    <p class="muted">Admin: everything. Analyst: review reports, quarantine, purge, manage threat intel. Viewer: read only.</p>
+    <table><tr><th>User</th><th>Name</th><th>E-mail</th><th>Role</th><th>State</th><th></th></tr>${rows.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.full_name)}</td><td>${esc(u.email || "")}</td><td>${esc(u.role)}</td>
+    <td>${u.locked ? `<span class="pill bad">locked</span>` : u.active ? `<span class="pill ok">active</span>` : `<span class="pill">inactive</span>`}</td><td><button class="btn secondary" data-u="${u.id}">Manage</button></td></tr>`).join("")}</table></div>`;
+  $("#addU").onclick = () => modal(`<h2>Add user</h2><label>User name</label><input name="username" required autocomplete="off"><label>Full name</label><input name="full_name" required autocomplete="off">
+    <label>E-mail</label><input name="email" type="email" autocomplete="off"><label>Role</label><select name="role"><option>analyst</option><option>viewer</option><option>admin</option></select>
+    <label>Temporary password (changed at first sign-in)</label><input name="temporary_password" type="password" autocomplete="new-password" required>`,
+    async (d) => { await api("POST", "/api/users", d); toast("User added"); route(); });
+  for (const b of c.querySelectorAll("[data-u]")) b.onclick = () => { const u = rows.find(x => x.id === +b.dataset.u);
+    modal(`<h2>Manage ${esc(u.username)}</h2><label>Role</label><select name="role">${["admin", "analyst", "viewer"].map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select>
+      <label class="check"><input type="checkbox" name="active" ${u.active ? "checked" : ""}> Active</label><label class="check"><input type="checkbox" name="unlock"> Unlock</label>
+      <label>Reset to temporary password (optional)</label><input name="temporary_password" type="password" autocomplete="new-password">`,
+      async (d) => { await api("PATCH", "/api/users/" + u.id, { role: d.role, active: d.active, unlock: d.unlock, temporary_password: d.temporary_password || null }); toast("Saved"); route(); }); };
+};
+
+V.setup = async (c) => {
+  const sys = await api("GET", "/api/status");
+  c.innerHTML = `<div class="panel"><h2>Connect your mail</h2>
+    <p><b>Microsoft 365 (recommended to start):</b> register an app in Microsoft Entra with the Graph application permissions <span class="mono">Mail.ReadWrite</span>, <span class="mono">Mail.Send</span> and <span class="mono">User.Read.All</span>, grant admin consent, then set <span class="mono">PG_M365_TENANT_ID</span>, <span class="mono">PG_M365_CLIENT_ID</span> and <span class="mono">PG_M365_CLIENT_SECRET</span>. New mail is scanned about every minute; threats move to a hidden "PhishGuard Quarantine" folder.</p>
+    <p><b>Any mail system (gateway):</b> run <span class="mono">python run.py gateway</span>, point MX or an inbound connector at it and set <span class="mono">PG_SMTP_NEXT_HOP</span> to your real mail server. This mode also rewrites links for time-of-click checks and adds warning banners.</p></div>
+  <div class="panel"><h2>"Report Phishing" button in Outlook</h2><p>Microsoft 365 admin center &gt; Settings &gt; Integrated apps &gt; Upload custom apps &gt; "Provide link to manifest file":</p>
+    <p class="mono">${esc(sys.base_url)}/addin/manifest.xml</p><p class="muted">Needs HTTPS. Users without the add-in can forward suspicious mail as an attachment to ${esc(sys.report_mailbox || "the report mailbox (PG_REPORT_MAILBOX)")}, or use the "Report phishing" link in warning banners.</p></div>
+  <div class="panel"><h2>Attachment detonation</h2><p>Static analysis runs on every attachment. To execute suspicious files in an isolated VM, install <b>CAPE Sandbox</b> on a separate, network-isolated host and set <span class="mono">PG_CAPE_URL</span> (and <span class="mono">PG_CAPE_TOKEN</span>). Files the sandbox convicts are block-listed and pulled from every mailbox.</p></div>`;
+};
+
+$("#loginForm").onsubmit = async (e) => { e.preventDefault(); try { const r = await api("POST", "/api/auth/login", Object.fromEntries(new FormData(e.target)));
+  S.token = r.token; sessionStorage.setItem("pg_token", r.token); e.target.reset(); boot(); } catch (err) { toast(err.message); } };
+$("#pwForm").onsubmit = async (e) => { e.preventDefault(); try { await api("POST", "/api/auth/change-password", Object.fromEntries(new FormData(e.target))); e.target.reset(); toast("Password changed"); boot(); } catch (err) { toast(err.message, 6000); } };
+$("#logoutBtn").onclick = async () => { try { await api("POST", "/api/auth/logout"); } catch (_) {} signOut("Signed out"); };
+async function boot() {
+  if (!S.token) return show("login");
+  try { S.me = await api("GET", "/api/me"); } catch (_) { return signOut(); }
+  if (S.me.must_change_password) return show("pw");
+  $("#who").textContent = `${S.me.full_name} (${S.me.role})`; show("app"); route();
+}
+boot();
+</script>
+</body>
+</html>

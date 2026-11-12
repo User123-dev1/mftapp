@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PhishGuard</title>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+  // Called by the "Report Phishing" ribbon button (ExecuteFunction).
+  function notify(item, message, isError) {
+    item.notificationMessages.replaceAsync("phishguard", {
+      type: isError ? Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage
+                    : Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
+      message: message, icon: "Icon.16", persistent: false
+    });
+  }
+
+  function reportPhish(event) {
+    var item = Office.context.mailbox.item;
+    fetch(window.location.origin + "/api/addin/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        internet_message_id: item.internetMessageId,
+        reporter: Office.context.mailbox.userProfile.emailAddress
+      })
+    }).then(function (resp) {
+      return resp.json().then(function (body) {
+        if (!resp.ok) throw new Error(body.detail || resp.statusText);
+        notify(item, body.duplicate ? "You already reported this e-mail. Thank you."
+                                    : "Reported to IT Security. Thank you - do not interact with this e-mail.", false);
+      });
+    }).catch(function (err) {
+      notify(item, "Could not report the e-mail: " + err.message + ". Forward it to IT Security instead.", true);
+    }).finally(function () { event.completed(); });
+  }
+
+  Office.onReady(function () {
+    if (Office.actions && Office.actions.associate) Office.actions.associate("reportPhish", reportPhish);
+  });
+</script>
+</head>
+<body></body>
+</html>
