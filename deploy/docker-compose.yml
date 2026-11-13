@@ -1,4 +1,4 @@
-# The AbelZeta app portal: a reverse proxy (HTTPS) in front of the portal and three apps.
+# The AbelZeta app portal: a reverse proxy (HTTPS) in front of the portal and four apps.
 # Generate .env, env/*.env, Caddyfile and apps.json first with configure.py (install.sh does this).
 #   docker compose -p abelzeta up -d --build
 name: abelzeta
@@ -19,11 +19,12 @@ services:
       - "8443:8443"     # trial mode: Service Desk
       - "8444:8444"     # trial mode: GMP Asset Manager
       - "8445:8445"     # trial mode: Password Vault
+      - "8446:8446"     # trial mode: PhishGuard
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # certificates (and Caddy's own CA in trial mode)
       - caddy_config:/config
-    depends_on: [portal, servicedesk, gmp, vault]
+    depends_on: [portal, servicedesk, gmp, vault, phishguard]
 
   portal:
     <<: *app
@@ -31,8 +32,8 @@ services:
     environment:
       PORTAL_APPS_FILE: /config/apps.json
       # Health checks go straight to the apps on the internal Docker network, never via a proxy.
-      NO_PROXY: servicedesk,gmp,vault,localhost,127.0.0.1
-      no_proxy: servicedesk,gmp,vault,localhost,127.0.0.1
+      NO_PROXY: servicedesk,gmp,vault,phishguard,localhost,127.0.0.1
+      no_proxy: servicedesk,gmp,vault,phishguard,localhost,127.0.0.1
     volumes:
       - ./apps.json:/config/apps.json:ro
 
@@ -58,6 +59,13 @@ services:
     env_file: env/vault.env
     volumes:
       - ${DATA_DIR:-./data}/vault:/data
+
+  phishguard:
+    <<: *app
+    build: ../PHISH_GUARD
+    env_file: env/phishguard.env
+    volumes:
+      - ${DATA_DIR:-./data}/phishguard:/data
 
 volumes:
   caddy_data:

@@ -9,6 +9,7 @@ One address for every internal app. This folder deploys the **portal** and the a
 | IT Service Desk (tickets, changes, CMDB, AbelOrder) | `https://<ip>:8443` | `https://servicedesk.abelzeta.com` |
 | GMP Asset Manager | `https://<ip>:8444` | `https://assets.abelzeta.com` |
 | Password Vault (admin API) | `https://<ip>:8445/docs` | `https://vault.abelzeta.com/docs` |
+| PhishGuard (e-mail security console) | `https://<ip>:8446` | `https://phishguard.abelzeta.com` |
 | GMP asset naming tool | *to be added* | |
 
 ```
@@ -41,8 +42,9 @@ One address for every internal app. This folder deploys the **portal** and the a
 | Service Desk | `manager@abelzeta.com` | `SD_ADMIN_PASSWORD` |
 | GMP Asset Manager | `admin` | `GMP_ADMIN_PASSWORD` (you must change it at first login) |
 | Password Vault | `admin` | `SS_ADMIN_PASSWORD` |
+| PhishGuard | `admin` | `PG_ADMIN_PASSWORD` (you must change it at first login) |
 
-Change each password after signing in. Leave `SS_MASTER_KEY` and `SD_SECRET_KEY` alone.
+Change each password after signing in. Leave `SS_MASTER_KEY`, `SD_SECRET_KEY` and `PG_SECRET_KEY` alone.
 **`SS_MASTER_KEY` decrypts the vault: if it's lost, the vault's contents are lost**, including from
 backups. That's why the secret is kept even if you delete the stack.
 
@@ -89,6 +91,18 @@ purpose (see above). Delete them by hand when you're sure.
 (see `ServiceDesk/README.md`, "Single sign-on") and the vault (`secret_server/README.md`). Also
 consider keeping the vault reachable only from the office or VPN. The trial's IP restriction is
 the only thing protecting it today.
+
+## PhishGuard in this deployment
+
+PhishGuard runs **console-only**: use **Test a message** to scan saved `.eml` files. It is not
+connected to any mailboxes, and AI analysis is off. To go further (in a pilot first):
+- **Microsoft 365:** add `PG_M365_TENANT_ID`, `PG_M365_CLIENT_ID` and `PG_M365_CLIENT_SECRET` (see
+  `PHISH_GUARD/README.md`). This lets it move and delete mail, so get approval from your Microsoft 365
+  owner and scope it to the pilot mailboxes.
+- **AI analysis:** set `PG_LLM_ENABLED=true` and add `ANTHROPIC_API_KEY` (a paid Anthropic account).
+
+For now, these settings go in `deploy/env/phishguard.env` on the server. They're overwritten when
+`install.sh` runs, so ask for them to be added to `configure.py` before relying on them.
 
 ## Files
 

@@ -111,7 +111,7 @@ DOMAIN=$DOMAIN
 LE_EMAIL=$LE_EMAIL
 CONF
 
-mkdir -p "$DATA_DIR"/servicedesk "$DATA_DIR"/gmp "$DATA_DIR"/vault
+mkdir -p "$DATA_DIR"/servicedesk "$DATA_DIR"/gmp "$DATA_DIR"/vault "$DATA_DIR"/phishguard
 chown -R 10001:10001 "$DATA_DIR"     # the apps run as uid 10001 inside their containers
 chmod 0750 "$DATA_DIR"
 
@@ -126,7 +126,7 @@ docker image prune -f >/dev/null
 CHECK_HOST=${DOMAIN:+portal.$DOMAIN}; CHECK_HOST=${CHECK_HOST:-$PUBLIC_HOST}
 sleep 5
 failed=0
-for port in 443 8443 8444 8445; do
+for port in 443 8443 8444 8445 8446; do
   [ -n "$DOMAIN" ] && [ "$port" != 443 ] && continue   # domain mode: one port, one name per app
   code=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$CHECK_HOST:$port:127.0.0.1" \
          "https://$CHECK_HOST:$port/" || true)

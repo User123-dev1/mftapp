@@ -45,6 +45,12 @@ APPS = [
         "description": "Enterprise privileged password vault. Administrators only for now: opens the API console.",
         "category": "Security", "icon": "lock", "color": "#7c3aed", "owner": "IT Security",
     },
+    {
+        "id": "phishguard", "port": 8446, "sub": "phishguard", "upstream": "phishguard:8100",
+        "health": "/health", "name": "PhishGuard",
+        "description": "Phishing, BEC and malware e-mail protection: test suspicious e-mails, quarantine and reports.",
+        "category": "Security", "icon": "phishing", "color": "#dc2626", "owner": "IT Security",
+    },
 ]
 
 REQUIRED_SECRETS = {
@@ -54,6 +60,9 @@ REQUIRED_SECRETS = {
     "SS_ADMIN_PASSWORD": lambda: strong_password(),
     # AES-256 master key for the vault: base64 of 32 random bytes.
     "SS_MASTER_KEY": lambda: base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+    "PG_ADMIN_PASSWORD": lambda: strong_password(),
+    # Signs PhishGuard's report / click-check links; must stay the same across restarts.
+    "PG_SECRET_KEY": lambda: secrets.token_urlsafe(48),
 }
 
 
@@ -144,6 +153,14 @@ def env_files(sec: dict, urls: dict, args) -> dict[str, dict]:
             "SS_MASTER_KEY": sec["SS_MASTER_KEY"],
             "SS_PUBLIC_URL": urls["password-vault"],
         },
+        "phishguard": {
+            "PG_ADMIN_PASSWORD": sec["PG_ADMIN_PASSWORD"],
+            "PG_SECRET_KEY": sec["PG_SECRET_KEY"],
+            "PG_BASE_URL": urls["phishguard"],
+            "PG_ORG_DOMAINS": args.org_domains,
+            # Console-only trial: no Microsoft 365 connection and no AI until keys are added.
+            "PG_LLM_ENABLED": "false",
+        },
     }
 
 
@@ -170,6 +187,7 @@ def main(argv=None) -> None:
     ap.add_argument("--organization", default="AbelZeta")
     ap.add_argument("--support-email", default="servicedesk@abelzeta.com")
     ap.add_argument("--site-name", default="AbelZeta")
+    ap.add_argument("--org-domains", default="abelzeta.com", help="PhishGuard: your own e-mail domains")
     ap.add_argument("--data-dir", default="/opt/abelzeta/data")
     ap.add_argument("--out", type=Path, default=HERE)
     args = ap.parse_args(argv)

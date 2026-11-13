@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  AbelZeta app portal (trial): the portal, IT Service Desk, GMP Asset Manager and the
-  password vault on one Amazon Linux 2023 server, behind an HTTPS reverse proxy, reachable
+  AbelZeta app portal (trial): the portal, IT Service Desk, GMP Asset Manager, the
+  password vault and PhishGuard on one Amazon Linux 2023 server, behind an HTTPS reverse proxy, reachable
   only from the IP range you allow. Passwords and the vault master key are generated on
   first start and kept in AWS Secrets Manager. The disk is encrypted and snapshotted daily.
 
@@ -46,10 +46,10 @@ Resources:
   PortalSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: AbelZeta portal - HTTPS (portal 443, apps 8443-8445) from the allowed range only
+      GroupDescription: AbelZeta portal - HTTPS (portal 443, apps 8443-8446) from the allowed range only
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr, Description: Portal }
-        - { IpProtocol: tcp, FromPort: 8443, ToPort: 8445, CidrIp: !Ref AllowedCidr, Description: Apps }
+        - { IpProtocol: tcp, FromPort: 8443, ToPort: 8446, CidrIp: !Ref AllowedCidr, Description: Apps }
 
   # Generated passwords + vault master key. Kept if the stack is deleted, because database
   # snapshots can't be decrypted without the vault key. Delete it by hand when no longer needed.
@@ -163,6 +163,8 @@ Outputs:
     Value: !Sub https://${PortalIP}:8444
   PasswordVaultUrl:
     Value: !Sub https://${PortalIP}:8445/docs
+  PhishGuardUrl:
+    Value: !Sub https://${PortalIP}:8446
   InitialPasswordsSecret:
     Description: >
       First admin passwords. In Secrets Manager open the secret with this ARN and click
