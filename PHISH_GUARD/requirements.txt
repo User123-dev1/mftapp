@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+httpx>=0.27            # Microsoft Graph, CAPE, time-of-click page checks
+anthropic>=2.8         # AI analysis with Claude
+dnspython>=2.6         # SPF / DMARC evaluation (gateway mode)
+aiosmtpd>=1.4          # SMTP gateway mode
+# Optional: DKIM signature verification in gateway mode
+# dkimpy>=1.1
+# Tests
+pytest>=8
