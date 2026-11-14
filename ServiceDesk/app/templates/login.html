@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Sign in · {{ app_name }}{% endblock %}
 {% block content %}
-<div class="card narrow">
+<div class="card narrow login-card">
+  <img class="login-mark" src="/static/agent.svg" alt="" width="88" height="88">
   <h1>Sign in</h1>
+  <p class="muted login-sub">{{ app_name }}: how can we help today?</p>
   {% if sso_providers %}
   <div class="sso">
     {% for p in sso_providers %}

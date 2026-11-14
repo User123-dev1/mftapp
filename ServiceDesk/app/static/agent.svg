@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Service desk agent">
+  <!-- Split-tone headset agent: left half lighter, right half deeper, as in the inspiration image. -->
+  <defs><clipPath id="l"><rect x="0" y="0" width="60" height="120"/></clipPath><clipPath id="r"><rect x="60" y="0" width="60" height="120"/></clipPath></defs>
+  <g clip-path="url(#l)">
+    <path d="M14 58a46 46 0 0 1 92 0" fill="none" stroke="#013773" stroke-width="8"/>
+    <rect x="6" y="44" width="22" height="34" rx="9" fill="#006ea1"/>
+    <circle cx="60" cy="58" r="27" fill="#ffdcd8"/>
+    <path d="M18 118a42 38 0 0 1 84 0z" fill="#00dcff"/>
+  </g>
+  <g clip-path="url(#r)">
+    <path d="M14 58a46 46 0 0 1 92 0" fill="none" stroke="#010042" stroke-width="8"/>
+    <rect x="92" y="44" width="22" height="34" rx="9" fill="#013773"/>
+    <circle cx="60" cy="58" r="27" fill="#ffb8bc"/>
+    <path d="M18 118a42 38 0 0 1 84 0z" fill="#00a8ff"/>
+  </g>
+  <rect x="64" y="66" width="34" height="8" rx="4" fill="#010042"/>
+</svg>
