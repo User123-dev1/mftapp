@@ -7,9 +7,11 @@ Then signs in to each app from the server itself with the value the app was set 
 """
 
 import hashlib
+import http.client
 import http.cookiejar
 import json
 import re
+import socket
 import ssl
 import subprocess
 import urllib.error
@@ -65,37 +67,64 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
 
+class _LocalHTTPS(http.client.HTTPSConnection):
+    """Connect to this server (127.0.0.1) while using the public name for TLS and the Host header,
+    exactly like a browser - the proxy only serves its configured addresses."""
+
+    def connect(self):
+        sock = socket.create_connection(("127.0.0.1", self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _LocalHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_LocalHTTPS, req, context=CTX)
+
+
 def opener():
-    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=CTX),
-                                       urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+    return urllib.request.build_opener(_LocalHandler(), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
                                        urllib.request.ProxyHandler({}))
 
 
-def json_login(port, username, password):
-    req = urllib.request.Request(f"https://127.0.0.1:{port}/api/auth/login",
+def app_url(c: dict, sub: str, port: int) -> str:
+    if c.get("DOMAIN"):
+        return f"https://{sub}.{c['DOMAIN']}"
+    return f"https://{c.get('PUBLIC_HOST', '127.0.0.1')}:{port}"
+
+
+def json_login(base, username, password):
+    req = urllib.request.Request(f"{base}/api/auth/login",
                                  json.dumps({"username": username, "password": password}).encode(),
                                  {"Content-Type": "application/json"})
     try:
-        body = json.loads(opener().open(req, timeout=10).read())
-        return "OK" if any(k in body for k in ("token", "access_token")) else f"unexpected reply {sorted(body)}"
+        raw = opener().open(req, timeout=10).read()
     except urllib.error.HTTPError as e:
-        return f"FAILED ({e.code}: {e.read()[:120].decode(errors='replace')})"
+        if e.code in (400, 401, 403):
+            return f"PASSWORD REFUSED ({e.code}: {e.read()[:120].decode(errors='replace')})"
+        return f"APP ERROR ({e.code})"
     except Exception as e:  # noqa: BLE001
-        return f"FAILED ({e})"
+        return f"NO RESPONSE ({e})"
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return "NO RESPONSE (empty or non-JSON page - check the proxy / address)"
+    return "OK" if any(k in body for k in ("token", "access_token")) else f"unexpected reply {sorted(body)}"
 
 
-def servicedesk_login(email, password):
+def servicedesk_login(base, email, password):
     op = opener()
     try:
-        page = op.open("https://127.0.0.1:8443/login", timeout=10).read().decode()
-        token = re.search(r'name="csrf-token" content="([^"]+)"', page).group(1)
-        data = urllib.parse.urlencode({"email": email, "password": password, "csrf_token": token, "next": "/"})
-        r = op.open("https://127.0.0.1:8443/login", data.encode(), timeout=10)
-        return "OK" if "/login" not in r.geturl() else "FAILED (back at the login page)"
+        page = op.open(f"{base}/login", timeout=10).read().decode()
+        m = re.search(r'name="csrf-token" content="([^"]+)"', page)
+        if not m:
+            return "NO RESPONSE (login page did not load - check the proxy / address)"
+        data = urllib.parse.urlencode({"email": email, "password": password, "csrf_token": m.group(1), "next": "/"})
+        r = op.open(f"{base}/login", data.encode(), timeout=10)
+        return "OK" if "/login" not in r.geturl() else "PASSWORD REFUSED"
     except urllib.error.HTTPError as e:
-        return f"FAILED ({e.code})"
+        return "PASSWORD REFUSED" if e.code == 400 else f"APP ERROR ({e.code})"
     except Exception as e:  # noqa: BLE001
-        return f"FAILED ({e})"
+        return f"NO RESPONSE ({e})"
 
 
 def main():
@@ -116,12 +145,15 @@ def main():
               f"aws {fp(aws_v)}  running {fp(run_v)}")
 
     print("\nSign-in test from this server, with the passwords the apps were set up with:")
-    print(f"  Service Desk  {env.get('SD_ADMIN_EMAIL', '?'):24} {servicedesk_login(env.get('SD_ADMIN_EMAIL', ''), env.get('SD_ADMIN_PASSWORD', ''))}")
-    print(f"  GMP Assets    {'admin':24} {json_login(8444, 'admin', env.get('GMP_ADMIN_PASSWORD', ''))}")
-    print(f"  Vault         {'admin':24} {json_login(8445, 'admin', env.get('SS_ADMIN_PASSWORD', ''))}")
-    print(f"  PhishGuard    {'admin':24} {json_login(8446, 'admin', env.get('PG_ADMIN_PASSWORD', ''))}")
-    print("\nIf a sign-in FAILS here, that app's admin password was changed or set differently on first start;"
-          "\nif it is OK here but not in your browser, the value you're using differs from Secrets Manager.")
+    sd = env.get("SD_ADMIN_EMAIL", "")
+    print(f"  Service Desk  {sd:24} {servicedesk_login(app_url(c, 'servicedesk', 8443), sd, env.get('SD_ADMIN_PASSWORD', ''))}")
+    print(f"  GMP Assets    {'admin':24} {json_login(app_url(c, 'assets', 8444), 'admin', env.get('GMP_ADMIN_PASSWORD', ''))}")
+    print(f"  Vault         {'admin':24} {json_login(app_url(c, 'vault', 8445), 'admin', env.get('SS_ADMIN_PASSWORD', ''))}")
+    print(f"  PhishGuard    {'admin':24} {json_login(app_url(c, 'phishguard', 8446), 'admin', env.get('PG_ADMIN_PASSWORD', ''))}")
+    print("\nOK here but not in your browser: the value you're entering differs from the secret above."
+          "\nPASSWORD REFUSED here: that admin password was changed in the app (or PhishGuard is locked:"
+          "\n  run reset_admin.py). A refused password counts toward the app's lockout, so don't repeat this"
+          "\n  more than a couple of times in a row.")
 
 
 if __name__ == "__main__":
