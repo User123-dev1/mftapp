@@ -5,3 +5,4 @@ apps.json
 secrets.json
 data/
 env/
+__pycache__/
