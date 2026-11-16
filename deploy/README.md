@@ -75,6 +75,22 @@ instance stops the server charge but keeps the address and disk.
 **Remove everything:** delete the `abelzeta-portal` stack. The secret and any snapshots are kept on
 purpose (see above). Delete them by hand when you're sure.
 
+### Passwords from Secrets Manager don't work
+
+Check which secret the server uses and whether its values match the running apps (no passwords are
+printed, only short fingerprints):
+
+```bash
+sudo python3 /opt/abelzeta/mftapp/deploy/diagnose.py
+```
+
+- **NO in either column:** the apps' passwords never reached Secrets Manager (for example, the
+  first start couldn't read it yet). Run `sudo bash /opt/abelzeta/mftapp/deploy/install.sh`. It keeps
+  the passwords the apps already use, including the vault key, and saves them to the secret shown.
+- **Sign-in OK on the server but not in your browser:** you're reading a different secret. After
+  re-creating the stack there are several `PortalSecret-...` secrets; use the one in the stack's
+  **Outputs → InitialPasswordsSecret**.
+
 ### Locked out of an app
 
 PhishGuard locks an account after 5 wrong passwords, and only another administrator can unlock

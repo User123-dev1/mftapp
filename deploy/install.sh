@@ -80,10 +80,37 @@ fi
 
 umask 077
 SECRETS_FILE=$BASE/secrets.json
+SM_FILE=$BASE/secrets.from-aws.json
 if [ -n "$SECRET_ID" ]; then
   log "Reading secrets from AWS Secrets Manager"
-  aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRET_ID" \
-    --query SecretString --output text > "$SECRETS_FILE"
+  # A brand-new server's permissions can take a minute or two to apply: retry before giving up.
+  for attempt in $(seq 1 10); do
+    if aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRET_ID" \
+         --query SecretString --output text > "$SM_FILE" 2> "$BASE/aws-error.log"; then
+      break
+    fi
+    if [ "$attempt" = 10 ]; then
+      cat "$BASE/aws-error.log" >&2
+      echo "Could not read Secrets Manager secret $SECRET_ID - nothing was changed." >&2
+      exit 1
+    fi
+    log "Secrets Manager not readable yet - retrying in 15 seconds ($attempt/10)"
+    sleep 15
+  done
+  # Merge, never overwrite: Secrets Manager wins, but keep anything only this server has.
+  python3 - "$SECRETS_FILE" "$SM_FILE" <<'PY'
+import json, os, sys
+local, aws = sys.argv[1], sys.argv[2]
+def load(p):
+    try:
+        return json.loads(open(p).read() or "{}") if os.path.exists(p) else {}
+    except ValueError:
+        return {}
+merged = {**load(local), **{k: v for k, v in load(aws).items() if v}}
+open(local, "w").write(json.dumps(merged, indent=2) + "\n")
+PY
+else
+  log "WARNING: no SECRET_ID - passwords are kept only in $SECRETS_FILE on this server"
 fi
 
 log "Generating configuration"
@@ -93,13 +120,23 @@ else
   WHERE=(--host "$PUBLIC_HOST")
 fi
 RESULT=$(python3 "$APP_DIR/deploy/configure.py" "${WHERE[@]}" --secrets "$SECRETS_FILE" --data-dir "$DATA_DIR")
+python3 -c '
+import json, sys
+r = json.loads(sys.argv[1])
+if r["generated_secrets"]:
+    print("  new secrets generated: " + ", ".join(r["generated_secrets"]))
+if r["recovered_secrets"]:
+    print("  kept from the running apps: " + ", ".join(r["recovered_secrets"]))
+' "$RESULT"
 if [ -n "$SECRET_ID" ]; then
-  if python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1])["generated_secrets"] else 1)' "$RESULT"; then
-    log "Saving newly generated secrets to AWS Secrets Manager"
+  # Store in Secrets Manager whenever it is missing something or differs from what the apps use.
+  if ! python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.loads(open(sys.argv[2]).read() or "{}"); sys.exit(0 if a==b else 1)' \
+       "$SECRETS_FILE" "$SM_FILE"; then
+    log "Saving the secrets in use to AWS Secrets Manager"
     aws secretsmanager put-secret-value --region "$REGION" --secret-id "$SECRET_ID" \
       --secret-string "file://$SECRETS_FILE" >/dev/null
   fi
-  rm -f "$SECRETS_FILE"   # Secrets Manager is the copy of record
+  rm -f "$SECRETS_FILE" "$SM_FILE" "$BASE/aws-error.log"   # Secrets Manager is the copy of record
 fi
 umask 022
 

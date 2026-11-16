@@ -76,14 +76,33 @@ def strong_password(length: int = 20) -> str:
             return pw
 
 
-def complete_secrets(path: Path) -> tuple[dict, list[str]]:
+def read_env_files(env_dir: Path) -> dict:
+    """Values the apps are running with now (from a previous run's env/*.env)."""
+    values = {}
+    for f in sorted(env_dir.glob("*.env")) if env_dir.is_dir() else []:
+        for line in f.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                values[k.strip()] = v
+    return values
+
+
+def complete_secrets(path: Path, env_dir: Path) -> tuple[dict, list[str], list[str]]:
+    """Fill in missing secrets. A secret the apps already run with is reused, never replaced:
+    regenerating e.g. the vault master key would make existing data unreadable."""
     data = json.loads(path.read_text()) if path.exists() and path.read_text().strip() else {}
-    added = []
+    running = read_env_files(env_dir)
+    added, recovered = [], []
     for key, make in REQUIRED_SECRETS.items():
-        if not data.get(key):
+        if data.get(key):
+            continue
+        if running.get(key):
+            data[key] = running[key]
+            recovered.append(key)
+        else:
             data[key] = make()
             added.append(key)
-    return data, added
+    return data, added, recovered
 
 
 def public_urls(host: str | None, domain: str | None) -> dict:
@@ -192,7 +211,7 @@ def main(argv=None) -> None:
     ap.add_argument("--out", type=Path, default=HERE)
     args = ap.parse_args(argv)
 
-    sec, added = complete_secrets(args.secrets)
+    sec, added, recovered = complete_secrets(args.secrets, args.out / "env")
     write(args.secrets, json.dumps(sec, indent=2) + "\n", 0o600)
     urls = public_urls(args.host, args.domain)
     write(args.out / ".env", render_env({"DATA_DIR": args.data_dir}))
@@ -201,7 +220,7 @@ def main(argv=None) -> None:
         write(args.out / "env" / f"{name}.env", render_env(values), 0o600)
     write(args.out / "Caddyfile", caddyfile(args.host, args.domain, args.email))
     write(args.out / "apps.json", json.dumps(apps_catalog(urls, args.organization, args.support_email), indent=2) + "\n")
-    print(json.dumps({"generated_secrets": added, "urls": urls}))
+    print(json.dumps({"generated_secrets": added, "recovered_secrets": recovered, "urls": urls}))
 
 
 if __name__ == "__main__":
