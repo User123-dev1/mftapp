@@ -75,6 +75,19 @@ instance stops the server charge but keeps the address and disk.
 **Remove everything:** delete the `abelzeta-portal` stack. The secret and any snapshots are kept on
 purpose (see above). Delete them by hand when you're sure.
 
+### Locked out of an app
+
+PhishGuard locks an account after 5 wrong passwords, and only another administrator can unlock
+it. To unlock `admin` and set its password back to `PG_ADMIN_PASSWORD` from Secrets Manager:
+
+```bash
+cd /opt/abelzeta/mftapp/deploy
+sudo docker compose exec phishguard python reset_admin.py
+```
+
+When copying a password from Secrets Manager, use the **Plaintext** view and copy only what's
+between the quotes, so no stray spaces or quote marks come along.
+
 ## 3. Going live on abelzeta.com (when the trial is approved)
 
 1. In DNS, point `portal`, `servicedesk`, `assets` and `vault`.abelzeta.com (A records) at the

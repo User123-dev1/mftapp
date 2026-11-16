@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY phishguard ./phishguard
-COPY run.py ./
+COPY run.py reset_admin.py ./
 
 # Database and copies of quarantined / reported messages (message_store/) live on the /data volume.
 RUN useradd --system --uid 10001 app && mkdir -p /data && chown app /data
