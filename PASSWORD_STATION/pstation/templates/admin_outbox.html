@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <p class="links"><a href="/admin">← Admin</a></p>
+  <h1>Outbox (demo mode)</h1>
+  <div class="flash bad">Demo only: in production codes are delivered by e-mail / SMS and never shown here.</div>
+  {% for m in rows %}
+  <div class="msg"><div class="muted small">{{ m.at[:19].replace('T', ' ') }} · {{ m.channel }} → {{ m.recipient }}</div><pre>{{ m.body }}</pre></div>
+  {% else %}<p class="muted">Nothing sent yet.</p>{% endfor %}
+</section>
+{% endblock %}

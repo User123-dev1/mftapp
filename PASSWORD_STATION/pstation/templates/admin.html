@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="head"><h1>Domains</h1><a class="btn" href="/admin/domain">+ Add domain</a></div>
+  <table class="grid">
+    <thead><tr><th>Key</th><th>Name</th><th>Type</th><th>Enrolled users</th><th>Status</th><th></th></tr></thead>
+    {% for d in all_domains %}
+    <tr><td><code>{{ d.id }}</code></td><td>{{ d.name }}</td><td>{{ 'Active Directory (LDAPS)' if d.kind == 'ad' else 'Demo' }}</td>
+      <td>{{ counts.get(d.id, 0) }}</td><td>{{ 'enabled' if d.enabled else 'disabled' }}</td><td><a href="/admin/domain?id={{ d.id }}">Edit / test</a></td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No domains yet.</td></tr>{% endfor %}
+  </table>
+  <p class="links"><a href="/admin/enrollments">Enrolments</a> · <a href="/admin/audit.csv">Download audit log (CSV)</a>{% if demo_outbox %} · <a href="/admin/outbox">Outbox (demo)</a>{% endif %}</p>
+</section>
+<section class="card">
+  <h2>Recent activity</h2>
+  <p class="{{ 'ok-text' if chain_ok else 'bad-text' }}">Audit log integrity: {{ 'verified' if chain_ok else 'BROKEN at entry ' ~ chain_n }} ({{ chain_n if chain_ok else '' }} entries, hash-chained).</p>
+  <table class="grid small">
+    <thead><tr><th>When (UTC)</th><th>IP</th><th>Domain</th><th>User</th><th>Action</th><th>Result</th><th>Detail</th></tr></thead>
+    {% for e in events %}
+    <tr><td>{{ e.at[:19].replace('T', ' ') }}</td><td>{{ e.ip }}</td><td>{{ e.domain_id }}</td><td>{{ e.username }}</td>
+      <td>{{ e.action }}</td><td><span class="badge {{ e.result }}">{{ e.result }}</span></td><td>{{ e.detail }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}

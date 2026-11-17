@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/static/key.svg" alt="" width="26" height="26"> {{ app_name }}</a>
+  <nav>
+    <a href="/change">Change</a><a href="/forgot">Forgot</a><a href="/unlock">Unlock</a><a href="/enroll">Recovery details</a>
+    {% if admin %}<a href="/admin">Admin</a>
+      <form method="post" action="/admin/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="link">Sign out</button></form>
+    {% endif %}
+  </nav>
+</header>
+{% if demo %}<div class="demo-bar">Demo mode - test accounts only, not connected to a real domain.{% if demo_outbox %} Codes appear in Admin → Outbox instead of being sent.{% endif %}</div>{% endif %}
+<main>
+  {% if error %}<div class="flash bad" role="alert">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer>Need help? Contact {{ support }}. Never share your password or a verification code with anyone.</footer>
+</body>
+</html>

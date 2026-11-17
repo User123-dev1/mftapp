@@ -1,0 +1,8 @@
+<label>Account type
+  <select name="domain" required>
+    <option value="">— choose —</option>
+    {% for d in domains %}<option value="{{ d.id }}" {{ 'selected' if form and form.get('domain') == d.id }}>{{ d.name }}</option>{% endfor %}
+  </select>
+</label>
+<label>User name <input name="username" value="{{ form.get('username', '') if form else '' }}" autocomplete="username" required
+  placeholder="e.g. jdoe or jdoe@abelzeta.com"></label>

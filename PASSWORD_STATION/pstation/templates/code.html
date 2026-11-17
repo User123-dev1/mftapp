@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card narrow">
+  <h1>Enter your code</h1>
+  <p>{{ text }}</p>
+  <form method="post" action="{{ action }}" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label>6-digit code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required class="code"></label>
+    <button class="btn">Continue</button>
+  </form>
+  <p class="hint">Didn't get it? Wait a minute, check spam, then start again to get a new code.</p>
+</section>
+{% endblock %}

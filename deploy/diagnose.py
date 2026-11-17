@@ -111,6 +111,22 @@ def json_login(base, username, password):
     return "OK" if any(k in body for k in ("token", "access_token")) else f"unexpected reply {sorted(body)}"
 
 
+def station_login(base, username, password):
+    op = opener()
+    try:
+        page = op.open(f"{base}/admin/login", timeout=10).read().decode()
+        m = re.search(r'name="csrf_token" value="([^"]+)"', page)
+        if not m:
+            return "NO RESPONSE (login page did not load - check the proxy / address)"
+        data = urllib.parse.urlencode({"username": username, "password": password, "csrf_token": m.group(1)})
+        r = op.open(f"{base}/admin/login", data.encode(), timeout=10)
+        return "OK" if r.geturl().rstrip("/").endswith("/admin") else "PASSWORD REFUSED"
+    except urllib.error.HTTPError as e:
+        return "PASSWORD REFUSED" if e.code == 400 else f"APP ERROR ({e.code})"
+    except Exception as e:  # noqa: BLE001
+        return f"NO RESPONSE ({e})"
+
+
 def servicedesk_login(base, email, password):
     op = opener()
     try:
@@ -139,7 +155,8 @@ def main():
         print(f"  NOTE: {local} exists - passwords kept only on this server (not yet in Secrets Manager)")
     print("\nSecret                In Secrets Manager   Matches running apps   (fingerprints, not passwords)")
     for key in ["SD_ADMIN_PASSWORD", "GMP_ADMIN_PASSWORD", "SS_ADMIN_PASSWORD", "PG_ADMIN_PASSWORD",
-                "SS_MASTER_KEY", "SD_SECRET_KEY", "PG_SECRET_KEY"]:
+                "PS_ADMIN_PASSWORD", "SS_MASTER_KEY", "SD_SECRET_KEY", "PG_SECRET_KEY", "PS_SECRET_KEY",
+                "PS_DATA_KEY"]:
         aws_v, run_v = (sm or {}).get(key, ""), env.get(key, "")
         print(f"{key:21} {'yes' if aws_v else 'NO':20} {'yes' if aws_v and aws_v == run_v else 'NO':22} "
               f"aws {fp(aws_v)}  running {fp(run_v)}")
@@ -150,8 +167,9 @@ def main():
     print(f"  GMP Assets    {'admin':24} {json_login(app_url(c, 'assets', 8444), 'admin', env.get('GMP_ADMIN_PASSWORD', ''))}")
     print(f"  Vault         {'admin':24} {json_login(app_url(c, 'vault', 8445), 'admin', env.get('SS_ADMIN_PASSWORD', ''))}")
     print(f"  PhishGuard    {'admin':24} {json_login(app_url(c, 'phishguard', 8446), 'admin', env.get('PG_ADMIN_PASSWORD', ''))}")
+    print(f"  Pwd Station   {'admin':24} {station_login(app_url(c, 'passwords', 8447), 'admin', env.get('PS_ADMIN_PASSWORD', ''))}")
     print("\nOK here but not in your browser: the value you're entering differs from the secret above."
-          "\nPASSWORD REFUSED here: that admin password was changed in the app (or PhishGuard is locked:"
+          "\nPASSWORD REFUSED here: that admin password was changed in the app (or PhishGuard / Password Station is locked:"
           "\n  run reset_admin.py). A refused password counts toward the app's lockout, so don't repeat this"
           "\n  more than a couple of times in a row.")
 

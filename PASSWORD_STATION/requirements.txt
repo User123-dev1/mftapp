@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.1
+ldap3>=2.9                # Active Directory over LDAPS
+cryptography>=42.0        # AES-256-GCM encryption of recovery contacts and bind passwords
+boto3>=1.34               # SMS codes via Amazon SNS (optional)
+# tests
+httpx>=0.27
+pytest>=8.0

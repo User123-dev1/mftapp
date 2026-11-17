@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Recovery details · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Set up recovery details</h1>
+  <p class="hint">Sign in with your current password. Then register a <strong>personal</strong> e-mail address or mobile number:
+    if you forget your password, that's where we'll send the code.</p>
+  <form method="post" action="/enroll" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% include "_domain.html" %}
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="btn">Continue</button>
+  </form>
+</section>
+{% endblock %}

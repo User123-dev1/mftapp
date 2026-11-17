@@ -20,11 +20,12 @@ services:
       - "8444:8444"     # trial mode: GMP Asset Manager
       - "8445:8445"     # trial mode: Password Vault
       - "8446:8446"     # trial mode: PhishGuard
+      - "8447:8447"     # trial mode: Password Station
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # certificates (and Caddy's own CA in trial mode)
       - caddy_config:/config
-    depends_on: [portal, servicedesk, gmp, vault, phishguard]
+    depends_on: [portal, servicedesk, gmp, vault, phishguard, passwordstation]
 
   portal:
     <<: *app
@@ -32,8 +33,8 @@ services:
     environment:
       PORTAL_APPS_FILE: /config/apps.json
       # Health checks go straight to the apps on the internal Docker network, never via a proxy.
-      NO_PROXY: servicedesk,gmp,vault,phishguard,localhost,127.0.0.1
-      no_proxy: servicedesk,gmp,vault,phishguard,localhost,127.0.0.1
+      NO_PROXY: servicedesk,gmp,vault,phishguard,passwordstation,localhost,127.0.0.1
+      no_proxy: servicedesk,gmp,vault,phishguard,passwordstation,localhost,127.0.0.1
     volumes:
       - ./apps.json:/config/apps.json:ro
 
@@ -66,6 +67,13 @@ services:
     env_file: env/phishguard.env
     volumes:
       - ${DATA_DIR:-./data}/phishguard:/data
+
+  passwordstation:
+    <<: *app
+    build: ../PASSWORD_STATION
+    env_file: env/passwordstation.env
+    volumes:
+      - ${DATA_DIR:-./data}/passwordstation:/data
 
 volumes:
   caddy_data:

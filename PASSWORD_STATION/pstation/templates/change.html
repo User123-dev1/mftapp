@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Change password · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Change my password</h1>
+  <form method="post" action="/change" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% include "_domain.html" %}
+    <label>Current password <input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New password <input type="password" name="new" autocomplete="new-password" required></label>
+    <label>Confirm new password <input type="password" name="confirm" autocomplete="new-password" required></label>
+    <p class="hint">At least 12 characters with three of: upper-case, lower-case, digit, symbol. Not your name, and not a recent password.</p>
+    <button class="btn">Change password</button>
+  </form>
+</section>
+{% endblock %}

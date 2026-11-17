@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Forgot password' if purpose == 'forgot' else 'Unlock account' }} · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ 'I forgot my password' if purpose == 'forgot' else 'Unlock my account' }}</h1>
+  <p class="hint">We'll send a code to the recovery e-mail or mobile number you registered. Enter it exactly as you registered it.</p>
+  <form method="post" action="/{{ purpose }}" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% include "_domain.html" %}
+    <fieldset class="choice"><legend>Send the code to</legend>
+      <label class="check"><input type="radio" name="channel" value="email" {{ 'checked' if form.get('channel', 'email') == 'email' }}> My recovery e-mail</label>
+      {% if sms_enabled %}<label class="check"><input type="radio" name="channel" value="sms" {{ 'checked' if form.get('channel') == 'sms' }}> My mobile number</label>{% endif %}
+    </fieldset>
+    <label>Recovery e-mail or mobile number <input name="contact" required placeholder="you@gmail.com or +1 555 123 4567"></label>
+    <button class="btn">Send code</button>
+  </form>
+  <p class="hint">Never registered recovery details? Contact {{ support }}.</p>
+</section>
+{% endblock %}

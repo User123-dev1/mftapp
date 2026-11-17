@@ -9,6 +9,7 @@
 #   PUBLIC_HOST   trial mode address (default: this server's public IP)
 #   DOMAIN        e.g. abelzeta.com -> portal.<domain>, servicedesk.<domain>, ... with real HTTPS
 #   LE_EMAIL      contact address for the Let's Encrypt certificates (domain mode)
+#   PS_DEMO       Password Station demo mode (test domains, codes in Admin > Outbox): true (default) / false
 set -euo pipefail
 
 BASE=/opt/abelzeta
@@ -17,6 +18,7 @@ SELF_SUM=$(sha256sum "$0" | cut -d' ' -f1)   # to notice when the update below c
 mkdir -p "$BASE"
 # Remembered settings first; anything passed in the environment wins.
 _env_branch=${BRANCH-}; _env_secret=${SECRET_ID-}; _env_host=${PUBLIC_HOST-}; _env_domain=${DOMAIN-}; _env_le=${LE_EMAIL-}
+_env_psdemo=${PS_DEMO-}
 # shellcheck disable=SC1090
 [ -f "$CONF" ] && . "$CONF"
 BRANCH=${_env_branch:-${BRANCH:-main}}
@@ -24,6 +26,7 @@ SECRET_ID=${_env_secret:-${SECRET_ID:-}}
 PUBLIC_HOST=${_env_host:-${PUBLIC_HOST:-}}
 DOMAIN=${_env_domain:-${DOMAIN:-}}
 LE_EMAIL=${_env_le:-${LE_EMAIL:-}}
+PS_DEMO=${_env_psdemo:-${PS_DEMO:-true}}
 REPO_URL=${REPO_URL:-https://github.com/User123-dev1/mftapp.git}
 APP_DIR=$BASE/mftapp
 DATA_DIR=$BASE/data
@@ -66,7 +69,7 @@ NEW_SCRIPT=$APP_DIR/deploy/install.sh
 if [ -z "${ABELZETA_REEXEC:-}" ] && [ "$(sha256sum "$NEW_SCRIPT" | cut -d' ' -f1)" != "$SELF_SUM" ]; then
   log "The installer itself was updated - restarting with the new version"
   exec env ABELZETA_REEXEC=1 BRANCH="$BRANCH" SECRET_ID="$SECRET_ID" PUBLIC_HOST="$PUBLIC_HOST" \
-    DOMAIN="$DOMAIN" LE_EMAIL="$LE_EMAIL" REPO_URL="$REPO_URL" bash "$NEW_SCRIPT"
+    DOMAIN="$DOMAIN" LE_EMAIL="$LE_EMAIL" PS_DEMO="$PS_DEMO" REPO_URL="$REPO_URL" bash "$NEW_SCRIPT"
 fi
 
 # Instance metadata (IMDSv2)
@@ -119,6 +122,7 @@ if [ -n "$DOMAIN" ]; then
 else
   WHERE=(--host "$PUBLIC_HOST")
 fi
+[ "$PS_DEMO" = false ] && WHERE+=(--no-ps-demo)
 RESULT=$(python3 "$APP_DIR/deploy/configure.py" "${WHERE[@]}" --secrets "$SECRETS_FILE" --data-dir "$DATA_DIR")
 python3 -c '
 import json, sys
@@ -146,9 +150,10 @@ SECRET_ID=$SECRET_ID
 PUBLIC_HOST=$PUBLIC_HOST
 DOMAIN=$DOMAIN
 LE_EMAIL=$LE_EMAIL
+PS_DEMO=$PS_DEMO
 CONF
 
-mkdir -p "$DATA_DIR"/servicedesk "$DATA_DIR"/gmp "$DATA_DIR"/vault "$DATA_DIR"/phishguard
+mkdir -p "$DATA_DIR"/servicedesk "$DATA_DIR"/gmp "$DATA_DIR"/vault "$DATA_DIR"/phishguard "$DATA_DIR"/passwordstation
 chown -R 10001:10001 "$DATA_DIR"     # the apps run as uid 10001 inside their containers
 chmod 0750 "$DATA_DIR"
 
@@ -163,7 +168,7 @@ docker image prune -f >/dev/null
 CHECK_HOST=${DOMAIN:+portal.$DOMAIN}; CHECK_HOST=${CHECK_HOST:-$PUBLIC_HOST}
 sleep 5
 failed=0
-for port in 443 8443 8444 8445 8446; do
+for port in 443 8443 8444 8445 8446 8447; do
   [ -n "$DOMAIN" ] && [ "$port" != 443 ] && continue   # domain mode: one port, one name per app
   code=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$CHECK_HOST:$port:127.0.0.1" \
          "https://$CHECK_HOST:$port/" || true)

@@ -51,6 +51,12 @@ APPS = [
         "description": "Phishing, BEC and malware e-mail protection: test suspicious e-mails, quarantine and reports.",
         "category": "Security", "icon": "phishing", "color": "#dc2626", "owner": "IT Security",
     },
+    {
+        "id": "password-station", "port": 8447, "sub": "passwords", "upstream": "passwordstation:8200",
+        "health": "/health", "name": "Password Station",
+        "description": "Change your password, reset a forgotten one or unlock your account - GMP and business domains.",
+        "category": "Self-service", "icon": "password", "color": "#006ea1", "owner": "IT Support",
+    },
 ]
 
 REQUIRED_SECRETS = {
@@ -63,7 +69,18 @@ REQUIRED_SECRETS = {
     "PG_ADMIN_PASSWORD": lambda: strong_password(),
     # Signs PhishGuard's report / click-check links; must stay the same across restarts.
     "PG_SECRET_KEY": lambda: secrets.token_urlsafe(48),
+    "PS_ADMIN_PASSWORD": lambda: strong_password(),
+    # Password Station: signs sessions and one-time codes; AES-256 key for recovery contacts and
+    # directory service-account passwords. Never change PS_DATA_KEY once users have enrolled.
+    "PS_SECRET_KEY": lambda: secrets.token_urlsafe(48),
+    "PS_DATA_KEY": lambda: base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
 }
+
+
+# Optional Password Station settings: add these keys to the Secrets Manager secret and re-run
+# install.sh. They're copied into its env file as they are (codes by e-mail / SMS).
+PS_OPTIONAL = ["PS_SMTP_HOST", "PS_SMTP_PORT", "PS_SMTP_USER", "PS_SMTP_PASSWORD", "PS_SMTP_FROM",
+               "PS_SMTP_STARTTLS", "PS_SMS_PROVIDER", "PS_SMS_SENDER_ID", "PS_SUPPORT_CONTACT"]
 
 
 def strong_password(length: int = 20) -> str:
@@ -180,6 +197,22 @@ def env_files(sec: dict, urls: dict, args) -> dict[str, dict]:
             # Console-only trial: no Microsoft 365 connection and no AI until keys are added.
             "PG_LLM_ENABLED": "false",
         },
+        "passwordstation": {
+            "PS_ADMIN_PASSWORD": sec["PS_ADMIN_PASSWORD"],
+            "PS_SECRET_KEY": sec["PS_SECRET_KEY"],
+            "PS_DATA_KEY": sec["PS_DATA_KEY"],
+            "PS_BASE_URL": urls["password-station"],
+            "PS_SUPPORT_CONTACT": args.support_email,  # overridden by PS_SUPPORT_CONTACT in the secret
+            # Trial: built-in test domains, codes shown in Admin > Outbox. Real GMP / business AD
+            # domains are added in the admin console once the VPN to the domain controllers exists.
+            "PS_DEMO": "true" if args.ps_demo else "false",
+            "PS_DEMO_OUTBOX": "true" if args.ps_demo else "false",
+            **{k: sec[k] for k in PS_OPTIONAL if sec.get(k)},
+            # SMS: keys of an IAM user allowed only sns:Publish (containers can't use the server's role).
+            **({"AWS_ACCESS_KEY_ID": sec["PS_SNS_ACCESS_KEY_ID"], "AWS_SECRET_ACCESS_KEY": sec["PS_SNS_SECRET_ACCESS_KEY"],
+                "AWS_REGION": sec.get("PS_SNS_REGION") or "us-east-1"}
+               if sec.get("PS_SNS_ACCESS_KEY_ID") and sec.get("PS_SNS_SECRET_ACCESS_KEY") else {}),
+        },
     }
 
 
@@ -207,6 +240,8 @@ def main(argv=None) -> None:
     ap.add_argument("--support-email", default="servicedesk@abelzeta.com")
     ap.add_argument("--site-name", default="AbelZeta")
     ap.add_argument("--org-domains", default="abelzeta.com", help="PhishGuard: your own e-mail domains")
+    ap.add_argument("--ps-demo", default=True, action=argparse.BooleanOptionalAction,
+                    help="Password Station: built-in test domains, codes in Admin > Outbox (default on)")
     ap.add_argument("--data-dir", default="/opt/abelzeta/data")
     ap.add_argument("--out", type=Path, default=HERE)
     args = ap.parse_args(argv)

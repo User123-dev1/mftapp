@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>Password Station</h1>
+  <p>Manage the passwords for your GMP and business (Microsoft 365) accounts.</p>
+</section>
+<section class="tiles">
+  <a class="tile" href="/change"><strong>Change my password</strong><span>You know your current password and want a new one, or it has expired.</span></a>
+  <a class="tile" href="/forgot"><strong>I forgot my password</strong><span>Get a code on your registered phone or e-mail and set a new password.</span></a>
+  <a class="tile" href="/unlock"><strong>Unlock my account</strong><span>Locked out after too many attempts? Unlock it with a code.</span></a>
+  <a class="tile accent" href="/enroll"><strong>Set up recovery details</strong><span>Register a personal e-mail or mobile number now, so you can reset or unlock later.</span></a>
+</section>
+{% if not domains %}<div class="flash bad">No domains are configured yet. An administrator needs to add them.</div>{% endif %}
+{% endblock %}

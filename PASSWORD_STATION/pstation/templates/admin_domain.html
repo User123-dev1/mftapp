@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+{% set st = d.settings if d else {} %}
+<section class="card">
+  <p class="links"><a href="/admin">← Admin</a></p>
+  <h1>{{ 'Domain: ' ~ d.name if d else 'Add a domain' }}</h1>
+  {% if saved %}<div class="flash ok">Saved.</div>{% endif %}
+  {% if test %}<div class="flash {{ test[0] }}">Connection test: {{ test[1] }}</div>{% endif %}
+  <form method="post" action="/admin/domain" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="row">
+      <label>Key <input name="id" value="{{ d.id if d else '' }}" {{ 'readonly' if d }} required placeholder="gmp"></label>
+      <label>Name shown to users <input name="name" value="{{ d.name if d else '' }}" required placeholder="GMP domain"></label>
+      <label>Type <select name="kind">
+        <option value="ad" {{ 'selected' if not d or d.kind == 'ad' }}>Active Directory (LDAPS)</option>
+        <option value="demo" {{ 'selected' if d and d.kind == 'demo' }}>Demo (test accounts)</option></select></label>
+      <label>Order <input name="sort" value="{{ d.sort if d else 0 }}"></label>
+    </div>
+    <h2>Active Directory</h2>
+    <div class="row">
+      <label>Domain controllers (comma-separated) <input name="hosts" value="{{ (st.get('hosts') or [])|join(', ') }}" placeholder="dc1.gmp.local, dc2.gmp.local"></label>
+      <label>LDAPS port <input name="port" value="{{ st.get('port', 636) }}"></label>
+      <label>Base DN <input name="base_dn" value="{{ st.get('base_dn', '') }}" placeholder="DC=gmp,DC=local"></label>
+      <label>Users sign in with <select name="login_attribute">
+        <option value="sAMAccountName" {{ 'selected' if st.get('login_attribute', 'sAMAccountName') == 'sAMAccountName' }}>sAMAccountName (jdoe)</option>
+        <option value="userPrincipalName" {{ 'selected' if st.get('login_attribute') == 'userPrincipalName' }}>userPrincipalName (jdoe@domain)</option></select></label>
+    </div>
+    <div class="row">
+      <label>Service account (DN or UPN) <input name="bind_user" value="{{ st.get('bind_user', '') }}" placeholder="svc-pwstation@gmp.local"></label>
+      <label>Service account password <input type="password" name="bind_password" autocomplete="new-password" placeholder="{{ 'saved - leave blank to keep' if d and d.secret else '' }}"></label>
+    </div>
+    <label>Only allow members of this group (optional, nested membership counts) <input name="allowed_group_dn" value="{{ st.get('allowed_group_dn', '') }}" placeholder="CN=PasswordStation-Users,OU=Groups,DC=gmp,DC=local"></label>
+    <label>Extra protected groups (one DN per line) - never self-service, in addition to Domain Admins etc. and adminCount=1
+      <textarea name="protected_groups" rows="3">{{ (st.get('protected_groups') or [])|join('\n') }}</textarea></label>
+    <label>Internal CA certificate (PEM) for LDAPS, if the DCs use your own CA
+      <textarea name="ca_pem" rows="4" class="mono">{{ st.get('ca_pem', '') }}</textarea></label>
+    <h2>Policy shown to users</h2>
+    <div class="row">
+      <label>Minimum length <input name="min_length" value="{{ st.get('min_length', 12) }}"></label>
+      <label>Policy text (optional) <input name="policy_text" value="{{ st.get('policy_text', '') }}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if not d or d.enabled }}> Enabled</label>
+    <div class="actions"><button class="btn" name="action" value="save">Save</button>
+      <button class="btn secondary" name="action" value="test">Save &amp; test connection</button></div>
+  </form>
+</section>
+{% endblock %}

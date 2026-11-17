@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Recovery details · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Your recovery details</h1>
+  {% if saved %}<div class="flash ok">Saved. You can now use 'Forgot password' and 'Unlock my account'.</div>{% endif %}
+  <dl class="kv">
+    <dt>Personal e-mail</dt><dd>{{ summary.email or 'not set' }}</dd>
+    <dt>Mobile number</dt><dd>{{ summary.sms or 'not set' }}</dd>
+  </dl>
+  <form method="post" action="/enroll/contact" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <fieldset class="choice"><legend>Add or replace</legend>
+      <label class="check"><input type="radio" name="channel" value="email" checked> Personal e-mail</label>
+      {% if sms_enabled %}<label class="check"><input type="radio" name="channel" value="sms"> Mobile number (text message)</label>{% endif %}
+    </fieldset>
+    <label>E-mail address or mobile number <input name="contact" required placeholder="you@gmail.com or +1 555 123 4567"></label>
+    <p class="hint">Use something you can reach when you're locked out of work e-mail. We'll send a code to confirm it.</p>
+    <button class="btn">Send confirmation code</button>
+  </form>
+</section>
+{% endblock %}

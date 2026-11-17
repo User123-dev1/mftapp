@@ -10,6 +10,7 @@ One address for every internal app. This folder deploys the **portal** and the a
 | GMP Asset Manager | `https://<ip>:8444` | `https://assets.abelzeta.com` |
 | Password Vault (admin API) | `https://<ip>:8445/docs` | `https://vault.abelzeta.com/docs` |
 | PhishGuard (e-mail security console) | `https://<ip>:8446` | `https://phishguard.abelzeta.com` |
+| Password Station (change / reset / unlock) | `https://<ip>:8447` | `https://passwords.abelzeta.com` |
 | GMP asset naming tool | *to be added* | |
 
 ```
@@ -43,8 +44,10 @@ One address for every internal app. This folder deploys the **portal** and the a
 | GMP Asset Manager | `admin` | `GMP_ADMIN_PASSWORD` (you must change it at first login) |
 | Password Vault | `admin` | `SS_ADMIN_PASSWORD` |
 | PhishGuard | `admin` | `PG_ADMIN_PASSWORD` (you must change it at first login) |
+| Password Station (admin console: `/admin/login`) | `admin` | `PS_ADMIN_PASSWORD` |
 
-Change each password after signing in. Leave `SS_MASTER_KEY`, `SD_SECRET_KEY` and `PG_SECRET_KEY` alone.
+Change each password after signing in. Leave `SS_MASTER_KEY`, `SD_SECRET_KEY`, `PG_SECRET_KEY`,
+`PS_SECRET_KEY` and `PS_DATA_KEY` alone (`PS_DATA_KEY` decrypts users' registered recovery details).
 **`SS_MASTER_KEY` decrypts the vault: if it's lost, the vault's contents are lost**, including from
 backups. That's why the secret is kept even if you delete the stack.
 
@@ -101,12 +104,15 @@ cd /opt/abelzeta/mftapp/deploy
 sudo docker compose exec phishguard python reset_admin.py
 ```
 
+Password Station locks `admin` for 15 minutes after 5 wrong passwords. To unlock it at once:
+`sudo docker compose exec passwordstation python reset_admin.py`.
+
 When copying a password from Secrets Manager, use the **Plaintext** view and copy only what's
 between the quotes, so no stray spaces or quote marks come along.
 
 ## 3. Going live on abelzeta.com (when the trial is approved)
 
-1. In DNS, point `portal`, `servicedesk`, `assets` and `vault`.abelzeta.com (A records) at the
+1. In DNS, point `portal`, `servicedesk`, `assets`, `vault`, `phishguard` and `passwords`.abelzeta.com (A records) at the
    Elastic IP from the stack outputs.
 2. Allow ports **80 and 443** from the internet in the security group. Let's Encrypt must reach port
    80 to issue the certificates.
@@ -133,6 +139,31 @@ connected to any mailboxes, and AI analysis is off. To go further (in a pilot fi
 For now, these settings go in `deploy/env/phishguard.env` on the server. They're overwritten when
 `install.sh` runs, so ask for them to be added to `configure.py` before relying on them.
 
+## Password Station in this deployment
+
+The trial runs in **demo mode**: two built-in test domains ("GMP domain (demo)" and "Business - Entra
+ID / Microsoft 365 (demo)") with test users `jdoe` and `asmith`, password `Welcome-Demo-2026`
+(`da-admin` shows that privileged accounts are refused). Codes aren't sent; read them in
+**Admin → Outbox**. Try: Set up recovery details → Forgot password → Unlock.
+
+To connect the real GMP and business Active Directory domains (see `PASSWORD_STATION/README.md`):
+1. A site-to-site VPN from the VPC to the domain controllers (LDAPS, TCP 636).
+2. A service account in each domain with *Reset password* and *Write lockoutTime* on the user OUs only.
+3. Admin console → **Add domain** for each, then **Save & test connection**.
+4. Set up e-mail (SMTP) and/or SMS (Amazon SNS) for the codes, then turn demo mode off (remembered
+   for later runs): `sudo PS_DEMO=false bash /opt/abelzeta/mftapp/deploy/install.sh`
+
+**Codes by e-mail / SMS:** add these keys to the Secrets Manager secret, then re-run `install.sh`:
+- E-mail: `PS_SMTP_HOST`, `PS_SMTP_PORT` (587), `PS_SMTP_USER`, `PS_SMTP_PASSWORD`, `PS_SMTP_FROM`
+  (for Microsoft 365: `smtp.office365.com` and a licensed or SMTP-AUTH-enabled sender mailbox).
+- SMS (Amazon SNS): `PS_SMS_PROVIDER=sns`, `PS_SNS_REGION`, and `PS_SNS_ACCESS_KEY_ID` /
+  `PS_SNS_SECRET_ACCESS_KEY` of an IAM user whose only permission is `sns:Publish`. The containers
+  deliberately can't use the server's own role, because that role can read every app's secrets.
+  Move the SNS account out of the SMS sandbox first, or it can only text verified numbers.
+
+Business AD is synced to Entra ID by Entra Connect, so a password changed or reset here reaches
+Microsoft 365 through the normal sync (password hash sync: about 2 minutes).
+
 ## Files
 
 | File | Purpose |
@@ -140,7 +171,7 @@ For now, these settings go in `deploy/env/phishguard.env` on the server. They're
 | `aws/abelzeta-portal.yaml` | CloudFormation stack: server, Elastic IP, security group, secret, IAM role, snapshots |
 | `install.sh` | Installs / updates everything on the server (re-runnable) |
 | `configure.py` | Generates each app's settings, the HTTPS proxy config and the portal's app list |
-| `docker-compose.yml` | The containers: proxy, portal, servicedesk, gmp, vault |
+| `docker-compose.yml` | The containers: proxy, portal, servicedesk, gmp, vault, phishguard, passwordstation |
 
 Each app only receives its own secrets. Generated files (`.env`, `env/`, `Caddyfile`, `apps.json`)
 are never committed.
@@ -149,7 +180,7 @@ are never committed.
 
 1. Put the app in this repository with a `Dockerfile` (copy `GMP_ASSET_MANAGER/Dockerfile`).
 2. Add a service for it to `docker-compose.yml` with a data volume.
-3. Add an entry to `APPS` in `configure.py` (name, port 8446, subdomain, upstream, health path).
+3. Add an entry to `APPS` in `configure.py` (name, next free port e.g. 8448, subdomain, upstream, health path).
 4. Allow the new port in the security group, then run `install.sh`.
 
 If it's hosted somewhere else, only step 3 is needed (the portal just links to it).
