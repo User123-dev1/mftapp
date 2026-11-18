@@ -46,7 +46,8 @@ Resources:
   PortalSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: AbelZeta portal - HTTPS (portal 443, apps 8443-8447) from the allowed range only
+      # Keep this text unchanged: editing GroupDescription makes CloudFormation replace the group.
+      GroupDescription: AbelZeta portal - HTTPS (portal 443, apps 8443-8446) from the allowed range only
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr, Description: Portal }
         - { IpProtocol: tcp, FromPort: 8443, ToPort: 8447, CidrIp: !Ref AllowedCidr, Description: Apps }
