@@ -17,5 +17,6 @@
     <ProjectReference Include="..\..\src\Whmi.Core\Whmi.Core.csproj" />
     <ProjectReference Include="..\..\src\Whmi.Link\Whmi.Link.csproj" />
     <ProjectReference Include="..\..\src\Whmi.Studio\Whmi.Studio.csproj" />
+    <ProjectReference Include="..\..\src\Whmi.Runtime\Whmi.Runtime.csproj" />
   </ItemGroup>
 </Project>

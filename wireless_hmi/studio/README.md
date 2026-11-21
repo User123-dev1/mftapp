@@ -7,7 +7,10 @@ Engineering software for WHMI projects. It runs on Windows, Linux and macOS.
 | `src/Whmi.Core` | Project model, validation and build. Produces **byte-identical** compiled projects to the Python tools (tested). |
 | `src/Whmi.Link` | WHMI-Link client: mutual HMAC auth, AES-256-GCM, download/upload/read/write/subscribe |
 | `src/Whmi.Studio` | Avalonia desktop app (MVVM with CommunityToolkit.Mvvm) |
-| `tests/Whmi.Tests` | xUnit: core rules, Python parity, C# client ↔ real Python receiver, headless UI tests with screenshots |
+| `src/Whmi.Runtime` | Panel engine: connect, project sync, live tag cache, writes, momentary push-buttons, reconnect |
+| `src/Whmi.Panel` | **WHMI Panel**: the operator app for Windows tablets and panel PCs |
+| `tests/Whmi.Tests` | xUnit: core rules, Python parity, C# client and runtime ↔ real Python receiver, Studio UI tests |
+| `tests/Whmi.Panel.Tests` | Panel UI tests: touch input, keypad, comm loss and recovery, PIN, screenshots |
 
 ## What Studio does
 
@@ -48,3 +51,34 @@ whmi receiver run --config ./rx-data/receiver.json
 
 In Studio, go to **Online** and set Host `127.0.0.1`, Client ID `studio` and Key file `rx-data/studio.key`. Then
 **Connect**, **Download to receiver** and **Monitor tags**.
+
+## WHMI Panel (Windows tablet / panel PC)
+
+The operator app. It renders the screens designed in Studio as working touch controls.
+
+* **Status bar:** receiver and link state, current screen, WiFi signal, battery, clock and settings.
+* **Push-buttons:** momentary buttons are re-sent while held and released on lift, when the finger slides off,
+  when the window loses focus, or when the screen changes. If WiFi drops, the receiver releases them itself.
+* **Communication lost:** a full-screen overlay blocks input. Values show `---` and are never shown as live.
+  The panel reconnects automatically.
+* **On-screen keypad** for setpoints, checked against the tag's limits before writing (the receiver checks again).
+* **Low-battery warning**, and the last project is cached so screens appear instantly at start-up.
+
+### Install on the tablet
+1. Copy `WhmiPanel.exe` to the tablet (it's a self-contained build, so no .NET install is needed).
+2. Join the tablet to the receiver's WiFi.
+3. Start WHMI Panel. On first run it opens **Settings**. Enter the receiver address and port, and **Import key file…**
+   (e.g. `panel1.key` from `whmi receiver init`; the panel ID is taken from the file name).
+   On Windows the key is stored encrypted with DPAPI.
+4. Optional: set a **PIN**, and turn on **Kiosk mode**. Kiosk mode is full screen and always on top; the app can then
+   only be closed from Settings.
+5. Auto-start: put a shortcut to `WhmiPanel.exe` in `shell:startup`. For full lock-down on Windows 11 Pro / IoT Enterprise,
+   use **Settings → Accounts → Other users → Set up a kiosk** (Assigned Access) with WhmiPanel.exe.
+
+```bash
+dotnet run --project src/Whmi.Panel          # on a development PC
+dotnet publish src/Whmi.Panel -c Release -r win-x64 --self-contained -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true -o publish/panel-win-x64
+```
+
+Settings live in `%LOCALAPPDATA%\WhmiPanel` (override with `WHMI_PANEL_HOME`).

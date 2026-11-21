@@ -1,0 +1,131 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Panel.ViewModels"
+             xmlns:c="using:Whmi.Panel.Controls"
+             x:Class="Whmi.Panel.App"
+             RequestedThemeVariant="Dark">
+  <!-- One template per widget type. Every root is sized to the widget's W x H. -->
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:LabelWidgetViewModel">
+      <Panel Width="{Binding W}" Height="{Binding H}">
+        <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}" FontSize="{Binding FontSize}" FontWeight="SemiBold"
+                   VerticalAlignment="Center" TextWrapping="Wrap" />
+      </Panel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:RectangleWidgetViewModel">
+      <Border Width="{Binding W}" Height="{Binding H}" Background="{Binding Fill}" CornerRadius="6" />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:IndicatorWidgetViewModel">
+      <Border Width="{Binding W}" Height="{Binding H}" Background="{Binding Fill}" CornerRadius="8" Opacity="{Binding Opacity}"
+              BorderBrush="#40FFFFFF" BorderThickness="1">
+        <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="6,2">
+          <TextBlock Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="Bold" Foreground="White" TextAlignment="Center" />
+        </Viewbox>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:DisplayWidgetViewModel">
+      <Border Width="{Binding W}" Height="{Binding H}" Background="#0E0E0E" BorderBrush="#3C3C3C" BorderThickness="1" CornerRadius="6"
+              Padding="10,4" Opacity="{Binding Opacity}">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Text="{Binding Caption}" IsVisible="{Binding HasCaption}" FontSize="12" Opacity="0.6" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Row="1" Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="SemiBold" Foreground="#7FDBFF"
+                     HorizontalAlignment="Right" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:BarWidgetViewModel">
+      <Border Width="{Binding W}" Height="{Binding H}" Background="#151515" BorderBrush="#3C3C3C" BorderThickness="1" CornerRadius="6"
+              Opacity="{Binding Opacity}" ClipToBounds="True">
+        <Panel>
+          <Border Height="{Binding FillHeight}" VerticalAlignment="Bottom" Background="#2E7DD7" CornerRadius="0,0,5,5" Margin="1" />
+          <TextBlock Text="{Binding Text}" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,6,0,0" />
+        </Panel>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:GaugeWidgetViewModel">
+      <Panel Width="{Binding W}" Height="{Binding H}" Opacity="{Binding Opacity}">
+        <Arc Width="{Binding Size}" Height="{Binding Size}" StartAngle="135" SweepAngle="270" Stroke="#333333" StrokeThickness="12" />
+        <Arc Width="{Binding Size}" Height="{Binding Size}" StartAngle="135" SweepAngle="{Binding Sweep}" Stroke="#2E7DD7" StrokeThickness="12" />
+        <TextBlock Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Panel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TrendWidgetViewModel">
+      <Border Width="{Binding W}" Height="{Binding H}" Background="#0E0E0E" BorderBrush="#3C3C3C" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+        <Panel>
+          <Polyline Points="{Binding Points}" Stroke="#2E7DD7" StrokeThickness="2" />
+          <TextBlock Text="{Binding Text}" FontSize="13" HorizontalAlignment="Right" Margin="8,4" Opacity="{Binding Opacity}" />
+        </Panel>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ButtonWidgetViewModel">
+      <c:TouchArea Width="{Binding W}" Height="{Binding H}" Background="{Binding Fill}" CornerRadius="10"
+                   BorderBrush="#50FFFFFF" BorderThickness="1" Opacity="{Binding EnabledOpacity}" ClipToBounds="True">
+        <Panel>
+          <Border Background="White" Opacity="0.25" IsVisible="{Binding ShowActive}" />
+          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="8,2">
+            <TextBlock Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="Bold" Foreground="White" TextAlignment="Center" />
+          </Viewbox>
+          <Border Background="Black" Opacity="{Binding PressOpacity}" />
+        </Panel>
+      </c:TouchArea>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ToggleWidgetViewModel">
+      <c:TouchArea Width="{Binding W}" Height="{Binding H}" Background="{Binding Fill}" CornerRadius="10"
+                   BorderBrush="#50FFFFFF" BorderThickness="1" Opacity="{Binding EnabledOpacity}">
+        <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="8,2">
+          <StackPanel>
+            <TextBlock Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding StateText}" FontSize="13" Foreground="White" Opacity="0.8" HorizontalAlignment="Center" />
+          </StackPanel>
+        </Viewbox>
+      </c:TouchArea>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:EntryWidgetViewModel">
+      <c:TouchArea Width="{Binding W}" Height="{Binding H}" Background="#ECECEC" CornerRadius="6" BorderBrush="#2E7DD7" BorderThickness="2"
+                   Padding="10,0" Opacity="{Binding EnabledOpacity}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding Text}" FontSize="{Binding FontSize}" FontWeight="SemiBold" Foreground="#111111"
+                     HorizontalAlignment="Right" VerticalAlignment="Center" Opacity="{Binding Opacity}" />
+          <TextBlock Grid.Column="1" Text="✎" Foreground="#2E7DD7" FontSize="16" VerticalAlignment="Center" Margin="8,0,0,0" />
+        </Grid>
+      </c:TouchArea>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:GotoWidgetViewModel">
+      <c:TouchArea Width="{Binding W}" Height="{Binding H}" Background="{Binding Fill}" CornerRadius="10" BorderBrush="#50FFFFFF" BorderThickness="1">
+        <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="8,2">
+          <TextBlock Text="{Binding Text, StringFormat='→ {0}'}" FontSize="{Binding FontSize}" FontWeight="SemiBold" Foreground="White" />
+        </Viewbox>
+      </c:TouchArea>
+    </DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Button.key">
+      <Setter Property="Width" Value="84" />
+      <Setter Property="Height" Value="64" />
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Margin" Value="4" />
+    </Style>
+    <Style Selector="Button.big">
+      <Setter Property="MinWidth" Value="140" />
+      <Setter Property="Height" Value="56" />
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Margin" Value="6" />
+    </Style>
+  </Application.Styles>
+</Application>

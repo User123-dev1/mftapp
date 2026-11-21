@@ -183,6 +183,7 @@ public class StudioWindowTests
     internal static void Snap(MainWindow window, string name)
     {
         Dispatcher.UIThread.RunJobs();
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick(); // otherwise the previous frame is returned
         var frame = window.CaptureRenderedFrame();
         Assert.NotNull(frame);
         Directory.CreateDirectory(ScreenshotDir);

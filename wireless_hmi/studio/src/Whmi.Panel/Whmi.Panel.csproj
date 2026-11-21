@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Whmi.Panel</RootNamespace>
+    <AssemblyName>WhmiPanel</AssemblyName>
+    <Description>WHMI Panel: the operator runtime for Windows tablets and panel PCs</Description>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Whmi.Core\Whmi.Core.csproj" />
+    <ProjectReference Include="..\Whmi.Link\Whmi.Link.csproj" />
+    <ProjectReference Include="..\Whmi.Runtime\Whmi.Runtime.csproj" />
+  </ItemGroup>
+</Project>

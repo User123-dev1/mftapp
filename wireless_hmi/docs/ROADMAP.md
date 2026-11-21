@@ -34,11 +34,14 @@ Each phase ends with something that runs and is covered by automated tests.
 - [ ] Simulation mode (run the panel runtime against an in-process receiver)
 - [ ] Code-signed Windows installer (MSIX)
 
-## Phase 3: Panel UI
+## Phase 3: Panel UI (Windows tablet) ✅ first release
 
-- Screen renderer for all widget types; touch-optimised; numeric keypad; screen navigation
-- Per-screen subscriptions (subscribe only to what is visible)
-- Status bar: link quality (RSSI), receiver, PLC state; full-screen "COMMUNICATION LOST" overlay
+- [x] C# runtime engine (`Whmi.Runtime`) and WHMI Panel app for Windows tablets / panel PCs
+- [x] Screen renderer for all widget types; touch-optimised; numeric keypad; screen navigation
+- [x] Momentary buttons released on lift, slide-off, focus loss and screen change
+- [x] Status bar: link state, WiFi signal, battery; full-screen "COMMUNICATION LOST" overlay; low-battery warning
+- [x] Pairing with DPAPI-protected key, PIN-protected settings, kiosk mode, offline project cache
+- [ ] Per-screen subscriptions (subscribe only to what is visible)
 - Security: operator login with access levels per widget; audit log of writes (who/when/old/new)
 - Alarms: digital/analog alarm definitions in the project, alarm banner, history, acknowledgement
 - Trends: receiver-side ring buffer, historical trend widget

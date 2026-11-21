@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Panel.ViewModels"
+             x:Class="Whmi.Panel.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel"
+             Background="#141414">
+  <ScrollViewer>
+    <StackPanel Margin="32,24" Spacing="14" MaxWidth="720" HorizontalAlignment="Left">
+      <TextBlock Text="Panel settings" FontSize="28" FontWeight="SemiBold" />
+      <TextBlock Text="Pair this panel with a WHMI receiver. The panel ID and key come from the receiver (whmi receiver init creates e.g. panel1.key)."
+                 TextWrapping="Wrap" Opacity="0.7" />
+      <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+        <TextBlock Text="Receiver address" VerticalAlignment="Center" FontSize="16" />
+        <TextBox Grid.Column="1" Text="{Binding Host}" FontSize="18" />
+        <TextBlock Grid.Row="1" Text="Port" VerticalAlignment="Center" FontSize="16" />
+        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Port}" Minimum="1" Maximum="65535" FormatString="0" FontSize="18" />
+        <TextBlock Grid.Row="2" Text="Panel ID" VerticalAlignment="Center" FontSize="16" />
+        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ClientId}" FontSize="18" />
+        <TextBlock Grid.Row="3" Text="Panel key" VerticalAlignment="Center" FontSize="16" />
+        <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox Text="{Binding KeyHex}" PasswordChar="•" FontSize="18" Watermark="64 hex characters" />
+          <Button Grid.Column="1" Content="Import key file…" Click="OnImportKey" Padding="14,8" />
+        </Grid>
+        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding KeyStatus}" Opacity="0.7" />
+      </Grid>
+      <TextBlock Text="Display &amp; security" FontSize="20" FontWeight="SemiBold" Margin="0,10,0,0" />
+      <CheckBox Content="Full screen" IsChecked="{Binding Fullscreen}" FontSize="16" />
+      <CheckBox Content="Kiosk mode (full screen, always on top, exit only from here)" IsChecked="{Binding Kiosk}" FontSize="16" />
+      <Grid ColumnDefinitions="200,200">
+        <TextBlock Text="Settings PIN" VerticalAlignment="Center" FontSize="16" />
+        <TextBox Grid.Column="1" Text="{Binding Pin}" PasswordChar="•" FontSize="18" Watermark="none" />
+      </Grid>
+      <TextBlock Text="{Binding Error}" Foreground="#FF6B6B" FontWeight="SemiBold" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal">
+        <Button Classes="big" Content="Save &amp; connect" Command="{Binding SaveCommand}" Background="#2E7DD7" />
+        <Button Classes="big" Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
+        <Button Classes="big" Content="Exit WHMI Panel" Command="{Binding ExitCommand}" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

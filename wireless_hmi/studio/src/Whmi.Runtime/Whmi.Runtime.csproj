@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Whmi.Runtime</RootNamespace>
+    <Description>WHMI panel runtime engine: link, project sync, tag cache, writes, momentary buttons</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Whmi.Core\Whmi.Core.csproj" />
+    <ProjectReference Include="..\Whmi.Link\Whmi.Link.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,128 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Whmi.Panel.ViewModels"
+        xmlns:views="using:Whmi.Panel.Views"
+        x:Class="Whmi.Panel.Views.MainWindow"
+        x:DataType="vm:PanelViewModel"
+        Title="WHMI Panel" Width="1280" Height="800" Background="Black"
+        WindowStartupLocation="CenterScreen">
+  <Grid RowDefinitions="48,*">
+    <!-- status bar: always reachable, even when communication is lost -->
+    <Border Background="#101010" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="12,0">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <Ellipse Width="14" Height="14" Fill="{Binding StateBrush}" />
+          <TextBlock Text="{Binding ReceiverText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StateText}" Opacity="0.75" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Grid.Column="1" Text="{Binding ScreenName}" FontSize="18" FontWeight="SemiBold"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="18" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasWifi}" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Bottom">
+              <Rectangle Width="4" Height="6" Fill="White" Opacity="{Binding Bar1}" VerticalAlignment="Bottom" />
+              <Rectangle Width="4" Height="10" Fill="White" Opacity="{Binding Bar2}" VerticalAlignment="Bottom" />
+              <Rectangle Width="4" Height="14" Fill="White" Opacity="{Binding Bar3}" VerticalAlignment="Bottom" />
+              <Rectangle Width="4" Height="18" Fill="White" Opacity="{Binding Bar4}" VerticalAlignment="Bottom" />
+            </StackPanel>
+            <TextBlock Text="{Binding WifiText}" VerticalAlignment="Center" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasBattery}" VerticalAlignment="Center">
+            <Border Width="28" Height="14" BorderBrush="White" BorderThickness="1.5" CornerRadius="2" Padding="1">
+              <Border Width="{Binding BatteryFillWidth}" HorizontalAlignment="Left" Background="{Binding BatteryBrush}" CornerRadius="1" />
+            </Border>
+            <TextBlock Text="{Binding BatteryText}" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock Text="{Binding Clock}" FontSize="16" VerticalAlignment="Center" />
+          <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Padding="12,6" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Panel Grid.Row="1">
+      <!-- the project screen, scaled to fit the display -->
+      <Viewbox Stretch="Uniform" IsVisible="{Binding HasScreen}">
+        <Panel Width="{Binding CurrentScreen.Width, FallbackValue=1024}" Height="{Binding CurrentScreen.Height, FallbackValue=600}"
+               Background="{Binding CurrentScreen.Background, FallbackValue=Black}" ClipToBounds="True">
+          <ItemsControl x:Name="ScreenItems" ItemsSource="{Binding CurrentScreen.Widgets}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.Styles>
+              <Style Selector="ItemsControl#ScreenItems ContentPresenter" x:DataType="vm:WidgetViewModel">
+                <Setter Property="Canvas.Left" Value="{Binding X}" />
+                <Setter Property="Canvas.Top" Value="{Binding Y}" />
+              </Style>
+            </ItemsControl.Styles>
+          </ItemsControl>
+        </Panel>
+      </Viewbox>
+
+      <Border IsVisible="{Binding LowBattery}" Background="#E0C62828" VerticalAlignment="Top" Padding="10">
+        <TextBlock Text="LOW BATTERY: connect the charger. The machine will stop safely if the panel shuts down."
+                   HorizontalAlignment="Center" FontWeight="SemiBold" />
+      </Border>
+
+      <Border IsVisible="{Binding HasToast}" Background="#E0303030" CornerRadius="8" Padding="18,10" Margin="0,0,0,24"
+              HorizontalAlignment="Center" VerticalAlignment="Bottom" BorderBrush="#C62828" BorderThickness="1">
+        <TextBlock Text="{Binding Toast}" FontSize="16" />
+      </Border>
+
+      <!-- communication lost: blocks all input to the screen -->
+      <Border IsVisible="{Binding ShowCommLost}" Background="#D8200000">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="760">
+          <TextBlock Text="{Binding CommLostTitle}" FontSize="44" FontWeight="Bold" Foreground="#FF6B6B" HorizontalAlignment="Center" />
+          <TextBlock Text="{Binding CommLostDetail}" FontSize="18" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" />
+          <TextBlock Text="Outputs held by this panel have been released. Values shown are not live." Opacity="0.7"
+                     TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" />
+          <ProgressBar IsIndeterminate="True" Width="320" />
+        </StackPanel>
+      </Border>
+
+      <!-- keypad (numeric entry, text entry, PIN) -->
+      <Border IsVisible="{Binding Keypad, Converter={x:Static ObjectConverters.IsNotNull}}" Background="#B0000000">
+        <Border Background="#1C1C1C" CornerRadius="12" Padding="20" BorderBrush="#3A3A3A" BorderThickness="1"
+                HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{Binding Keypad.Title}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Keypad.Hint}" Opacity="0.7" />
+            <Border Background="#0E0E0E" CornerRadius="6" Padding="12,8" IsVisible="{Binding Keypad.IsNumeric}">
+              <TextBlock Text="{Binding Keypad.Display}" FontSize="32" HorizontalAlignment="Right" MinHeight="40" />
+            </Border>
+            <TextBox Text="{Binding Keypad.Entry}" FontSize="22" IsVisible="{Binding Keypad.IsText, FallbackValue=False}" />
+            <TextBlock Text="{Binding Keypad.Error}" Foreground="#FF6B6B" FontWeight="SemiBold" />
+            <UniformGrid Columns="4" IsVisible="{Binding Keypad.IsNumeric}" HorizontalAlignment="Center">
+              <Button Classes="key" Content="7" Command="{Binding Keypad.KeyCommand}" CommandParameter="7" />
+              <Button Classes="key" Content="8" Command="{Binding Keypad.KeyCommand}" CommandParameter="8" />
+              <Button Classes="key" Content="9" Command="{Binding Keypad.KeyCommand}" CommandParameter="9" />
+              <Button Classes="key" Content="⌫" Command="{Binding Keypad.BackspaceCommand}" />
+              <Button Classes="key" Content="4" Command="{Binding Keypad.KeyCommand}" CommandParameter="4" />
+              <Button Classes="key" Content="5" Command="{Binding Keypad.KeyCommand}" CommandParameter="5" />
+              <Button Classes="key" Content="6" Command="{Binding Keypad.KeyCommand}" CommandParameter="6" />
+              <Button Classes="key" Content="C" Command="{Binding Keypad.ClearCommand}" />
+              <Button Classes="key" Content="1" Command="{Binding Keypad.KeyCommand}" CommandParameter="1" />
+              <Button Classes="key" Content="2" Command="{Binding Keypad.KeyCommand}" CommandParameter="2" />
+              <Button Classes="key" Content="3" Command="{Binding Keypad.KeyCommand}" CommandParameter="3" />
+              <Button Classes="key" Content="±" Command="{Binding Keypad.NegateCommand}" />
+              <Button Classes="key" Content="0" Command="{Binding Keypad.KeyCommand}" CommandParameter="0" />
+              <Button Classes="key" Content="." Command="{Binding Keypad.KeyCommand}" CommandParameter="." />
+            </UniformGrid>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Classes="big" Content="Cancel" Command="{Binding Keypad.CancelCommand}" />
+              <Button Classes="big" Content="OK" Command="{Binding Keypad.OkCommand}" Background="#2E7DD7" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Border>
+    </Panel>
+
+    <!-- settings page covers everything except the status bar -->
+    <ContentControl Grid.Row="1" Content="{Binding SettingsPage}" IsVisible="{Binding SettingsPage, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <ContentControl.DataTemplates>
+        <DataTemplate DataType="vm:SettingsViewModel">
+          <views:SettingsView />
+        </DataTemplate>
+      </ContentControl.DataTemplates>
+    </ContentControl>
+  </Grid>
+</Window>
