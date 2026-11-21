@@ -6,7 +6,8 @@ A wireless touchscreen HMI system made of three parts:
 * **WHMI Receiver**: a DIN-rail I/O receiver with local I/O slots and a WiFi radio. Its **Ethernet port talks to
   Rockwell ControlLogix/CompactLogix PLCs** over EtherNet/IP.
 * **WHMI Studio**: engineering software for building HMI projects (tags, I/O, PLC connections, screens) and
-  downloading them. The `whmi` CLI in this repository is Studio's backend. The C# GUI is Phase 2.
+  downloading them. It's a C# / Avalonia desktop app in [`studio/`](studio/README.md); the `whmi` CLI does the
+  same work from a terminal.
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first, then [docs/PROTOCOL.md](docs/PROTOCOL.md),
 [docs/HARDWARE.md](docs/HARDWARE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).

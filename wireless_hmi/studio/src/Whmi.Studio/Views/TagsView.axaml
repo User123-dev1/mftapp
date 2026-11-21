@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             x:Class="Whmi.Studio.Views.TagsView"
+             x:DataType="vm:TagsViewModel">
+  <DockPanel>
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Classes="h1" Text="Tag database" Margin="0,0,16,0" VerticalAlignment="Center" />
+        <Button Classes="toolbar" Content="+ Add tag" Command="{Binding AddCommand}" />
+        <Button Classes="toolbar" Content="Duplicate" Command="{Binding DuplicateCommand}" />
+        <Button Classes="toolbar" Content="Delete" Command="{Binding DeleteCommand}" />
+        <Button Classes="toolbar" Content="Import CSV…" Command="{Binding ImportCsvCommand}" />
+        <Button Classes="toolbar" Content="Export CSV…" Command="{Binding ExportCsvCommand}" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+        <TextBlock Text="{Binding CountText}" VerticalAlignment="Center" Opacity="0.7" />
+        <TextBox Text="{Binding Filter}" Watermark="Filter by name, address, description" Width="280" />
+      </StackPanel>
+    </Grid>
+
+    <DataGrid x:Name="Grid" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
+              AutoGenerateColumns="False" CanUserSortColumns="False" CanUserReorderColumns="True"
+              GridLinesVisibility="All" FrozenColumnCount="1" RowHeight="32">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Name" Binding="{Binding Name}" x:DataType="vm:TagRow" Width="210" />
+        <DataGridTextColumn Tag="live" Header="Live value" Binding="{Binding LiveValue}" x:DataType="vm:TagRow" IsReadOnly="True" Width="110" IsVisible="False" />
+        <DataGridTextColumn Tag="live" Header="Quality" Binding="{Binding LiveQuality}" x:DataType="vm:TagRow" IsReadOnly="True" Width="100" IsVisible="False" />
+        <DataGridTemplateColumn Header="Type" Width="100">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:TagRow">
+              <ComboBox ItemsSource="{x:Static vm:Lists.DataTypes}" SelectedItem="{Binding DataType}" HorizontalAlignment="Stretch" BorderThickness="0" Background="Transparent" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="Source" Width="105">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:TagRow">
+              <ComboBox ItemsSource="{x:Static vm:Lists.Sources}" SelectedItem="{Binding Source}" HorizontalAlignment="Stretch" BorderThickness="0" Background="Transparent" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="PLC" Width="95">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:TagRow">
+              <ComboBox ItemsSource="{Binding $parent[DataGrid].((vm:TagsViewModel)DataContext).ConnectionNames}"
+                        SelectedItem="{Binding Connection}" HorizontalAlignment="Stretch" BorderThickness="0" Background="Transparent" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Address" Binding="{Binding Address}" x:DataType="vm:TagRow" Width="200" />
+        <DataGridTemplateColumn Header="Access" Width="120">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:TagRow">
+              <ComboBox ItemsSource="{x:Static vm:Lists.Accesses}" SelectedItem="{Binding Access}" HorizontalAlignment="Stretch" BorderThickness="0" Background="Transparent" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Units" Binding="{Binding Units}" x:DataType="vm:TagRow" Width="75" />
+        <DataGridTextColumn Header="Min" Binding="{Binding MinText}" x:DataType="vm:TagRow" Width="75" />
+        <DataGridTextColumn Header="Max" Binding="{Binding MaxText}" x:DataType="vm:TagRow" Width="75" />
+        <DataGridTextColumn Header="Deadband" Binding="{Binding DeadbandText}" x:DataType="vm:TagRow" Width="100" />
+        <DataGridTextColumn Header="Scaling raw→eng" Binding="{Binding ScalingText}" x:DataType="vm:TagRow" Width="160" />
+        <DataGridTextColumn Header="Initial" Binding="{Binding InitialText}" x:DataType="vm:TagRow" Width="80" />
+        <DataGridCheckBoxColumn Header="Momentary" Binding="{Binding Momentary}" x:DataType="vm:TagRow" Width="95" />
+        <DataGridTextColumn Header="Fail-safe" Binding="{Binding FailsafeText}" x:DataType="vm:TagRow" Width="90" />
+        <DataGridCheckBoxColumn Header="Retentive" Binding="{Binding Retentive}" x:DataType="vm:TagRow" Width="85" />
+        <DataGridCheckBoxColumn Header="Safety" Binding="{Binding Safety}" x:DataType="vm:TagRow" Width="70" />
+        <DataGridTextColumn Header="Description" Binding="{Binding Description}" x:DataType="vm:TagRow" Width="*" MinWidth="160" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

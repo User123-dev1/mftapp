@@ -18,19 +18,20 @@ Each phase ends with something that runs and is covered by automated tests.
 - [x] `whmi` CLI: new / validate / build / tags / keygen / receiver init+run / download / read / write / monitor / info
 - [x] Test suite (91 tests): codec, crypto attacks, end-to-end receiver ↔ panel, CLI against a real process
 
-## Phase 2: WHMI Studio (C#)
+## Phase 2: WHMI Studio (C#, Avalonia) ✅ first release
 
-**Needs:** `dot.net`, `builds.dotnet.microsoft.com`, `api.nuget.org` allowed in the dev environment.
-
-- `Whmi.Core` (.NET 8 class library): C# port of the project model and builder. Must produce
-  byte-identical compiled projects (shared golden test vectors with the Python suite).
-- `Whmi.Link`: C# WHMI-Link client (System.Security.Cryptography `AesGcm`, `HMACSHA256`, `HKDF`)
-- `Whmi.Studio` (WPF on Windows): project explorer, tag database grid (import/export CSV,
-  import tags from an L5X export or directly from the online controller), I/O slot configurator,
-  PLC connection editor with "Test connection", and a drag-and-drop screen designer with a
-  property grid and live validation
-- Download / upload / compare-with-receiver, online monitoring of tags
-- Simulation mode: runs the runtime against an in-process simulated receiver
+- [x] `Whmi.Core`: C# port of the project model, validation and builder. Produces **byte-identical**
+      compiled projects to the Python tools (checked by a test).
+- [x] `Whmi.Link`: C# WHMI-Link client, tested against the real Python receiver
+- [x] `Whmi.Studio` (Avalonia, cross-platform): project & I/O slots, PLC connections, tag database grid with
+      CSV import/export, drag-and-drop screen designer with properties panel, live validation with
+      click-to-navigate problems
+- [x] Online: connect, download (with confirmation), upload, compare-with-receiver, live tag monitoring, test writes
+- [x] 59 C# tests incl. headless UI tests that render screenshots
+- [ ] Import tags from a Logix L5X export / browse tags of the online controller
+- [ ] Undo/redo, copy/paste between screens, alignment tools, multi-select
+- [ ] Simulation mode (run the panel runtime against an in-process receiver)
+- [ ] Code-signed Windows installer (MSIX)
 
 ## Phase 3: Panel UI
 

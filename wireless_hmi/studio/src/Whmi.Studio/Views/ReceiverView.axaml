@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             x:Class="Whmi.Studio.Views.ReceiverView"
+             x:DataType="vm:ReceiverViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="18" MaxWidth="980" HorizontalAlignment="Left">
+      <StackPanel>
+        <TextBlock Classes="h1" Text="Project" />
+        <Grid ColumnDefinitions="140,360" RowDefinitions="Auto,Auto" RowSpacing="8">
+          <TextBlock Classes="label" Text="Name" />
+          <TextBox Grid.Column="1" Text="{Binding Project.Name}" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Description" />
+          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Project.Description}" AcceptsReturn="True" Height="60" TextWrapping="Wrap" />
+        </Grid>
+      </StackPanel>
+
+      <StackPanel>
+        <TextBlock Classes="h1" Text="Receiver" />
+        <Grid ColumnDefinitions="140,160,40,200,160" RowDefinitions="Auto,Auto" RowSpacing="8">
+          <TextBlock Classes="label" Text="Receiver name" />
+          <TextBox Grid.Column="1" Text="{Binding Receiver.Name}" />
+          <TextBlock Grid.Column="3" Classes="label" Text="I/O scan (ms)" />
+          <NumericUpDown Grid.Column="4" Value="{Binding Receiver.ScanMs}" Minimum="1" Maximum="1000" FormatString="0" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Heartbeat (ms)" />
+          <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Receiver.HeartbeatMs}" Minimum="50" Maximum="5000" Increment="50" FormatString="0" />
+          <TextBlock Grid.Row="1" Grid.Column="3" Classes="label" Text="Link watchdog (ms)" />
+          <NumericUpDown Grid.Row="1" Grid.Column="4" Value="{Binding Receiver.WatchdogMs}" Minimum="100" Maximum="30000" Increment="100" FormatString="0" />
+        </Grid>
+        <TextBlock Classes="hint" Margin="0,8,0,0"
+                   Text="When a panel is silent for longer than the watchdog, the receiver drops its session, releases its push-buttons and applies fail-safe values." />
+      </StackPanel>
+
+      <StackPanel>
+        <TextBlock Classes="h1" Text="I/O slots" />
+        <ItemsControl ItemsSource="{Binding Slots}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:SlotRow">
+              <Grid ColumnDefinitions="70,140,230,*" Margin="0,2">
+                <TextBlock Classes="label" Text="{Binding Label}" />
+                <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:Lists.SlotChoices}" SelectedItem="{Binding Choice}" HorizontalAlignment="Stretch" />
+                <TextBlock Grid.Column="2" Text="{Binding Points}" FontFamily="monospace" Opacity="0.8" VerticalAlignment="Center" Margin="12,0" />
+                <TextBlock Grid.Column="3" Text="{Binding Description}" Opacity="0.7" VerticalAlignment="Center" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

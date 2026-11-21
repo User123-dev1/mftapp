@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Whmi.Core</RootNamespace>
+    <Description>WHMI project model, validation and build</Description>
+  </PropertyGroup>
+</Project>

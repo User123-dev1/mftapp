@@ -1,0 +1,35 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             xmlns:views="using:Whmi.Studio.Views"
+             x:Class="Whmi.Studio.App"
+             RequestedThemeVariant="Dark">
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:ReceiverViewModel"><views:ReceiverView /></DataTemplate>
+    <DataTemplate DataType="vm:ConnectionsViewModel"><views:ConnectionsView /></DataTemplate>
+    <DataTemplate DataType="vm:TagsViewModel"><views:TagsView /></DataTemplate>
+    <DataTemplate DataType="vm:ScreensViewModel"><views:ScreensView /></DataTemplate>
+    <DataTemplate DataType="vm:OnlineViewModel"><views:OnlineView /></DataTemplate>
+  </Application.DataTemplates>
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="TextBlock.hint">
+      <Setter Property="Opacity" Value="0.65" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+    <Style Selector="Button.toolbar">
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Padding" Value="10,4" />
+    </Style>
+  </Application.Styles>
+</Application>

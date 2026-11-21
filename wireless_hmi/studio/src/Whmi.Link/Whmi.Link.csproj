@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Whmi.Link</RootNamespace>
+    <Description>WHMI-Link protocol client</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Whmi.Core\Whmi.Core.csproj" />
+  </ItemGroup>
+</Project>

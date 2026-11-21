@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             x:Class="Whmi.Studio.Views.OnlineView"
+             x:DataType="vm:OnlineViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h1" Text="Receiver connection" />
+        <Grid ColumnDefinitions="120,260,30,90,150" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+          <TextBlock Classes="label" Text="Host / IP" />
+          <TextBox Grid.Column="1" Text="{Binding Host}" IsEnabled="{Binding IsOffline}" />
+          <TextBlock Grid.Column="3" Classes="label" Text="Port" />
+          <NumericUpDown Grid.Column="4" Value="{Binding Port}" Minimum="1" Maximum="65535" FormatString="0" IsEnabled="{Binding IsOffline}" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Client ID" />
+          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ClientId}" IsEnabled="{Binding IsOffline}" />
+          <TextBlock Grid.Row="2" Classes="label" Text="Key file" />
+          <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+            <TextBox Text="{Binding KeyFile}" Watermark="e.g. rx-data/studio.key" IsEnabled="{Binding IsOffline}" />
+            <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseKeyCommand}" IsEnabled="{Binding IsOffline}" />
+          </Grid>
+          <TextBlock Grid.Row="3" Classes="label" Text="or key (hex)" />
+          <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" Text="{Binding KeyHex}" PasswordChar="•" IsEnabled="{Binding IsOffline}" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+          <Button Classes="toolbar" Content="Connect" Command="{Binding ConnectCommand}" />
+          <Button Classes="toolbar" Content="Disconnect" Command="{Binding DisconnectCommand}" />
+        </StackPanel>
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Width="300" HorizontalAlignment="Left" />
+      </StackPanel>
+
+      <StackPanel Spacing="8" IsVisible="{Binding IsConnected}">
+        <TextBlock Classes="h1" Text="Receiver" />
+        <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+          <TextBlock Classes="label" Text="Receiver ID" />
+          <TextBlock Grid.Column="1" Text="{Binding ReceiverId}" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Your role" />
+          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Role}" />
+          <TextBlock Grid.Row="2" Classes="label" Text="Running" />
+          <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ReceiverProjectText}" />
+          <TextBlock Grid.Row="3" Classes="label" Text="Sync" />
+          <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SyncText}" FontWeight="SemiBold" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+          <Button Classes="toolbar" Content="⬇ Download to receiver" Command="{Binding DownloadCommand}" />
+          <Button Classes="toolbar" Content="⬆ Upload from receiver" Command="{Binding UploadCommand}" />
+          <ToggleButton Classes="toolbar" Content="Monitor tags" IsChecked="{Binding IsMonitoring, Mode=OneWay}" Command="{Binding ToggleMonitorCommand}" />
+        </StackPanel>
+        <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}" Width="300" HorizontalAlignment="Left" IsVisible="{Binding IsBusy}" />
+        <TextBlock Classes="hint" Text="While monitoring, live values appear in the Tags grid." />
+
+        <TextBlock Classes="h1" Text="Test write" Margin="0,10,0,0" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBox Text="{Binding WriteTag}" Watermark="Tag name" Width="260" />
+          <TextBox Text="{Binding WriteValue}" Watermark="Value" Width="140" />
+          <Button Content="Write" Command="{Binding WriteCommand}" />
+        </StackPanel>
+        <TextBlock Classes="hint" Text="Writes go through the same checks as a panel: role, access, limits. Momentary tags can only be released here." />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

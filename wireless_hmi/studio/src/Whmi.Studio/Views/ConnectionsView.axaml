@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             xmlns:m="using:Whmi.Core.Model"
+             x:Class="Whmi.Studio.Views.ConnectionsView"
+             x:DataType="vm:ConnectionsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="PLC connections" />
+      <TextBlock Classes="hint"
+                 Text="The receiver reads and writes PLC tags by name over its Ethernet port (EtherNet/IP explicit messaging; no PLC program changes needed). Path '1,0' = backplane port 1, slot 0. Set a heartbeat tag (DINT) so the PLC program can detect HMI loss." />
+      <StackPanel Orientation="Horizontal">
+        <Button Classes="toolbar" Content="+ Add connection" Command="{Binding AddCommand}" />
+        <Button Classes="toolbar" Content="Remove" Command="{Binding RemoveCommand}" />
+      </StackPanel>
+    </StackPanel>
+    <DataGrid ItemsSource="{Binding Connections}" SelectedItem="{Binding SelectedConnection}"
+              AutoGenerateColumns="False" CanUserSortColumns="False" GridLinesVisibility="Horizontal">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Name" Binding="{Binding Name}" x:DataType="m:PlcConnection" Width="140" />
+        <DataGridTemplateColumn Header="Driver" Width="140">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PlcConnection">
+              <ComboBox ItemsSource="{x:Static vm:Lists.Drivers}" SelectedItem="{Binding Driver}" HorizontalAlignment="Stretch" BorderThickness="0" Background="Transparent" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Host / IP" Binding="{Binding Host}" x:DataType="m:PlcConnection" Width="160" />
+        <DataGridTextColumn Header="Path" Binding="{Binding Path}" x:DataType="m:PlcConnection" Width="90" />
+        <DataGridTextColumn Header="Poll ms" Binding="{Binding PollMs}" x:DataType="m:PlcConnection" Width="90" />
+        <DataGridTextColumn Header="Timeout ms" Binding="{Binding TimeoutMs}" x:DataType="m:PlcConnection" Width="110" />
+        <DataGridTextColumn Header="Heartbeat tag" Binding="{Binding HeartbeatTag}" x:DataType="m:PlcConnection" Width="160" />
+        <DataGridTextColumn Header="Heartbeat ms" Binding="{Binding HeartbeatMs}" x:DataType="m:PlcConnection" Width="*" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

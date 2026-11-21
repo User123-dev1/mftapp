@@ -1,0 +1,93 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Whmi.Studio.ViewModels"
+        x:Class="Whmi.Studio.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Width="1440" Height="900" MinWidth="960" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+N" Command="{Binding NewCommand}" />
+    <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenCommand}" />
+    <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
+    <KeyBinding Gesture="F6" Command="{Binding ValidateCommand}" />
+    <KeyBinding Gesture="F7" Command="{Binding BuildCommand}" />
+  </Window.KeyBindings>
+
+  <DockPanel>
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New" InputGesture="Ctrl+N" Command="{Binding NewCommand}" />
+        <MenuItem Header="_Open…" InputGesture="Ctrl+O" Command="{Binding OpenCommand}" />
+        <MenuItem Header="_Save" InputGesture="Ctrl+S" Command="{Binding SaveCommand}" />
+        <MenuItem Header="Save _As…" Command="{Binding SaveAsCommand}" />
+        <Separator />
+        <MenuItem Header="_Import tags (CSV)…" Command="{Binding Tags.ImportCsvCommand}" />
+        <MenuItem Header="_Export tags (CSV)…" Command="{Binding Tags.ExportCsvCommand}" />
+      </MenuItem>
+      <MenuItem Header="_Project">
+        <MenuItem Header="_Validate" InputGesture="F6" Command="{Binding ValidateCommand}" />
+        <MenuItem Header="_Build .whc…" InputGesture="F7" Command="{Binding BuildCommand}" />
+      </MenuItem>
+      <MenuItem Header="_Online">
+        <MenuItem Header="_Connect" Command="{Binding Online.ConnectCommand}" />
+        <MenuItem Header="_Download to receiver" Command="{Binding Online.DownloadCommand}" />
+        <MenuItem Header="_Upload from receiver" Command="{Binding Online.UploadCommand}" />
+        <MenuItem Header="_Monitor tags" Command="{Binding Online.ToggleMonitorCommand}" />
+        <MenuItem Header="D_isconnect" Command="{Binding Online.DisconnectCommand}" />
+      </MenuItem>
+    </Menu>
+
+    <Border DockPanel.Dock="Bottom" Background="#1A1A1A" Padding="10,4">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Text="{Binding Online.Status}" Opacity="0.75" Margin="20,0,0,0" VerticalAlignment="Center" />
+      </Grid>
+    </Border>
+
+    <Grid ColumnDefinitions="210,*" RowDefinitions="*,4,170">
+      <!-- section navigation -->
+      <ListBox Grid.RowSpan="3" ItemsSource="{Binding Sections}" SelectedItem="{Binding CurrentSection}"
+               Background="#202020" Padding="0,8">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:SectionViewModel">
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,6">
+              <TextBlock Text="{Binding Glyph}" FontSize="16" />
+              <TextBlock Text="{Binding Title}" FontSize="14" VerticalAlignment="Center" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <ContentControl Grid.Column="1" Content="{Binding CurrentSection}" Margin="16,12,16,8" />
+
+      <GridSplitter Grid.Column="1" Grid.Row="1" ResizeDirection="Rows" Background="#2E2E2E" />
+
+      <!-- problems -->
+      <DockPanel Grid.Column="1" Grid.Row="2" Margin="16,6,16,6">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,4">
+          <TextBlock Text="Problems" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding IssueSummary}" Opacity="0.7" />
+          <TextBlock Text="(double-click to go there)" Opacity="0.45" />
+        </StackPanel>
+        <ListBox x:Name="IssueList" ItemsSource="{Binding Issues}" DoubleTapped="OnIssueDoubleTapped">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:IssueItem">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{Binding Glyph}" />
+                <TextBlock Text="{Binding Path}" FontFamily="monospace" Opacity="0.8" />
+                <TextBlock Text="{Binding Message}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="Padding" Value="6,2" />
+              <Setter Property="MinHeight" Value="24" />
+            </Style>
+          </ListBox.Styles>
+        </ListBox>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>

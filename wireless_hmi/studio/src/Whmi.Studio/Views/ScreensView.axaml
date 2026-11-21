@@ -1,0 +1,163 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Whmi.Studio.ViewModels"
+             x:Class="Whmi.Studio.Views.ScreensView"
+             x:DataType="vm:ScreensViewModel"
+             Focusable="True">
+  <Grid ColumnDefinitions="230,*,300" ColumnSpacing="12">
+    <!-- screens + toolbox -->
+    <ScrollViewer>
+      <StackPanel Spacing="10">
+        <TextBlock Classes="h1" Text="Screens" />
+        <ListBox ItemsSource="{Binding Screens}" SelectedItem="{Binding SelectedScreen}" MaxHeight="200">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:ScreenItem">
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <WrapPanel>
+          <Button Classes="toolbar" Content="+ Screen" Command="{Binding AddScreenCommand}" Margin="0,0,6,6" />
+          <Button Classes="toolbar" Content="Delete" Command="{Binding DeleteScreenCommand}" Margin="0,0,6,6" />
+          <Button Classes="toolbar" Content="Set as start" Command="{Binding SetStartScreenCommand}" Margin="0,0,6,6" />
+        </WrapPanel>
+        <TextBlock Text="★ start screen" IsVisible="{Binding IsStartScreen}" Foreground="Gold" />
+        <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+          <TextBlock Classes="label" Text="Name" />
+          <TextBox Grid.Column="1" Text="{Binding SelectedScreen.Name}" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Width" />
+          <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding SelectedScreen.Width}" Minimum="100" Maximum="4096" Increment="10" FormatString="0" />
+          <TextBlock Grid.Row="2" Classes="label" Text="Height" />
+          <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding SelectedScreen.Height}" Minimum="100" Maximum="4096" Increment="10" FormatString="0" />
+          <TextBlock Grid.Row="3" Classes="label" Text="Backgr." />
+          <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedScreen.Background}" />
+        </Grid>
+        <TextBlock Classes="h1" Text="Toolbox" Margin="0,8,0,0" />
+        <ItemsControl ItemsSource="{x:Static vm:Lists.WidgetTypes}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <!-- TextBlock content: a plain string would treat '_' as an access-key marker -->
+              <Button Margin="0,0,4,4" Padding="8,3" FontSize="12"
+                      Command="{Binding $parent[UserControl].((vm:ScreensViewModel)DataContext).AddWidgetCommand}"
+                      CommandParameter="{Binding}">
+                <TextBlock Text="{Binding}" />
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Classes="hint" Text="Drag widgets to move them, drag the blue corner to resize. Arrow keys nudge, Delete removes." />
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- design canvas -->
+    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#121212">
+      <Border Margin="16" HorizontalAlignment="Left" VerticalAlignment="Top" BorderBrush="#5A5A5A" BorderThickness="1"
+              BoxShadow="0 4 18 0 #80000000">
+        <Panel Width="{Binding SelectedScreen.Width, FallbackValue=1024}" Height="{Binding SelectedScreen.Height, FallbackValue=600}"
+               Background="{Binding SelectedScreen.BackgroundBrush, FallbackValue=Black}">
+          <ItemsControl x:Name="DesignCanvas" ItemsSource="{Binding SelectedScreen.Widgets}" Background="Transparent">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><Canvas /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.Styles>
+              <Style Selector="ItemsControl#DesignCanvas ContentPresenter" x:DataType="vm:WidgetItem">
+                <Setter Property="Canvas.Left" Value="{Binding X}" />
+                <Setter Property="Canvas.Top" Value="{Binding Y}" />
+              </Style>
+            </ItemsControl.Styles>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:WidgetItem">
+                <Panel Width="{Binding W}" Height="{Binding H}" Background="Transparent" Cursor="SizeAll">
+                  <Border Background="{Binding Fill}" BorderBrush="{Binding OutlineBrush}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                    <Panel>
+                      <Border IsVisible="{Binding IsBar}" Background="#2E7DD7" Height="{Binding BarFillHeight}" VerticalAlignment="Bottom" Margin="1" CornerRadius="3" />
+                      <TextBlock Text="{Binding Caption}" Foreground="{Binding CaptionBrush}" FontWeight="SemiBold"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="4" />
+                    </Panel>
+                  </Border>
+                  <Border Classes="resize" Width="12" Height="12" Background="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                          IsVisible="{Binding IsSelected}" Cursor="BottomRightCorner" />
+                </Panel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Panel>
+      </Border>
+    </ScrollViewer>
+
+    <!-- properties of the selected widget -->
+    <ScrollViewer Grid.Column="2">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h1" Text="Properties" />
+        <TextBlock Classes="hint" Text="Select a widget on the canvas." IsVisible="{Binding !HasWidget}" />
+        <StackPanel Spacing="8" IsVisible="{Binding HasWidget}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="toolbar" Content="Duplicate" Command="{Binding DuplicateWidgetCommand}" />
+            <Button Classes="toolbar" Content="Delete" Command="{Binding DeleteWidgetCommand}" />
+          </StackPanel>
+          <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+            <TextBlock Classes="label" Text="Type" />
+            <TextBlock Grid.Column="1" Text="{Binding SelectedWidget.Type}" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="1" Classes="label" Text="Id" />
+            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedWidget.Id}" />
+            <TextBlock Grid.Row="2" Classes="label" Text="X" />
+            <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding SelectedWidget.X}" Increment="5" FormatString="0" Minimum="0" />
+            <TextBlock Grid.Row="3" Classes="label" Text="Y" />
+            <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding SelectedWidget.Y}" Increment="5" FormatString="0" Minimum="0" />
+            <TextBlock Grid.Row="4" Classes="label" Text="Width" />
+            <NumericUpDown Grid.Row="4" Grid.Column="1" Value="{Binding SelectedWidget.W}" Increment="5" FormatString="0" Minimum="10" />
+            <TextBlock Grid.Row="5" Classes="label" Text="Height" />
+            <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding SelectedWidget.H}" Increment="5" FormatString="0" Minimum="10" />
+          </Grid>
+
+          <StackPanel Spacing="4" IsVisible="{Binding SelectedWidget.HasTag, FallbackValue=False}">
+            <TextBlock Text="Tag" />
+            <AutoCompleteBox ItemsSource="{Binding TagNames}" Text="{Binding SelectedWidget.Tag}" FilterMode="ContainsOrdinal" MinimumPrefixLength="0" />
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="Text" />
+            <TextBox Text="{Binding SelectedWidget.Text}" />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding SelectedWidget.IsButton, FallbackValue=False}">
+            <TextBlock Text="Button action" />
+            <ComboBox ItemsSource="{x:Static vm:Lists.ButtonActions}" SelectedItem="{Binding SelectedWidget.Action}" HorizontalAlignment="Stretch" />
+            <TextBlock Classes="hint" Text="momentary: on while pressed (released automatically if WiFi drops). set/reset/toggle: BOOL tags." />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding SelectedWidget.IsGoto, FallbackValue=False}">
+            <TextBlock Text="Target screen" />
+            <ComboBox ItemsSource="{Binding ScreenNames}" SelectedItem="{Binding SelectedWidget.TargetScreen}" HorizontalAlignment="Stretch" />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding SelectedWidget.HasFormat, FallbackValue=False}">
+            <TextBlock Text="Format" />
+            <TextBox Text="{Binding SelectedWidget.Format}" Watermark="{}{:.1f} %" />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding SelectedWidget.HasColor, FallbackValue=False}">
+            <TextBlock Text="Color" />
+            <TextBox Text="{Binding SelectedWidget.Color}" Watermark="#3A6EA5" />
+          </StackPanel>
+          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="4"
+                IsVisible="{Binding SelectedWidget.IsIndicator, FallbackValue=False}">
+            <TextBlock Text="On text" />
+            <TextBlock Grid.Column="1" Text="Off text" />
+            <TextBox Grid.Row="1" Text="{Binding SelectedWidget.OnText}" />
+            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedWidget.OffText}" />
+            <TextBlock Grid.Row="2" Text="On color" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="Off color" />
+            <TextBox Grid.Row="3" Text="{Binding SelectedWidget.OnColor}" Watermark="#2E7D32" />
+            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedWidget.OffColor}" Watermark="#555555" />
+          </Grid>
+          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4"
+                IsVisible="{Binding SelectedWidget.HasRange, FallbackValue=False}">
+            <TextBlock Text="Min" />
+            <TextBlock Grid.Column="1" Text="Max" />
+            <TextBox Grid.Row="1" Text="{Binding SelectedWidget.MinText}" />
+            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedWidget.MaxText}" />
+          </Grid>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>
