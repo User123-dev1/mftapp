@@ -20,6 +20,7 @@ Each phase ends with something that runs and is covered by automated tests.
 
 ## Phase 2: WHMI Studio (C#, Avalonia) ✅ first release
 
+- [x] .NET 10 (LTS) solution that opens in Visual Studio 2026
 - [x] `Whmi.Core`: C# port of the project model, validation and builder. Produces **byte-identical**
       compiled projects to the Python tools (checked by a test).
 - [x] `Whmi.Link`: C# WHMI-Link client, tested against the real Python receiver

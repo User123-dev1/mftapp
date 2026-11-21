@@ -6,7 +6,7 @@ WHMI has three products that ship together:
 
 | Product | What it is | Runs on | Language |
 |---|---|---|---|
-| **WHMI Studio** | Engineering software. Used to create projects, tags, I/O configuration, PLC connections and HMI screens, and to download projects. | Windows engineering PC | C# (.NET 8, WPF/Avalonia) |
+| **WHMI Studio** | Engineering software. Used to create projects, tags, I/O configuration, PLC connections and HMI screens, and to download projects. | Windows engineering PC | C# (.NET 10, Avalonia) |
 | **WHMI Panel** | Wireless touchscreen operator panel. Runs the HMI runtime. | Linux panel (Raspberry Pi CM5-class industrial panel) | Python runtime engine; C#/Avalonia UI planned |
 | **WHMI Receiver** | Wireless I/O receiver and gateway. Has local I/O module slots, a WiFi radio for the panels and an Ethernet port for PLCs (Rockwell ControlLogix/CompactLogix, etc.). | Linux SoM with Ethernet + WiFi (CM5-class); MCU firmware port later | Python service |
 

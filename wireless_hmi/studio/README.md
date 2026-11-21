@@ -1,4 +1,4 @@
-# WHMI Studio (C# / .NET 8 / Avalonia)
+# WHMI Studio (C# / .NET 10 / Avalonia)
 
 Engineering software for WHMI projects. It runs on Windows, Linux and macOS.
 
@@ -20,8 +20,9 @@ Engineering software for WHMI projects. It runs on Windows, Linux and macOS.
 
 ## Open it in Visual Studio (Windows)
 
-1. Install **Visual Studio 2022** (17.8 or newer) with the **.NET desktop development** workload. That includes the .NET 8 SDK.
-2. Optional: install the **Avalonia for Visual Studio** extension to get the XAML previewer.
+1. Install **Visual Studio 2026** with the **.NET desktop development** workload. That includes the .NET 10 SDK.
+2. Optional: install the **Avalonia for Visual Studio** extension (Extensions → Manage Extensions) to get the XAML
+   previewer. Studio builds and runs without it.
 3. Open `wireless_hmi/studio/Whmi.sln`, set **Whmi.Studio** as the startup project, and press **F5**.
 4. **File → Open** → `wireless_hmi/examples/demo_line.whp`.
 
