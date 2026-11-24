@@ -14,7 +14,10 @@ from pstation.service import Station
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--password", help="new password (default: PS_ADMIN_PASSWORD)")
+    ap.add_argument("--password-stdin", action="store_true", help="read the new password from stdin")
     args = ap.parse_args()
+    if args.password_stdin:
+        args.password = sys.stdin.readline().rstrip("\r\n")
     s = Settings()
     password = args.password or s.admin_password
     if len(password or "") < 12:

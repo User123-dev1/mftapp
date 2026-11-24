@@ -94,7 +94,19 @@ sudo python3 /opt/abelzeta/mftapp/deploy/diagnose.py
   re-creating the stack there are several `PortalSecret-...` secrets; use the one in the stack's
   **Outputs → InitialPasswordsSecret**.
 
-### Locked out of an app
+### Locked out of an app, or the admin password doesn't work
+
+Set your own admin password for every app at once (also unlocks the accounts):
+
+```bash
+sudo python3 /opt/abelzeta/mftapp/deploy/reset_passwords.py                       # all five apps
+sudo python3 /opt/abelzeta/mftapp/deploy/reset_passwords.py --apps servicedesk gmp   # just some
+```
+
+It asks for the password twice without showing it, then saves it in Secrets Manager too, so the
+secret always holds the current admin passwords. Passwords set this way (or changed inside an app)
+are kept: restarts, reboots and `install.sh` never reset an existing admin.
+
 
 PhishGuard locks an account after 5 wrong passwords, and only another administrator can unlock
 it. To unlock `admin` and set its password back to `PG_ADMIN_PASSWORD` from Secrets Manager:

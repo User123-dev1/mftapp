@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY gmp_assets ./gmp_assets
-COPY run_server.py ./
+COPY run_server.py reset_admin.py ./
 
 # The SQLite database lives on the /data volume.
 RUN useradd --system --uid 10001 app && mkdir -p /data && chown app /data

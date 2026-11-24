@@ -24,7 +24,10 @@ def main() -> None:
     ap.add_argument("--list", action="store_true", help="list accounts and exit")
     ap.add_argument("--email", help="account to reset (default: SD_ADMIN_EMAIL)")
     ap.add_argument("--password", help="new password (default: SD_ADMIN_PASSWORD)")
+    ap.add_argument("--password-stdin", action="store_true", help="read the new password from stdin")
     args = ap.parse_args()
+    if args.password_stdin:
+        args.password = sys.stdin.readline().rstrip("\r\n")
 
     database.init_db()
     db = database.SessionLocal()

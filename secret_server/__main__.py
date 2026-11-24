@@ -5,6 +5,8 @@ Command-line entry point.
     python -m secret_server serve --port 8443 --ssl-keyfile key.pem --ssl-certfile cert.pem
     python -m secret_server maintenance               # release expired check-outs, report expiry
     python -m secret_server rotate-master-key         # add a new master key and re-wrap data keys
+    python -m secret_server reset-admin [--admin admin] [--password-stdin]
+                                                      # set a local admin's password, unlock and enable it
 """
 
 import argparse
@@ -40,6 +42,35 @@ def cmd_init(settings: Settings, args) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
     print(f"Administrator '{args.admin}' created.")
+    return 0
+
+
+def cmd_reset_admin(settings: Settings, args) -> int:
+    """Server-console recovery: new password (from stdin or SS_ADMIN_PASSWORD), unlocked, enabled,
+    signed out everywhere. Recorded in the audit log as done by 'system'."""
+    from .auth import TokenService
+    from .crypto import hash_password
+    from .directory import check_password_strength
+
+    password = sys.stdin.readline().rstrip("\r\n") if args.password_stdin else os.getenv("SS_ADMIN_PASSWORD", "")
+    try:
+        check_password_strength(password)
+    except VaultError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    keyring = KeyRing.from_settings(settings)
+    with Database(settings.db_path).transaction() as conn:
+        row = conn.execute("SELECT id, auth_source FROM users WHERE username = ?", (args.admin,)).fetchone()
+        if row is None or row["auth_source"] != "local":
+            print(f"error: no local user {args.admin!r}", file=sys.stderr)
+            return 1
+        conn.execute("UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL, enabled = 1 "
+                     "WHERE id = ?", (hash_password(password), row["id"]))
+        TokenService.revoke_user(conn, row["id"])
+        AuditLog(keyring).record(conn, "USER_UPDATE", None, "user", row["id"],
+                                 {"changed": ["password_hash", "unlocked"], "via": "server console"},
+                                 username="system")
+    print(f"Vault: '{args.admin}' password reset, unlocked and enabled.")
     return 0
 
 
@@ -96,11 +127,14 @@ def main(argv=None) -> int:
                          help="trust X-Forwarded-* headers from the reverse proxy")
     sub.add_parser("maintenance")
     sub.add_parser("rotate-master-key")
+    p_reset = sub.add_parser("reset-admin")
+    p_reset.add_argument("--admin", default="admin")
+    p_reset.add_argument("--password-stdin", action="store_true", help="read the new password from stdin")
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
     handler = {"init": cmd_init, "serve": cmd_serve, "maintenance": cmd_maintenance,
-               "rotate-master-key": cmd_rotate_master_key}[args.command]
+               "rotate-master-key": cmd_rotate_master_key, "reset-admin": cmd_reset_admin}[args.command]
     return handler(settings, args)
 
 

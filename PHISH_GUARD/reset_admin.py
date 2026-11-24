@@ -22,7 +22,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Unlock and reset the PhishGuard admin account")
     ap.add_argument("--username", default="admin")
     ap.add_argument("--password", help="temporary password (default: PG_ADMIN_PASSWORD)")
+    ap.add_argument("--no-force-change", action="store_true",
+                    help="the password was chosen by its owner: don't require a change at next sign-in")
+    ap.add_argument("--password-stdin", action="store_true", help="read the new password from stdin")
     args = ap.parse_args()
+    if args.password_stdin:
+        args.password = sys.stdin.readline().rstrip("\r\n")
 
     settings = Settings()
     password = args.password or settings.admin_password
@@ -47,6 +52,11 @@ def main() -> int:
         return 1
     users.update(row["id"], active=False)            # also ends every existing session
     users.update(row["id"], active=True, unlock=True, temp_password=password)
+    if args.no_force_change:
+        with users.db.tx() as conn:
+            conn.execute("UPDATE users SET must_change_password = 0 WHERE id = ?", (row["id"],))
+        print(f"PhishGuard: '{args.username}' unlocked; password reset.")
+        return 0
     print(f"'{args.username}' unlocked; password reset (must be changed at next sign-in).")
     return 0
 
