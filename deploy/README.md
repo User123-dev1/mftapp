@@ -94,6 +94,26 @@ sudo python3 /opt/abelzeta/mftapp/deploy/diagnose.py
   re-creating the stack there are several `PortalSecret-...` secrets; use the one in the stack's
   **Outputs → InitialPasswordsSecret**.
 
+### Connecting from a different location (new public IP)
+
+Only the addresses in **AllowedCidr** (plus the optional **AllowedCidr2** / **AllowedCidr3**, e.g.
+office, home, spare) can reach the portal. Changing them only edits the firewall rule; the server
+and its data are untouched. Either:
+
+- **Console:** CloudFormation → the stack → **Update** → **Use existing template** → **Next** →
+  change the address(es) → **Next** → **Next** → tick the IAM box → **Submit**.
+- **AWS CloudShell** (the `>_` icon in the console), replacing the address with yours:
+  ```bash
+  aws cloudformation update-stack --stack-name abelzeta-portal --use-previous-template \
+    --capabilities CAPABILITY_IAM --parameters ParameterKey=AllowedCidr,ParameterValue=203.0.113.25/32 \
+    ParameterKey=AllowedCidr2,UsePreviousValue=true ParameterKey=AllowedCidr3,UsePreviousValue=true \
+    ParameterKey=InstanceType,UsePreviousValue=true ParameterKey=VolumeSize,UsePreviousValue=true \
+    ParameterKey=Branch,UsePreviousValue=true ParameterKey=LatestAmiId,UsePreviousValue=true
+  ```
+
+Find your current public IP by searching "what is my ip" from the computer you'll use (not from
+CloudShell, which has its own address). It takes about a minute to apply.
+
 ### Locked out of an app, or the admin password doesn't work
 
 Set your own admin password for every app at once (also unlocks the accounts):
