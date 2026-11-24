@@ -104,6 +104,15 @@ cd /opt/abelzeta/mftapp/deploy
 sudo docker compose exec phishguard python reset_admin.py
 ```
 
+Service Desk: see why a sign-in failed, list the accounts, or set the IT manager back to
+`SD_ADMIN_PASSWORD`:
+
+```bash
+sudo docker compose logs servicedesk | grep "Sign-in failed"
+sudo docker compose exec servicedesk python reset_admin.py --list
+sudo docker compose exec servicedesk python reset_admin.py
+```
+
 Password Station locks `admin` for 15 minutes after 5 wrong passwords. To unlock it at once:
 `sudo docker compose exec passwordstation python reset_admin.py`.
 

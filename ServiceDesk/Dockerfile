@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY run.py seed_demo.py ./
+COPY run.py seed_demo.py reset_admin.py ./
 
 # Data (SQLite database, uploaded quotes, generated PDFs) lives on the /data volume.
 RUN useradd --system --uid 10001 app && mkdir -p /data && chown app /data

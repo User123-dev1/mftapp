@@ -137,6 +137,18 @@ def login(
     if ok and not settings.local_login and user.role != Role.MANAGER:
         ok = False
     if not ok:
+        # Say why in the server log only (docker compose logs servicedesk); never the password itself.
+        if user is None:
+            why = "no account with this e-mail"
+        elif not user.is_active:
+            why = "account is deactivated"
+        elif not verify_password(password, user.password_hash):
+            why = "wrong password"
+            if password != password.strip() and verify_password(password.strip(), user.password_hash):
+                why += " (the entered password has extra spaces at the start or end)"
+        else:
+            why = "password sign-in is off for this role (SSO only)"
+        logger.warning("Sign-in failed for %r: %s", email.strip().lower()[:254], why)
         flash(request, "Invalid email or password.", "error")
         return render(
             request, "login.html", {"next": _safe_next(next), "email": email, "show_password": True}, status_code=400
