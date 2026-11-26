@@ -68,7 +68,9 @@ jobs:
 
           # Try VM sizes in order until Azure has capacity for one (small sizes are often capacity-
           # restricted; a refused size creates nothing). Override with the VM_SIZE repository variable.
-          LOC=$(az group show -n "$RG" --query location -o tsv)
+          # Region: the AZURE_LOCATION repository variable (the resource group's own region if unset).
+          LOC="${{ vars.AZURE_LOCATION }}"
+          [ -n "$LOC" ] || LOC=$(az group show -n "$RG" --query location -o tsv)
           CANDIDATES="Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_B2s_v2 Standard_B2as_v2 Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5 Standard_D2as_v5"
           [ -n "${{ vars.VM_SIZE }}" ] && CANDIDATES="${{ vars.VM_SIZE }}"
           echo "What Azure reports for these sizes in $LOC (empty = no restriction):"
@@ -79,7 +81,7 @@ jobs:
             echo "Trying VM size $SIZE in $LOC"
             if az deployment group create -g "$RG" -n "portal-${GITHUB_RUN_NUMBER}-${SIZE#Standard_}" \
                  -f deploy/azure/main.bicep \
-                 -p deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
+                 -p location="$LOC" deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
                     rdpAllowedCidr="${{ vars.RDP_ALLOWED_CIDR }}" linuxVmSize="$SIZE" windowsVmSize="$SIZE" \
                  --query properties.outputs -o json > "$RUNNER_TEMP/outputs.json" 2> "$RUNNER_TEMP/err.txt"; then
               deployed=$SIZE; break
