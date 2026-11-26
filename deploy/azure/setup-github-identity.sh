@@ -42,14 +42,26 @@ for repo in "$REPO" "${REPO,,}"; do
     --subject "repo:$repo:ref:refs/heads/$BRANCH" \
     --audiences api://AzureADTokenExchange -o none 2>/dev/null || true
 done
+echo "GitHub may sign in as this identity from:"
+az identity federated-credential list -g "$ID_RG" --identity-name "$ID_NAME" --query "[].subject" -o tsv
 
 echo "Granting Contributor on $RG only (may retry while the identity propagates)..."
 SCOPE=$(az group show -n "$RG" --query id -o tsv)
 for i in 1 2 3 4 5 6; do
-  if az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
-       --role Contributor --scope "$SCOPE" -o none 2>/dev/null; then break; fi
-  [ "$i" = 6 ] && { echo "Role assignment failed - do you have Owner on this subscription?"; exit 1; }
-  sleep 10
+  if [ "$i" -lt 6 ]; then
+    az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+      --role Contributor --scope "$SCOPE" -o none 2>/dev/null && break
+    sleep 15
+  else   # last try: show Azure's own error message
+    az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+      --role Contributor --scope "$SCOPE" -o none && break
+    echo
+    echo "Role assignment failed (Azure's message is above). Your roles on this subscription:"
+    az role assignment list --assignee "$(az ad signed-in-user show --query id -o tsv)" --all \
+      --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+    echo "You need Owner (or User Access Administrator) on the subscription. Re-run this script afterwards."
+    exit 1
+  fi
 done
 
 echo
