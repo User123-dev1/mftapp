@@ -62,6 +62,24 @@ def update_env_files(updates: dict) -> None:
             f.write_text("\n".join(new) + "\n")
 
 
+def update_key_vault(vault: str, updates: dict) -> str:
+    kv = ["python3", str(HERE / "azure" / "keyvault.py")]
+    fd, path = tempfile.mkstemp(prefix="secret-", suffix=".json")
+    os.close(fd)
+    try:
+        r = subprocess.run(kv + ["get", vault, path], capture_output=True, text=True)
+        if r.returncode:
+            return "could not read it: " + (r.stderr.strip().splitlines() or ["error"])[-1]
+        data = json.loads(open(path).read() or "{}")
+        data.update(updates)
+        with open(path, "w") as fh:
+            json.dump(data, fh)
+        r = subprocess.run(kv + ["put", vault, path], capture_output=True, text=True)
+        return "updated" if r.returncode == 0 else "could not save it: " + r.stderr.strip()[-200:]
+    finally:
+        os.unlink(path)
+
+
 def update_secrets_manager(secret_id: str, updates: dict) -> str:
     region = secret_id.split(":")[3] if secret_id.startswith("arn:") else None
     reg = ["--region", region] if region else []
@@ -124,8 +142,11 @@ def main() -> int:
 
     if done:
         update_env_files(done)
-        secret_id = conf().get("SECRET_ID", "")
-        if secret_id:
+        c = conf()
+        secret_id = c.get("SECRET_ID", "")
+        if c.get("KEY_VAULT"):
+            print(f"Key Vault ({c['KEY_VAULT']}): {update_key_vault(c['KEY_VAULT'], done)}")
+        elif secret_id:
             print(f"Secrets Manager ({secret_id.rsplit(':', 1)[-1]}): {update_secrets_manager(secret_id, done)}")
     print("\nSign in with the new password (type it - don't let the browser fill in an old one).")
     return 0 if len(done) == len(args.apps) else 1

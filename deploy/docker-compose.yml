@@ -21,6 +21,7 @@ services:
       - "8445:8445"     # trial mode: Password Vault
       - "8446:8446"     # trial mode: PhishGuard
       - "8447:8447"     # trial mode: Password Station
+      - "8448:8448"     # Azure (Application Proxy): Password Station admin console
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # certificates (and Caddy's own CA in trial mode)

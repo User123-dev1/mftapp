@@ -1,6 +1,6 @@
 #!/bin/bash
-# Install or update the AbelZeta app portal on Amazon Linux 2023. Run as root.
-# First run: called by the CloudFormation template's user data.
+# Install or update the AbelZeta app portal on Amazon Linux 2023 (AWS) or Ubuntu 24.04 (Azure). Run as root.
+# First run: called by the CloudFormation template's user data (AWS) / the GitHub deploy workflow (Azure).
 # Later updates (pull new code, rebuild, restart):  sudo bash /opt/abelzeta/mftapp/deploy/install.sh
 #
 # Settings (environment variables; remembered in /opt/abelzeta/install.conf):
@@ -10,6 +10,9 @@
 #   DOMAIN        e.g. abelzeta.com -> portal.<domain>, servicedesk.<domain>, ... with real HTTPS
 #   LE_EMAIL      contact address for the Let's Encrypt certificates (domain mode)
 #   PS_DEMO       Password Station demo mode (test domains, codes in Admin > Outbox): true (default) / false
+#   KEY_VAULT     Azure: Key Vault holding the secrets (instead of SECRET_ID / Secrets Manager)
+#   URL_PATTERN   Azure: published addresses, e.g. https://{sub}-abelzetaco.msappproxy.net (Entra
+#                 Application Proxy); the server itself is then only reached on its private address
 set -euo pipefail
 
 BASE=/opt/abelzeta
@@ -19,6 +22,7 @@ mkdir -p "$BASE"
 # Remembered settings first; anything passed in the environment wins.
 _env_branch=${BRANCH-}; _env_secret=${SECRET_ID-}; _env_host=${PUBLIC_HOST-}; _env_domain=${DOMAIN-}; _env_le=${LE_EMAIL-}
 _env_psdemo=${PS_DEMO-}
+_env_kv=${KEY_VAULT-}; _env_pattern=${URL_PATTERN-}
 # shellcheck disable=SC1090
 [ -f "$CONF" ] && . "$CONF"
 BRANCH=${_env_branch:-${BRANCH:-main}}
@@ -27,6 +31,8 @@ PUBLIC_HOST=${_env_host:-${PUBLIC_HOST:-}}
 DOMAIN=${_env_domain:-${DOMAIN:-}}
 LE_EMAIL=${_env_le:-${LE_EMAIL:-}}
 PS_DEMO=${_env_psdemo:-${PS_DEMO:-true}}
+KEY_VAULT=${_env_kv:-${KEY_VAULT:-}}
+URL_PATTERN=${_env_pattern:-${URL_PATTERN:-}}
 REPO_URL=${REPO_URL:-https://github.com/User123-dev1/mftapp.git}
 APP_DIR=$BASE/mftapp
 DATA_DIR=$BASE/data
@@ -35,7 +41,13 @@ COMPOSE_VERSION=v2.29.7
 log() { echo "[abelzeta $(date -u +%H:%M:%S)] $*"; }
 
 log "Installing packages"
-dnf install -y -q docker git python3 >/dev/null
+if command -v apt-get >/dev/null; then          # Ubuntu (Azure)
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null
+  apt-get install -y -qq docker.io docker-compose-v2 git python3 curl >/dev/null
+else                                             # Amazon Linux (AWS)
+  dnf install -y -q docker git python3 >/dev/null
+fi
 if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
   systemctl enable --now docker
 fi
@@ -69,21 +81,36 @@ NEW_SCRIPT=$APP_DIR/deploy/install.sh
 if [ -z "${ABELZETA_REEXEC:-}" ] && [ "$(sha256sum "$NEW_SCRIPT" | cut -d' ' -f1)" != "$SELF_SUM" ]; then
   log "The installer itself was updated - restarting with the new version"
   exec env ABELZETA_REEXEC=1 BRANCH="$BRANCH" SECRET_ID="$SECRET_ID" PUBLIC_HOST="$PUBLIC_HOST" \
-    DOMAIN="$DOMAIN" LE_EMAIL="$LE_EMAIL" PS_DEMO="$PS_DEMO" REPO_URL="$REPO_URL" bash "$NEW_SCRIPT"
+    DOMAIN="$DOMAIN" LE_EMAIL="$LE_EMAIL" PS_DEMO="$PS_DEMO" KEY_VAULT="$KEY_VAULT" URL_PATTERN="$URL_PATTERN" REPO_URL="$REPO_URL" bash "$NEW_SCRIPT"
 fi
 
-# Instance metadata (IMDSv2)
-TOKEN=$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
-imds() { curl -sf -m 2 -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1" || true; }
-REGION=$(imds placement/region)
-if [ -z "$DOMAIN" ] && [ -z "$PUBLIC_HOST" ]; then
-  PUBLIC_HOST=$(imds public-ipv4)
-  [ -n "$PUBLIC_HOST" ] || { echo "Set PUBLIC_HOST or DOMAIN" >&2; exit 1; }
+if [ -n "$KEY_VAULT" ]; then
+  # Azure: the proxy listens on the private address; Entra Application Proxy's connector reaches it there.
+  REGION=""
+  if [ -z "$PUBLIC_HOST" ]; then
+    PUBLIC_HOST=$(curl -sf -m 3 --noproxy '*' -H Metadata:true \
+      "http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/privateIpAddress?api-version=2021-02-01&format=text" || true)
+    [ -n "$PUBLIC_HOST" ] || { echo "Could not read this VM's private IP; set PUBLIC_HOST" >&2; exit 1; }
+  fi
+else
+  # Instance metadata (IMDSv2)
+  TOKEN=$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
+  imds() { curl -sf -m 2 -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1" || true; }
+  REGION=$(imds placement/region)
+  if [ -z "$DOMAIN" ] && [ -z "$PUBLIC_HOST" ]; then
+    PUBLIC_HOST=$(imds public-ipv4)
+    [ -n "$PUBLIC_HOST" ] || { echo "Set PUBLIC_HOST or DOMAIN" >&2; exit 1; }
+  fi
 fi
 
 umask 077
 SECRETS_FILE=$BASE/secrets.json
 SM_FILE=$BASE/secrets.from-aws.json
+KV="python3 $APP_DIR/deploy/azure/keyvault.py"
+if [ -n "$KEY_VAULT" ]; then
+  log "Reading secrets from Azure Key Vault $KEY_VAULT"
+  $KV get "$KEY_VAULT" "$SM_FILE" || { echo "Could not read Key Vault $KEY_VAULT - nothing was changed." >&2; exit 1; }
+fi
 if [ -n "$SECRET_ID" ]; then
   log "Reading secrets from AWS Secrets Manager"
   # A brand-new server's permissions can take a minute or two to apply: retry before giving up.
@@ -100,7 +127,9 @@ if [ -n "$SECRET_ID" ]; then
     log "Secrets Manager not readable yet - retrying in 15 seconds ($attempt/10)"
     sleep 15
   done
-  # Merge, never overwrite: Secrets Manager wins, but keep anything only this server has.
+fi
+if [ -n "$SECRET_ID$KEY_VAULT" ]; then
+  # Merge, never overwrite: the cloud secret store wins, but keep anything only this server has.
   python3 - "$SECRETS_FILE" "$SM_FILE" <<'PY'
 import json, os, sys
 local, aws = sys.argv[1], sys.argv[2]
@@ -123,6 +152,7 @@ else
   WHERE=(--host "$PUBLIC_HOST")
 fi
 [ "$PS_DEMO" = false ] && WHERE+=(--no-ps-demo)
+[ -n "$URL_PATTERN" ] && WHERE+=(--url-pattern "$URL_PATTERN")
 RESULT=$(python3 "$APP_DIR/deploy/configure.py" "${WHERE[@]}" --secrets "$SECRETS_FILE" --data-dir "$DATA_DIR")
 python3 -c '
 import json, sys
@@ -132,15 +162,20 @@ if r["generated_secrets"]:
 if r["recovered_secrets"]:
     print("  kept from the running apps: " + ", ".join(r["recovered_secrets"]))
 ' "$RESULT"
-if [ -n "$SECRET_ID" ]; then
-  # Store in Secrets Manager whenever it is missing something or differs from what the apps use.
+if [ -n "$SECRET_ID$KEY_VAULT" ]; then
+  # Store in the cloud whenever it is missing something or differs from what the apps use.
   if ! python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.loads(open(sys.argv[2]).read() or "{}"); sys.exit(0 if a==b else 1)' \
        "$SECRETS_FILE" "$SM_FILE"; then
-    log "Saving the secrets in use to AWS Secrets Manager"
-    aws secretsmanager put-secret-value --region "$REGION" --secret-id "$SECRET_ID" \
-      --secret-string "file://$SECRETS_FILE" >/dev/null
+    if [ -n "$KEY_VAULT" ]; then
+      log "Saving the secrets in use to Azure Key Vault"
+      $KV put "$KEY_VAULT" "$SECRETS_FILE"
+    else
+      log "Saving the secrets in use to AWS Secrets Manager"
+      aws secretsmanager put-secret-value --region "$REGION" --secret-id "$SECRET_ID" \
+        --secret-string "file://$SECRETS_FILE" >/dev/null
+    fi
   fi
-  rm -f "$SECRETS_FILE" "$SM_FILE" "$BASE/aws-error.log"   # Secrets Manager is the copy of record
+  rm -f "$SECRETS_FILE" "$SM_FILE" "$BASE/aws-error.log"   # the cloud store is the copy of record
 fi
 umask 022
 
@@ -151,6 +186,8 @@ PUBLIC_HOST=$PUBLIC_HOST
 DOMAIN=$DOMAIN
 LE_EMAIL=$LE_EMAIL
 PS_DEMO=$PS_DEMO
+KEY_VAULT=$KEY_VAULT
+URL_PATTERN='$URL_PATTERN'
 CONF
 
 mkdir -p "$DATA_DIR"/servicedesk "$DATA_DIR"/gmp "$DATA_DIR"/vault "$DATA_DIR"/phishguard "$DATA_DIR"/passwordstation
@@ -168,7 +205,7 @@ docker image prune -f >/dev/null
 CHECK_HOST=${DOMAIN:+portal.$DOMAIN}; CHECK_HOST=${CHECK_HOST:-$PUBLIC_HOST}
 sleep 5
 failed=0
-for port in 443 8443 8444 8445 8446 8447; do
+for port in 443 8443 8444 8445 8446 8447 ${URL_PATTERN:+8448}; do
   [ -n "$DOMAIN" ] && [ "$port" != 443 ] && continue   # domain mode: one port, one name per app
   code=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$CHECK_HOST:$port:127.0.0.1" \
          "https://$CHECK_HOST:$port/" || true)

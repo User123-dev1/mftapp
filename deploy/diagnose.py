@@ -39,8 +39,20 @@ def conf() -> dict:
     for line in p.read_text().splitlines() if p.exists() else []:
         if "=" in line:
             k, v = line.split("=", 1)
-            out[k] = v
+            out[k] = v.strip("'")
     return out
+
+
+def key_vault(vault: str):
+    tmp = BASE / "diagnose-kv.json"
+    r = subprocess.run(["python3", str(HERE / "azure" / "keyvault.py"), "get", vault, str(tmp)],
+                       capture_output=True, text=True)
+    try:
+        if r.returncode:
+            return None, (r.stderr.strip().splitlines() or ["Key Vault read failed"])[-1]
+        return json.loads(tmp.read_text() or "{}"), None
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def secrets_manager(secret_id: str):
@@ -146,14 +158,18 @@ def servicedesk_login(base, email, password):
 def main():
     c, env = conf(), env_values()
     secret_id = c.get("SECRET_ID", "")
-    print(f"Secret this server uses: {secret_id or '(none)'}")
-    sm, err = secrets_manager(secret_id)
+    if c.get("KEY_VAULT"):
+        print(f"Key Vault this server uses: {c['KEY_VAULT']} (secret 'portal-secrets')")
+        sm, err = key_vault(c["KEY_VAULT"])
+    else:
+        print(f"Secret this server uses: {secret_id or '(none)'}")
+        sm, err = secrets_manager(secret_id)
     if err:
         print(f"  Secrets Manager: {err}")
     local = BASE / "secrets.json"
     if local.exists():
         print(f"  NOTE: {local} exists - passwords kept only on this server (not yet in Secrets Manager)")
-    print("\nSecret                In Secrets Manager   Matches running apps   (fingerprints, not passwords)")
+    print("\nSecret                In secret store      Matches running apps   (fingerprints, not passwords)")
     for key in ["SD_ADMIN_PASSWORD", "GMP_ADMIN_PASSWORD", "SS_ADMIN_PASSWORD", "PG_ADMIN_PASSWORD",
                 "PS_ADMIN_PASSWORD", "SS_MASTER_KEY", "SD_SECRET_KEY", "PG_SECRET_KEY", "PS_SECRET_KEY",
                 "PS_DATA_KEY"]:
@@ -167,7 +183,7 @@ def main():
     print(f"  GMP Assets    {'admin':24} {json_login(app_url(c, 'assets', 8444), 'admin', env.get('GMP_ADMIN_PASSWORD', ''))}")
     print(f"  Vault         {'admin':24} {json_login(app_url(c, 'vault', 8445), 'admin', env.get('SS_ADMIN_PASSWORD', ''))}")
     print(f"  PhishGuard    {'admin':24} {json_login(app_url(c, 'phishguard', 8446), 'admin', env.get('PG_ADMIN_PASSWORD', ''))}")
-    print(f"  Pwd Station   {'admin':24} {station_login(app_url(c, 'passwords', 8447), 'admin', env.get('PS_ADMIN_PASSWORD', ''))}")
+    print(f"  Pwd Station   {'admin':24} {station_login(app_url(c, 'passwords', 8448 if c.get('URL_PATTERN') else 8447), 'admin', env.get('PS_ADMIN_PASSWORD', ''))}")
     print("\nOK here but not in your browser: the value you're entering differs from the secret above."
           "\nPASSWORD REFUSED here: that admin password was changed in the app (or PhishGuard / Password Station is locked:"
           "\n  run reset_admin.py). A refused password counts toward the app's lockout, so don't repeat this"

@@ -1,0 +1,99 @@
+# Deploys / updates the AbelZeta portal on Azure (deploy/azure/main.bicep + deploy/install.sh).
+# Runs only for pushes to this branch whose commit message contains "[deploy azure]", so ordinary pushes
+# never create or change anything in Azure. Signs in to Azure with workload identity federation (no
+# stored secret): see deploy/azure/setup-github-identity.sh and the AZURE_* repository variables.
+name: Azure deploy
+
+on:
+  push:
+    branches: [claude/service-desk-tickets-xypu1p]
+
+permissions:
+  id-token: write   # Azure sign-in (OIDC)
+  contents: read
+
+concurrency:
+  group: azure-deploy
+  cancel-in-progress: false
+
+env:
+  RG: rg-abelzeta-portal
+  BRANCH: claude/service-desk-tickets-xypu1p
+  # Entra Application Proxy addresses: https://<app>-<tenant name>.msappproxy.net
+  URL_PATTERN: https://{sub}-${{ vars.AZURE_APPPROXY_TENANT || 'abelzetaco' }}.msappproxy.net
+
+jobs:
+  deploy:
+    if: contains(github.event.head_commit.message, '[deploy azure]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy infrastructure (Bicep)
+        id: infra
+        run: |
+          set -euo pipefail
+          # Object ID of this deployment identity, from its own access token (no directory read rights needed).
+          TOKEN=$(az account get-access-token --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          OID=$(python3 -c 'import sys,json,base64; p=sys.argv[1].split(".")[1]; p+="="*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))["oid"])' "$TOKEN")
+
+          # Reuse the connector VM password and the SSH public key once they exist (changing them on an
+          # existing VM isn't allowed); generate them on the first deployment.
+          KV=$(az keyvault list -g "$RG" --query "[0].name" -o tsv 2>/dev/null || true)
+          WINPW=""; SSHPUB=""
+          if [ -n "$KV" ]; then
+            WINPW=$(az keyvault secret show --vault-name "$KV" -n connector-vm-admin-password --query value -o tsv 2>/dev/null || true)
+            SSHPUB=$(az keyvault secret show --vault-name "$KV" -n apps-vm-ssh-public-key --query value -o tsv 2>/dev/null || true)
+          fi
+          if [ -z "$WINPW" ]; then
+            WINPW=$(python3 -c 'import secrets,string; a=string.ascii_letters+string.digits+"-_.!@#%"
+          while True:
+              p="".join(secrets.choice(a) for _ in range(24))
+              if any(c.islower() for c in p) and any(c.isupper() for c in p) and any(c.isdigit() for c in p) and any(c in "-_.!@#%" for c in p): print(p); break')
+          fi
+          echo "::add-mask::$WINPW"
+          if [ -z "$SSHPUB" ]; then
+            ssh-keygen -q -t rsa -b 3072 -N '' -C abelzeta-apps -f "$RUNNER_TEMP/k"
+            SSHPUB=$(cat "$RUNNER_TEMP/k.pub"); rm -f "$RUNNER_TEMP/k" "$RUNNER_TEMP/k.pub"   # private key discarded
+          fi
+
+          az deployment group create -g "$RG" -n "portal-${GITHUB_RUN_NUMBER}" \
+            -f deploy/azure/main.bicep \
+            -p deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
+               rdpAllowedCidr="${{ vars.RDP_ALLOWED_CIDR }}" \
+            --query properties.outputs -o json > "$RUNNER_TEMP/outputs.json"
+          python3 -c 'import json,sys; o=json.load(open(sys.argv[1])); [print(k + ": " + str(v["value"])) for k, v in o.items()]' "$RUNNER_TEMP/outputs.json"
+          echo "kv=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["keyVaultName"]["value"])' "$RUNNER_TEMP/outputs.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Install / update the apps on vm-abz-apps
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/install.sh" <<EOF
+          set -e
+          cloud-init status --wait >/dev/null 2>&1 || true   # a new VM finishes its first-boot setup first
+          export BRANCH='$BRANCH' KEY_VAULT='${{ steps.infra.outputs.kv }}' URL_PATTERN='$URL_PATTERN'
+          if [ ! -d /opt/abelzeta/mftapp/.git ]; then
+            apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null
+            mkdir -p /opt/abelzeta
+            git clone -q --depth 1 --branch "\$BRANCH" https://github.com/User123-dev1/mftapp.git /opt/abelzeta/mftapp
+          fi
+          if bash /opt/abelzeta/mftapp/deploy/install.sh > /var/log/abelzeta-install.log 2>&1; then
+            tail -n 15 /var/log/abelzeta-install.log
+            python3 /opt/abelzeta/mftapp/deploy/diagnose.py 2>&1 | head -n 25
+            echo ABELZETA_INSTALL_OK
+          else
+            tail -n 60 /var/log/abelzeta-install.log
+          fi
+          EOF
+          az vm run-command invoke -g "$RG" -n vm-abz-apps --command-id RunShellScript \
+            --scripts @"$RUNNER_TEMP/install.sh" --query "value[0].message" -o tsv | tee "$RUNNER_TEMP/out.txt"
+          grep -q ABELZETA_INSTALL_OK "$RUNNER_TEMP/out.txt"
