@@ -69,16 +69,11 @@ jobs:
           # Try VM sizes in order until Azure has capacity for one (small sizes are often capacity-
           # restricted; a refused size creates nothing). Override with the VM_SIZE repository variable.
           LOC=$(az group show -n "$RG" --query location -o tsv)
-          if [ -n "${{ vars.VM_SIZE }}" ]; then
-            CANDIDATES="${{ vars.VM_SIZE }}"
-          else
-            AVAILABLE=$(az vm list-skus -l "$LOC" --resource-type virtualMachines \
-              --query "[?length(restrictions)==\`0\`].name" -o tsv)
-            CANDIDATES=""
-            for c in Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_B2s_v2 Standard_B2as_v2 Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5; do
-              grep -qx "$c" <<< "$AVAILABLE" && CANDIDATES="$CANDIDATES $c"
-            done
-          fi
+          CANDIDATES="Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_B2s_v2 Standard_B2as_v2 Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5 Standard_D2as_v5"
+          [ -n "${{ vars.VM_SIZE }}" ] && CANDIDATES="${{ vars.VM_SIZE }}"
+          echo "What Azure reports for these sizes in $LOC (empty = no restriction):"
+          az vm list-skus -l "$LOC" --resource-type virtualMachines \
+            --query "[?contains('$CANDIDATES', name)].{size:name, restriction:join(', ', restrictions[].reasonCode)}" -o table || true
           deployed=""
           for SIZE in $CANDIDATES; do
             echo "Trying VM size $SIZE in $LOC"
