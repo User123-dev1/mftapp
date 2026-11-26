@@ -66,11 +66,35 @@ jobs:
             SSHPUB=$(cat "$RUNNER_TEMP/k.pub"); rm -f "$RUNNER_TEMP/k" "$RUNNER_TEMP/k.pub"   # private key discarded
           fi
 
-          az deployment group create -g "$RG" -n "portal-${GITHUB_RUN_NUMBER}" \
-            -f deploy/azure/main.bicep \
-            -p deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
-               rdpAllowedCidr="${{ vars.RDP_ALLOWED_CIDR }}" \
-            --query properties.outputs -o json > "$RUNNER_TEMP/outputs.json"
+          # Try VM sizes in order until Azure has capacity for one (small sizes are often capacity-
+          # restricted; a refused size creates nothing). Override with the VM_SIZE repository variable.
+          LOC=$(az group show -n "$RG" --query location -o tsv)
+          if [ -n "${{ vars.VM_SIZE }}" ]; then
+            CANDIDATES="${{ vars.VM_SIZE }}"
+          else
+            AVAILABLE=$(az vm list-skus -l "$LOC" --resource-type virtualMachines \
+              --query "[?length(restrictions)==\`0\`].name" -o tsv)
+            CANDIDATES=""
+            for c in Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_B2s_v2 Standard_B2as_v2 Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5; do
+              grep -qx "$c" <<< "$AVAILABLE" && CANDIDATES="$CANDIDATES $c"
+            done
+          fi
+          deployed=""
+          for SIZE in $CANDIDATES; do
+            echo "Trying VM size $SIZE in $LOC"
+            if az deployment group create -g "$RG" -n "portal-${GITHUB_RUN_NUMBER}-${SIZE#Standard_}" \
+                 -f deploy/azure/main.bicep \
+                 -p deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
+                    rdpAllowedCidr="${{ vars.RDP_ALLOWED_CIDR }}" linuxVmSize="$SIZE" windowsVmSize="$SIZE" \
+                 --query properties.outputs -o json > "$RUNNER_TEMP/outputs.json" 2> "$RUNNER_TEMP/err.txt"; then
+              deployed=$SIZE; break
+            fi
+            cat "$RUNNER_TEMP/err.txt"
+            grep -q -e SkuNotAvailable -e AllocationFailed -e ZonalAllocationFailed "$RUNNER_TEMP/err.txt" || exit 1
+            echo "No capacity for $SIZE - trying the next size"
+          done
+          [ -n "$deployed" ] || { echo "No VM size had capacity in $LOC (tried:$CANDIDATES). Set VM_SIZE or try later."; exit 1; }
+          echo "Deployed with VM size $deployed"
           python3 -c 'import json,sys; o=json.load(open(sys.argv[1])); [print(k + ": " + str(v["value"])) for k, v in o.items()]' "$RUNNER_TEMP/outputs.json"
           echo "kv=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["keyVaultName"]["value"])' "$RUNNER_TEMP/outputs.json")" >> "$GITHUB_OUTPUT"
 
