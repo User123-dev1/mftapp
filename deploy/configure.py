@@ -83,6 +83,14 @@ PS_OPTIONAL = ["PS_SMTP_HOST", "PS_SMTP_PORT", "PS_SMTP_USER", "PS_SMTP_PASSWORD
                "PS_SMTP_STARTTLS", "PS_SMS_PROVIDER", "PS_SMS_SENDER_ID", "PS_SUPPORT_CONTACT"]
 
 
+# Optional PhishGuard settings, copied from the secret store when present: the Microsoft 365
+# connection (Graph API mode), reporting / alert mailboxes, scoring and AI analysis.
+PG_OPTIONAL = ["PG_M365_TENANT_ID", "PG_M365_CLIENT_ID", "PG_M365_CLIENT_SECRET", "PG_M365_MAILBOXES",
+               "PG_M365_POLL_SECONDS", "PG_ALERT_FROM", "PG_SECURITY_EMAIL", "PG_REPORT_MAILBOX",
+               "PG_QUARANTINE_SCORE", "PG_WARN_SCORE", "PG_VIP_NAMES", "PG_PROTECTED_DOMAINS",
+               "PG_LLM_ENABLED", "PG_LLM_MODEL", "ANTHROPIC_API_KEY"]
+
+
 def strong_password(length: int = 20) -> str:
     """Random password with upper, lower, digit and symbol (meets every app's policy)."""
     alphabet = string.ascii_letters + string.digits + "-_.!@#%"
@@ -215,8 +223,9 @@ def env_files(sec: dict, urls: dict, args) -> dict[str, dict]:
             "PG_SECRET_KEY": sec["PG_SECRET_KEY"],
             "PG_BASE_URL": urls["phishguard"],
             "PG_ORG_DOMAINS": args.org_domains,
-            # Console-only trial: no Microsoft 365 connection and no AI until keys are added.
+            # Console-only until the Microsoft 365 settings below are added; AI off unless enabled.
             "PG_LLM_ENABLED": "false",
+            **{k: sec[k] for k in PG_OPTIONAL if sec.get(k)},
         },
         "passwordstation": {
             "PS_ADMIN_PASSWORD": sec["PS_ADMIN_PASSWORD"],

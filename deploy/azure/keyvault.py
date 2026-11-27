@@ -3,10 +3,15 @@
     python3 keyvault.py get  <vault-name> <out-file>    # writes {} if the secret doesn't exist yet
     python3 keyvault.py put  <vault-name> <in-file>
 
+`get` also merges any separate secrets named after a setting, e.g. PG-M365-CLIENT-SECRET ->
+PG_M365_CLIENT_SECRET (prefixes PG, PS, SD, GMP, SS, ANTHROPIC). Those win over portal-secrets, so
+a setting can be added or changed in the portal without editing the JSON document.
+
 Signs in with the VM's managed identity (Azure Instance Metadata Service), so no key or password is
 stored on the server. Standard library only (runs before anything else is installed).
 """
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -33,6 +38,27 @@ def call(method: str, vault: str, body=None):
     return json.loads(urllib.request.urlopen(req, timeout=20).read() or b"{}")
 
 
+SETTING_SECRET = re.compile(r"^(PG|PS|SD|GMP|SS|ANTHROPIC)(-[A-Za-z0-9]+)+$")
+
+
+def _get_url(url: str) -> dict:
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token()}"})
+    return json.loads(urllib.request.urlopen(req, timeout=20).read() or b"{}")
+
+
+def setting_secrets(vault: str, fetch=_get_url) -> dict:
+    """{SETTING_NAME: value} for enabled secrets named like PG-M365-CLIENT-SECRET."""
+    out, url = {}, f"https://{vault}.vault.azure.net/secrets?api-version={API}&maxresults=25"
+    while url:
+        page = fetch(url)
+        for item in page.get("value", []):
+            name = item["id"].rstrip("/").rsplit("/", 1)[-1]
+            if SETTING_SECRET.match(name) and item.get("attributes", {}).get("enabled", True):
+                out[name.replace("-", "_").upper()] = fetch(f"{item['id']}?api-version={API}")["value"]
+        url = page.get("nextLink")
+    return out
+
+
 def main() -> int:
     if len(sys.argv) != 4 or sys.argv[1] not in ("get", "put"):
         print(__doc__, file=sys.stderr)
@@ -48,9 +74,10 @@ def main() -> int:
                     if e.code != 404:
                         raise
                     value = "{}"
-                json.loads(value)                      # must be JSON
+                doc = json.loads(value)                # must be JSON
+                doc.update(setting_secrets(vault))
                 with open(path, "w") as fh:
-                    fh.write(value)
+                    json.dump(doc, fh)
             else:
                 with open(path) as fh:
                     value = fh.read()

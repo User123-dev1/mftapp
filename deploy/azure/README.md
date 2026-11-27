@@ -59,6 +59,21 @@ on AWS work, e.g. `python3 /opt/abelzeta/mftapp/deploy/diagnose.py` or `reset_pa
    published, pre-authenticated address. Assign users or a group to each app (Users and groups).
 4. Users need a Microsoft 365 Business Premium licence (Entra ID P1) assigned.
 
+## Adding settings (e.g. PhishGuard's Microsoft 365 connection)
+
+Add each setting as its **own Key Vault secret**, named after the setting with dashes instead of
+underscores, then run an apps-only deployment (commit message with `[deploy azure] [apps only]`):
+
+| Key Vault secret | Setting |
+|---|---|
+| `PG-M365-TENANT-ID`, `PG-M365-CLIENT-ID`, `PG-M365-CLIENT-SECRET` | PhishGuard Microsoft 365 (Graph) connection |
+| `PG-M365-MAILBOXES` | Mailboxes to protect, comma-separated (pilot) |
+| `PG-REPORT-MAILBOX`, `PG-SECURITY-EMAIL`, `PG-ALERT-FROM` | Reported-mail mailbox, analyst alert address, alert sender |
+| `PS-SMTP-HOST`, … | Password Station e-mail / SMS (see deploy/README.md) |
+
+They override the same keys in `portal-secrets` (and are copied into it at install). Adding a secret
+needs **Set** in your Key Vault access policy.
+
 ## Removing it
 
 Stop backups first (Recovery Services vault `rsv-abz` → Backup items → Stop backup, delete data), then
