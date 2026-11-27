@@ -21,6 +21,25 @@ Built with FastAPI and SQLite, the same stack as the MFT application in `MFT_PRO
 | **SSO** | OIDC auth-code + PKCE, SAML 2.0 SP-initiated login, JIT provisioning, IdP-group → local group sync, IdP-group → admin role, e-mail domain allow-list, optional SSO-only enforcement |
 | **Audit** | Every login, view, edit, check-out, rotation and permission change goes into an HMAC hash-chained log that shows any tampering |
 
+## Web interface
+
+Open the vault's address in a browser (`/`); the API console stays at `/docs` for administrators and
+scripts. The interface is static files in `secret_server/ui/` that use only the REST API above.
+
+- **Everyone:** folders and search, secrets with **Reveal** (recorded in the audit log, hidden again
+  after 60 seconds or when the tab is hidden), **Copy** (clipboard cleared after 30 seconds),
+  check-out / check-in, access requests, new and edited secrets with a password generator, two-step
+  verification for vault accounts.
+- **Owners of a secret:** history of old values, permissions, the secret's audit trail, delete.
+- **Administrators:** users, groups, folder permissions, the audit log with an integrity check,
+  Microsoft Entra single sign-on, and maintenance (expired passwords, overdue check-outs).
+
+Security: served with a strict Content-Security-Policy (no inline or third-party code); server data is
+only ever inserted as text; the session token is kept in the tab's sessionStorage and expires with the
+vault session (`SS_TOKEN_TTL_MINUTES`, default 30). For Microsoft sign-in set
+`SS_SSO_SUCCESS_REDIRECT` to the vault's own address ending in `/` (the AbelZeta deployment does this),
+then add the provider under Administration → Single sign-on.
+
 ## Quick start
 
 ```bash

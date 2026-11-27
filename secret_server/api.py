@@ -7,14 +7,17 @@ REST API for Secret Server (FastAPI).
     /api/users, /api/groups
     /api/folders, /api/templates, /api/secrets, /api/access-requests
     /api/audit             audit log + chain verification
+    /                      web interface (static, served from secret_server/ui; uses only the API above)
 """
 
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import httpx
 from fastapi import Depends, FastAPI, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -157,6 +160,13 @@ class ProviderIn(BaseModel):
     default_role: str = "user"
 
 
+UI_DIR = Path(__file__).resolve().parent / "ui"
+# The web interface loads nothing from other sites and runs no inline script.
+UI_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+          "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; "
+          "object-src 'none'")
+
+
 class ProviderPatch(BaseModel):
     enabled: Optional[bool] = None
     config: Optional[dict] = None
@@ -199,6 +209,8 @@ def create_app(settings: Optional[Settings] = None,
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path == "/" or request.url.path.startswith("/ui/"):
+            response.headers["Content-Security-Policy"] = UI_CSP
         return response
 
     bearer = HTTPBearer(auto_error=False)
@@ -221,6 +233,15 @@ def create_app(settings: Optional[Settings] = None,
     @app.get("/health")
     def health():
         return {"status": "ok"}
+
+    # ------------------------------------------------------------------ web interface
+
+    if UI_DIR.is_dir():
+        app.mount("/ui", StaticFiles(directory=str(UI_DIR)), name="ui")
+
+        @app.get("/", include_in_schema=False)
+        def ui_index():
+            return FileResponse(UI_DIR / "index.html", media_type="text/html")
 
     # ------------------------------------------------------------------ auth
 

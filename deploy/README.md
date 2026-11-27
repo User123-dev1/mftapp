@@ -8,7 +8,7 @@ One address for every internal app. This folder deploys the **portal** and the a
 | Portal (start here) | `https://<ip>` | `https://portal.abelzeta.com` |
 | IT Service Desk (tickets, changes, CMDB, AbelOrder) | `https://<ip>:8443` | `https://servicedesk.abelzeta.com` |
 | GMP Asset Manager | `https://<ip>:8444` | `https://assets.abelzeta.com` |
-| Password Vault (admin API) | `https://<ip>:8445/docs` | `https://vault.abelzeta.com/docs` |
+| Password Vault (web interface; API console at `/docs`) | `https://<ip>:8445` | `https://vault.abelzeta.com` |
 | PhishGuard (e-mail security console) | `https://<ip>:8446` | `https://phishguard.abelzeta.com` |
 | Password Station (change / reset / unlock) | `https://<ip>:8447` | `https://passwords.abelzeta.com` |
 | GMP asset naming tool | *to be added* | |

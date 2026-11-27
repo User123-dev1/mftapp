@@ -41,8 +41,8 @@ APPS = [
     },
     {
         "id": "password-vault", "port": 8445, "sub": "vault", "upstream": "vault:8090",
-        "health": "/health", "path": "/docs", "name": "Password Vault (admin API)",
-        "description": "Enterprise privileged password vault. Administrators only for now: opens the API console.",
+        "health": "/health", "name": "Password Vault",
+        "description": "Shared and privileged passwords: folders, reveal with audit, check-out, access approvals.",
         "category": "Security", "icon": "lock", "color": "#7c3aed", "owner": "IT Security",
     },
     {
@@ -207,6 +207,8 @@ def env_files(sec: dict, urls: dict, args) -> dict[str, dict]:
             "SS_ADMIN_PASSWORD": sec["SS_ADMIN_PASSWORD"],
             "SS_MASTER_KEY": sec["SS_MASTER_KEY"],
             "SS_PUBLIC_URL": urls["password-vault"],
+            # Microsoft (Entra) sign-in returns to the web interface with a one-time code.
+            "SS_SSO_SUCCESS_REDIRECT": urls["password-vault"] + "/",
         },
         "phishguard": {
             "PG_ADMIN_PASSWORD": sec["PG_ADMIN_PASSWORD"],
