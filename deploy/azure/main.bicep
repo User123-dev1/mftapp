@@ -269,17 +269,19 @@ resource rsv 'Microsoft.RecoveryServices/vaults@2023-04-01' = {
   properties: { publicNetworkAccess: 'Enabled' }
 }
 
+// Trusted Launch VMs can only be backed up with an Enhanced (V2) policy.
 resource backupPolicy 'Microsoft.RecoveryServices/vaults/backupPolicies@2023-04-01' = {
   parent: rsv
-  name: 'daily-7days'
+  name: 'daily-7days-enhanced'
   properties: {
     backupManagementType: 'AzureIaasVM'
+    policyType: 'V2'
     instantRpRetentionRangeInDays: 2
     timeZone: 'UTC'
     schedulePolicy: {
-      schedulePolicyType: 'SimpleSchedulePolicy'
+      schedulePolicyType: 'SimpleSchedulePolicyV2'
       scheduleRunFrequency: 'Daily'
-      scheduleRunTimes: ['2026-01-01T05:00:00Z']
+      dailySchedule: { scheduleRunTimes: ['2026-01-01T05:00:00Z'] }
     }
     retentionPolicy: {
       retentionPolicyType: 'LongTermRetentionPolicy'
