@@ -152,7 +152,7 @@ else
   WHERE=(--host "$PUBLIC_HOST")
 fi
 [ "$PS_DEMO" = false ] && WHERE+=(--no-ps-demo)
-[ -n "$URL_PATTERN" ] && WHERE+=(--url-pattern "$URL_PATTERN")
+[ -n "$URL_PATTERN" ] && WHERE+=(--url-pattern "$URL_PATTERN" --internal-name "$(hostname -s)")
 RESULT=$(python3 "$APP_DIR/deploy/configure.py" "${WHERE[@]}" --secrets "$SECRETS_FILE" --data-dir "$DATA_DIR")
 python3 -c '
 import json, sys

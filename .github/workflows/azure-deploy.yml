@@ -39,6 +39,8 @@ jobs:
 
       - name: Deploy infrastructure (Bicep)
         id: infra
+        # "[apps only]" in the commit message: leave the Azure resources as they are, just update the apps.
+        if: ${{ !contains(github.event.head_commit.message, '[apps only]') }}
         run: |
           set -euo pipefail
           # Object ID of this deployment identity, from its own access token (no directory read rights needed).
@@ -98,10 +100,12 @@ jobs:
       - name: Install / update the apps on vm-abz-apps
         run: |
           set -euo pipefail
+          KV='${{ steps.infra.outputs.kv }}'
+          [ -n "$KV" ] || KV=$(az keyvault list -g "$RG" --query "[0].name" -o tsv)
           cat > "$RUNNER_TEMP/install.sh" <<EOF
           set -e
           cloud-init status --wait >/dev/null 2>&1 || true   # a new VM finishes its first-boot setup first
-          export BRANCH='$BRANCH' KEY_VAULT='${{ steps.infra.outputs.kv }}' URL_PATTERN='$URL_PATTERN'
+          export BRANCH='$BRANCH' KEY_VAULT='$KV' URL_PATTERN='$URL_PATTERN'
           if [ ! -d /opt/abelzeta/mftapp/.git ]; then
             apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null
             mkdir -p /opt/abelzeta
