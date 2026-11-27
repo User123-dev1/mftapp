@@ -175,7 +175,7 @@ def main():
                 "PS_DATA_KEY"]:
         aws_v, run_v = (sm or {}).get(key, ""), env.get(key, "")
         print(f"{key:21} {'yes' if aws_v else 'NO':20} {'yes' if aws_v and aws_v == run_v else 'NO':22} "
-              f"aws {fp(aws_v)}  running {fp(run_v)}")
+              f"stored {fp(aws_v)}  running {fp(run_v)}")
 
     print("\nSign-in test from this server, with the passwords the apps were set up with:")
     sd = env.get("SD_ADMIN_EMAIL", "")
