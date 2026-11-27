@@ -18,7 +18,9 @@ connections from the internet.
 1. `setup-github-identity.sh` in Azure Cloud Shell (Owner on the subscription): resource groups and the
    GitHub deployment identity (Contributor on `rg-abelzeta-portal` only, no stored secret).
 2. GitHub repository variables: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
-   `AZURE_LOCATION`. Optional: `AZURE_APPPROXY_TENANT` (default `abelzetaco`), `RDP_ALLOWED_CIDR`.
+   `AZURE_LOCATION`. Optional: `AZURE_APPPROXY_TENANT` (default `abelzetaco`), `RDP_ALLOWED_CIDR`,
+   `KEY_VAULT_READERS` (comma-separated Entra object IDs of people who may read the passwords in Key
+   Vault; a full deployment resets the Key Vault access list to the VM, the deployer and these people).
 
 ## Deploy / update
 

@@ -85,6 +85,7 @@ jobs:
                  -f deploy/azure/main.bicep \
                  -p location="$LOC" deployerObjectId="$OID" windowsAdminPassword="$WINPW" linuxSshPublicKey="$SSHPUB" \
                     rdpAllowedCidr="${{ vars.RDP_ALLOWED_CIDR }}" linuxVmSize="$SIZE" windowsVmSize="$SIZE" \
+                    secretReaderObjectIds="$(python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(",") if x.strip()]))' "${{ vars.KEY_VAULT_READERS }}")" \
                  --query properties.outputs -o json > "$RUNNER_TEMP/outputs.json" 2> "$RUNNER_TEMP/err.txt"; then
               deployed=$SIZE; break
             fi

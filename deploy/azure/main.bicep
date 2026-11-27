@@ -23,6 +23,9 @@ param windowsAdminPassword string
 @description('SSH public key for the Linux VM. Its private key is not kept: the VM is managed with Run Command.')
 param linuxSshPublicKey string
 
+@description('Object IDs of people allowed to read the secrets in Key Vault (Get/List), e.g. the portal administrators.')
+param secretReaderObjectIds array = []
+
 @description('Optional: one IP range (e.g. 203.0.113.25/32) allowed to use remote desktop on the connector VM. Empty = closed.')
 param rdpAllowedCidr string = ''
 
@@ -234,7 +237,7 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: false
     enableSoftDelete: true
     softDeleteRetentionInDays: 30
-    accessPolicies: [
+    accessPolicies: concat([
       {
         tenantId: subscription().tenantId
         objectId: appsVm.identity.principalId
@@ -245,7 +248,11 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
         objectId: deployerObjectId
         permissions: { secrets: ['get', 'list', 'set'] }
       }
-    ]
+    ], [for id in secretReaderObjectIds: {
+      tenantId: subscription().tenantId
+      objectId: id
+      permissions: { secrets: ['get', 'list'] }
+    }])
   }
 }
 
