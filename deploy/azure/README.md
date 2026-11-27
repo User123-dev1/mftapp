@@ -39,17 +39,19 @@ on AWS work, e.g. `python3 /opt/abelzeta/mftapp/deploy/diagnose.py` or `reset_pa
 2. On it, as a Global / Application Administrator: Entra admin center → **Global Secure Access →
    Connect → Connectors** (or *Enterprise apps → Application proxy*) → **Download connector service**,
    install, sign in. Then remove `RDP_ALLOWED_CIDR` and redeploy.
-3. Publish each app: **Enterprise applications → New application → Add an on-premises application**:
+3. Publish each app: **Enterprise applications → New application → Add an on-premises application**
+   (internal URLs must be host names: the server answers to `abz-apps`; on the **Advanced** tab untick
+   **Validate Backend SSL certificate**, since the server uses its own internal certificate):
 
 | Name | Internal URL | External URL prefix | Pre-authentication |
 |------|--------------|---------------------|--------------------|
-| Portal | `https://10.40.1.4/` | `portal` | Microsoft Entra ID |
-| Service Desk | `https://10.40.1.4:8443/` | `servicedesk` | Microsoft Entra ID |
-| GMP Asset Manager | `https://10.40.1.4:8444/` | `assets` | Microsoft Entra ID |
-| Password Vault | `https://10.40.1.4:8445/` | `vault` | Microsoft Entra ID |
-| PhishGuard | `https://10.40.1.4:8446/` | `phishguard` | Microsoft Entra ID |
-| Password Station | `https://10.40.1.4:8447/` | `passwords` | **Passthrough** (users who forgot their password can't sign in) |
-| Password Station admin | `https://10.40.1.4:8448/` | `passwords-admin` | Microsoft Entra ID |
+| Portal | `https://abz-apps/` | `portal` | Microsoft Entra ID |
+| Service Desk | `https://abz-apps:8443/` | `servicedesk` | Microsoft Entra ID |
+| GMP Asset Manager | `https://abz-apps:8444/` | `assets` | Microsoft Entra ID |
+| Password Vault | `https://abz-apps:8445/` | `vault` | Microsoft Entra ID |
+| PhishGuard | `https://abz-apps:8446/` | `phishguard` | Microsoft Entra ID |
+| Password Station | `https://abz-apps:8447/` | `passwords` | **Passthrough** (users who forgot their password can't sign in) |
+| Password Station admin | `https://abz-apps:8448/` | `passwords-admin` | Microsoft Entra ID |
 
    The public Password Station address refuses `/admin`; its admin console is only on the separately
    published, pre-authenticated address. Assign users or a group to each app (Users and groups).
