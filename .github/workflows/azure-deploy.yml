@@ -71,7 +71,7 @@ jobs:
           # Region: the AZURE_LOCATION repository variable (the resource group's own region if unset).
           LOC="${{ vars.AZURE_LOCATION }}"
           [ -n "$LOC" ] || LOC=$(az group show -n "$RG" --query location -o tsv)
-          CANDIDATES="Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_B2s_v2 Standard_B2as_v2 Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5 Standard_D2as_v5"
+          CANDIDATES="Standard_B2ls_v2 Standard_B2als_v2 Standard_B2s Standard_D2ls_v5 Standard_D2als_v5 Standard_D2s_v5 Standard_D2as_v5 Standard_D2lds_v5 Standard_D2ds_v5 Standard_D2ls_v6 Standard_D2lds_v6 Standard_D2als_v6 Standard_D2s_v6 Standard_D2ds_v6 Standard_D2as_v6"
           [ -n "${{ vars.VM_SIZE }}" ] && CANDIDATES="${{ vars.VM_SIZE }}"
           echo "What Azure reports for these sizes in $LOC (empty = no restriction):"
           az vm list-skus -l "$LOC" --resource-type virtualMachines \
@@ -87,7 +87,7 @@ jobs:
               deployed=$SIZE; break
             fi
             cat "$RUNNER_TEMP/err.txt"
-            grep -q -e SkuNotAvailable -e AllocationFailed -e ZonalAllocationFailed -e QuotaExceeded "$RUNNER_TEMP/err.txt" || exit 1
+            grep -q -e SkuNotAvailable -e AllocationFailed -e ZonalAllocationFailed -e QuotaExceeded -e NVMe -e DiskController "$RUNNER_TEMP/err.txt" || exit 1
             echo "No capacity for $SIZE - trying the next size"
           done
           [ -n "$deployed" ] || { echo "No VM size had capacity in $LOC (tried:$CANDIDATES). Set VM_SIZE or try later."; exit 1; }

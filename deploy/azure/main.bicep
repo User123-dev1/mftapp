@@ -37,6 +37,9 @@ var appsIp = '10.40.1.4'
 var connectorIp = '10.40.1.5'
 var appsVmName = 'vm-abz-apps'
 var connectorVmName = 'vm-abz-connector'
+// v6 sizes (and some newer families) only attach disks over NVMe; older sizes use SCSI.
+var linuxDiskController = contains(toLower(linuxVmSize), '_v6') ? 'NVMe' : 'SCSI'
+var windowsDiskController = contains(toLower(windowsVmSize), '_v6') ? 'NVMe' : 'SCSI'
 var rdpRule = empty(rdpAllowedCidr) ? [] : [
   {
     name: 'allow-rdp-temporary'
@@ -161,6 +164,7 @@ resource appsVm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
       uefiSettings: { secureBootEnabled: true, vTpmEnabled: true }
     }
     storageProfile: {
+      diskControllerType: linuxDiskController
       imageReference: { publisher: 'Canonical', offer: 'ubuntu-24_04-lts', sku: 'server', version: 'latest' }
       osDisk: {
         name: 'disk-abz-apps-os'
@@ -195,6 +199,7 @@ resource connectorVm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
       uefiSettings: { secureBootEnabled: true, vTpmEnabled: true }
     }
     storageProfile: {
+      diskControllerType: windowsDiskController
       imageReference: {
         publisher: 'MicrosoftWindowsServer'
         offer: 'WindowsServer'
