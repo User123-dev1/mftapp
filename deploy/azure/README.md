@@ -51,7 +51,7 @@ on AWS work, e.g. `python3 /opt/abelzeta/mftapp/deploy/diagnose.py` or `reset_pa
 | Password Vault | `https://abz-apps:8445/` | `vault` | Microsoft Entra ID |
 | PhishGuard | `https://abz-apps:8446/` | `phishguard` | Microsoft Entra ID |
 | Password Station | `https://abz-apps:8447/` | `passwords` | **Passthrough** (users who forgot their password can't sign in) |
-| Password Station admin | `https://abz-apps:8448/` | `passwords-admin` | Microsoft Entra ID |
+| Password Station admin | `https://abz-apps:8448/` | `passwordsadmin` (no hyphens: msappproxy.net prefixes allow only letters and digits) | Microsoft Entra ID |
 
    The public Password Station address refuses `/admin`; its admin console is only on the separately
    published, pre-authenticated address. Assign users or a group to each app (Users and groups).

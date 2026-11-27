@@ -154,7 +154,7 @@ def caddyfile(host: str | None, domain: str | None, email: str | None, split_ps_
     if split_ps_admin:
         # Password Station: the public port serves everything except /admin, which only the separately
         # published (Entra pre-authenticated) admin port serves.
-        sites.append(("password-station-admin", "passwordstation:8200", PS_ADMIN_PORT, "passwords-admin"))
+        sites.append(("password-station-admin", "passwordstation:8200", PS_ADMIN_PORT, "passwordsadmin"))
     for _id, upstream, port, sub in sites:
         block = ""
         if split_ps_admin and _id == "password-station":
@@ -282,7 +282,7 @@ def main(argv=None) -> None:
                                                internal_name=args.internal_name if args.url_pattern else None))
     write(args.out / "apps.json", json.dumps(apps_catalog(urls, args.organization, args.support_email), indent=2) + "\n")
     if args.url_pattern:
-        urls["password-station-admin"] = args.url_pattern.format(sub="passwords-admin")
+        urls["password-station-admin"] = args.url_pattern.format(sub="passwordsadmin")
     print(json.dumps({"generated_secrets": added, "recovered_secrets": recovered, "urls": urls}))
 
 
