@@ -65,3 +65,9 @@ def test_ui_flow_through_api(client, admin, make_user):
     assert [x["name"] for x in client.get("/api/secrets?q=SQL", headers=user).json()] == ["SQL01 sa"]
     audit = client.get(f"/api/secrets/{s['id']}/audit", headers=admin).json()
     assert {"SECRET_CHECKOUT", "SECRET_VIEW", "SECRET_CHECKIN"} <= {a["action"] for a in audit}
+
+
+def test_requests_keep_same_origin_cookies():
+    """Behind Entra Application Proxy every request must carry the proxy's own sign-in cookie."""
+    js = (UI / "app.js").read_text()
+    assert "credentials: 'omit'" not in js and "credentials: 'same-origin'" in js

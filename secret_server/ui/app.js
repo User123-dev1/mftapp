@@ -72,11 +72,20 @@ function go(hash) { if (location.hash === hash) render(); else location.hash = h
 // ---------------------------------------------------------------- API
 
 async function api(method, path, body) {
+  try { return await apiCall(method, path, body); }
+  catch (e) {
+    if (e instanceof TypeError) throw new Error('Could not reach the vault. Reload the page (your Microsoft sign-in may have expired) and try again.');
+    throw e;
+  }
+}
+async function apiCall(method, path, body) {
   const headers = { 'Accept': 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (S.token) headers['Authorization'] = 'Bearer ' + S.token;
+  // credentials 'same-origin': behind Entra Application Proxy the browser must send Entra's own sign-in
+  // cookie with every request. The vault itself only uses the bearer token, never cookies.
   const r = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body),
-                                credentials: 'omit', cache: 'no-store' });
+                                credentials: 'same-origin', cache: 'no-store' });
   if (r.status === 204) return null;
   let data = null;
   try { data = await r.json(); } catch (_) { /* not JSON */ }
